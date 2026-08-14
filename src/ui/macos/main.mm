@@ -4,11 +4,14 @@
 // Project and asks project::compileProjectGraph for a graph; every edit
 // recompiles and hands the result to the audio engine through an atomic swap.
 //
-// Not yet present: the Channel Rack and pattern list (Phase 8b), the mixer
-// (Phase 10) and automation (Phase 11). The signal path is
-// instrument -> channel gain -> master gain -> device, and nothing pretends
-// otherwise — channel pan is deliberately not applied, because a pan law
-// belongs to the mixer.
+// Phase 8b adds the two panes that make the project visible: a pattern list and
+// a Channel Rack with a step sequencer. The window holds no editing logic of
+// its own — the panes emit commands and it recompiles what they changed.
+//
+// Not yet present: the mixer (Phase 10) and automation (Phase 11). The signal
+// path is instrument -> channel gain -> master gain -> device, and nothing
+// pretends otherwise — channel pan is deliberately not applied, because a pan
+// law belongs to the mixer.
 
 #import <Cocoa/Cocoa.h>
 
@@ -18,6 +21,8 @@
 #include "platform/SystemInfo.h"
 #include "project/Model.h"
 #include "project/ProjectGraphCompiler.h"
+#include "ui/macos/ChannelRackView.h"
+#include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
 
 #include <memory>
@@ -52,9 +57,11 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 } // namespace
 
 @interface INCDAWAppDelegate : NSObject <NSApplicationDelegate>
-@property (strong) NSWindow*              window;
-@property (strong) INCDAWPianoRollView*   pianoRoll;
-@property (strong) NSTextField*           statusField;
+@property (strong) NSWindow*                window;
+@property (strong) INCDAWPianoRollView*     pianoRoll;
+@property (strong) INCDAWChannelRackView*   channelRack;
+@property (strong) INCDAWPatternListView*   patternList;
+@property (strong) NSTextField*             statusField;
 @end
 
 @implementation INCDAWAppDelegate {
@@ -92,17 +99,68 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     NSView* content = self.window.contentView;
 
-    constexpr CGFloat statusHeight = 26.0;
+    constexpr CGFloat statusHeight  = 26.0;
+    constexpr CGFloat listWidth     = 150.0;
+    constexpr CGFloat rackHeight    = 220.0;
+
+    const NSRect body = NSMakeRect(0, statusHeight, frame.size.width,
+                                   frame.size.height - statusHeight);
 
     self.pianoRoll = [[INCDAWPianoRollView alloc]
-        initWithFrame:NSMakeRect(0, statusHeight, frame.size.width, frame.size.height - statusHeight)
+        initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, body.size.height - rackHeight)
               project:_project.get()
              registry:_registry.get()];
 
     self.pianoRoll.patternIdValue = pattern.id.value();
     self.pianoRoll.channelIdValue = channel.id.value();
-    self.pianoRoll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    [content addSubview:self.pianoRoll];
+
+    self.channelRack = [[INCDAWChannelRackView alloc]
+        initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, rackHeight)
+              project:_project.get()
+             registry:_registry.get()];
+
+    self.channelRack.patternIdValue         = pattern.id.value();
+    self.channelRack.selectedChannelIdValue = channel.id.value();
+
+    self.patternList = [[INCDAWPatternListView alloc]
+        initWithFrame:NSMakeRect(0, 0, listWidth, body.size.height)
+              project:_project.get()
+             registry:_registry.get()];
+
+    self.patternList.selectedPatternIdValue = pattern.id.value();
+
+    // Both panes scroll vertically; the rack scrolls its steps horizontally by
+    // itself, so that the channel names stay pinned at the left edge.
+    NSScrollView* rackScroll = [[NSScrollView alloc]
+        initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, rackHeight)];
+    rackScroll.hasVerticalScroller = YES;
+    rackScroll.drawsBackground     = NO;
+    rackScroll.documentView        = self.channelRack;
+
+    NSScrollView* listScroll = [[NSScrollView alloc]
+        initWithFrame:NSMakeRect(0, 0, listWidth, body.size.height)];
+    listScroll.hasVerticalScroller = YES;
+    listScroll.drawsBackground     = NO;
+    listScroll.documentView        = self.patternList;
+
+    NSSplitView* editors = [[NSSplitView alloc]
+        initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, body.size.height)];
+    editors.vertical      = NO;
+    editors.dividerStyle  = NSSplitViewDividerStyleThin;
+    [editors addSubview:self.pianoRoll];
+    [editors addSubview:rackScroll];
+
+    NSSplitView* workspace = [[NSSplitView alloc] initWithFrame:body];
+    workspace.vertical         = YES;
+    workspace.dividerStyle     = NSSplitViewDividerStyleThin;
+    workspace.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [workspace addSubview:listScroll];
+    [workspace addSubview:editors];
+
+    [content addSubview:workspace];
+
+    [workspace setPosition:listWidth ofDividerAtIndex:0];
+    [editors setPosition:body.size.height - rackHeight ofDividerAtIndex:0];
 
     self.statusField = [NSTextField labelWithString:@""];
     self.statusField.frame = NSMakeRect(10, 4, frame.size.width - 20, statusHeight - 8);
@@ -112,15 +170,32 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     [content addSubview:self.statusField];
 
     __weak INCDAWAppDelegate* weakSelf = self;
-    self.pianoRoll.onChange = ^{
+
+    void (^changed)(void) = ^{
         [weakSelf rebuildGraph];
         [weakSelf refreshStatus];
+        [weakSelf.channelRack setNeedsDisplay:YES];
+        [weakSelf.pianoRoll requestRedraw];
+    };
+
+    self.pianoRoll.onChange   = changed;
+    self.channelRack.onChange = changed;
+    self.patternList.onChange = changed;
+
+    self.channelRack.onSelectChannel = ^(unsigned long long channelId) {
+        [weakSelf selectChannel:channelId];
+    };
+
+    self.patternList.onSelectPattern = ^(unsigned long long patternId) {
+        [weakSelf selectPattern:patternId];
     };
 
     [self startAudio];
 
     __weak INCDAWAppDelegate* weakAudioSelf = self;
-    self.pianoRoll.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
+    self.pianoRoll.onTransportToggle   = ^{ [weakAudioSelf toggleTransport]; };
+    self.channelRack.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
+    self.patternList.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
 
     // Drives the playhead and reclaims retired graphs. Both are non-realtime
     // work that must happen off the audio thread; 30 Hz is smooth enough for a
@@ -138,6 +213,35 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     [self.window makeKeyAndOrderFront:nil];
     [self.window makeFirstResponder:self.pianoRoll];
     [NSApp activateIgnoringOtherApps:YES];
+}
+
+/// Points both editors at a channel. The rack owns the highlight, the Piano
+/// Roll owns what it edits, and neither knows about the other.
+- (void)selectChannel:(unsigned long long)channelId
+{
+    self.pianoRoll.channelIdValue          = channelId;
+    self.channelRack.selectedChannelIdValue = channelId;
+
+    [self.pianoRoll requestRedraw];
+    [self refreshStatus];
+}
+
+/// Switches the pattern both editors and the transport are working on.
+- (void)selectPattern:(unsigned long long)patternId
+{
+    self.pianoRoll.patternIdValue           = patternId;
+    self.channelRack.patternIdValue         = patternId;
+    self.patternList.selectedPatternIdValue = patternId;
+
+    if (const project::Pattern* pattern = _project->findPattern(project::EntityId{patternId}))
+        self.window.title = [NSString stringWithFormat:@"INCDAW — %s", pattern->name.c_str()];
+
+    // The graph plays one pattern at a time until the playlist exists (Phase 9),
+    // so switching pattern is a recompile, not just a view change.
+    [self rebuildGraph];
+    [self retargetLoop];
+    [self.pianoRoll requestRedraw];
+    [self refreshStatus];
 }
 
 - (void)startAudio
@@ -196,6 +300,26 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     _audio->setGraph(std::move(compiled.graph));
 }
 
+/// Loops whatever pattern is selected, so playback repeats rather than running
+/// off into silence — and so that switching pattern while playing does not keep
+/// looping the length of the previous one.
+- (void)retargetLoop
+{
+    if (!_audioReady)
+        return;
+
+    auto& transport = _audio->transport();
+
+    const project::Pattern* pattern =
+        _project->findPattern(project::EntityId{self.pianoRoll.patternIdValue});
+
+    const Tick length = pattern != nullptr && pattern->length > 0 ? pattern->length
+                                                                  : ticksPerQuarterNote * 8;
+
+    transport.setLoopRange(0, transport.tempoMap().frameForTick(length));
+    transport.setLoopEnabled(true);
+}
+
 - (void)toggleTransport
 {
     if (!_audioReady)
@@ -206,13 +330,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     if (transport.isPlaying()) {
         transport.stop();
     } else {
-        // Loop the pattern, so playback repeats rather than running off into
-        // silence after two bars.
-        const project::Pattern& pattern = _project->patterns()[0];
-        const auto loopEnd = transport.tempoMap().frameForTick(pattern.length > 0 ? pattern.length
-                                                                                  : ticksPerQuarterNote * 8);
-        transport.setLoopRange(0, loopEnd);
-        transport.setLoopEnabled(YES);
+        [self retargetLoop];
         transport.seek(0);
         transport.play();
     }
@@ -228,9 +346,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     _audio->collectRetiredGraphs();
 
     const auto position = _audio->transport().position();
-    self.pianoRoll.playheadTick = _audio->transport().isPlaying()
-                                      ? _audio->transport().tempoMap().tickForFrame(position)
-                                      : -1;
+    const long long tick = _audio->transport().isPlaying()
+                               ? _audio->transport().tempoMap().tickForFrame(position)
+                               : -1;
+
+    self.pianoRoll.playheadTick   = tick;
+    self.channelRack.playheadTick = tick;
 
     [self.pianoRoll requestRedraw];
     [self refreshStatus];
@@ -238,8 +359,10 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
 - (void)refreshStatus
 {
-    const auto& patterns = _project->patterns();
-    const std::size_t noteCount = patterns.empty() ? 0 : patterns[0].totalEventCount();
+    const project::Pattern* pattern =
+        _project->findPattern(project::EntityId{self.pianoRoll.patternIdValue});
+
+    const std::size_t noteCount = pattern != nullptr ? pattern->totalEventCount() : 0;
 
     NSString* undo = _registry->canUndo()
                          ? [NSString stringWithFormat:@"undo: %s", _registry->undoName().c_str()]
@@ -253,10 +376,16 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                  _audio->profiler().peakLoad() * 100.0];
     }
 
+    const project::Channel* channel =
+        _project->findChannel(project::EntityId{self.pianoRoll.channelIdValue});
+
     self.statusField.stringValue = [NSString stringWithFormat:
-        @"INCDAW %s  ·  %lu notes  ·  %@  ·  %@  ·  space: play   click: add   drag: move   "
-        @"right-click: delete   Q: quantize   ⌘Z: undo",
-        app::Version::string(), static_cast<unsigned long>(noteCount), audio, undo];
+        @"INCDAW %s  ·  %s / %s  ·  %lu notes  ·  %@  ·  %@  ·  space: play   "
+        @"click: add or toggle step   ⌘Z: undo",
+        app::Version::string(),
+        pattern != nullptr ? pattern->name.c_str() : "—",
+        channel != nullptr ? channel->name.c_str() : "—",
+        static_cast<unsigned long>(noteCount), audio, undo];
 }
 
 - (void)buildMenu

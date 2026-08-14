@@ -621,6 +621,29 @@ enum class DragMode { none, move, resize, boxSelect };
     _needsRedraw = YES;
 }
 
+// Retargeting clears the selection: indices refer to one channel's event list
+// in one pattern, and carrying them across would delete or move notes the user
+// never selected.
+- (void)setPatternIdValue:(unsigned long long)value
+{
+    if (_patternIdValue == value)
+        return;
+
+    _patternIdValue = value;
+    _model->clearSelection();
+    [self setNeedsDisplay:YES];
+}
+
+- (void)setChannelIdValue:(unsigned long long)value
+{
+    if (_channelIdValue == value)
+        return;
+
+    _channelIdValue = value;
+    _model->clearSelection();
+    [self setNeedsDisplay:YES];
+}
+
 - (void)reportAction:(NSString*)action
 {
     _statusText = [action copy];
