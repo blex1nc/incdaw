@@ -1,0 +1,29 @@
+add_library(doctest INTERFACE)
+target_include_directories(doctest INTERFACE ${CMAKE_SOURCE_DIR}/third_party/doctest)
+
+add_executable(incdaw_tests
+    main.cpp
+    unit/TimeTests.cpp
+    unit/IdentityTests.cpp
+    unit/PluginIdentifierTests.cpp
+    unit/SystemInfoTests.cpp)
+
+# incdaw_project pulls in engine -> platform transitively; listing them again
+# here puts the same archive on the link line twice and ld warns about it.
+target_link_libraries(incdaw_tests
+    PRIVATE doctest
+            incdaw_project
+            incdaw_plugins
+            incdaw_warnings)
+
+add_test(NAME unit COMMAND incdaw_tests)
+
+# ── Layering test ─────────────────────────────────────────────────────────────
+# Enforces docs/ARCHITECTURE.md §2 statically over the source tree. It runs as
+# part of the suite so that an architectural violation fails the build the same
+# way a failing assertion does.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+add_test(NAME layering
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/check_layering.py
+                 ${CMAKE_SOURCE_DIR}/src)
