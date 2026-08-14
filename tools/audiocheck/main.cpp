@@ -8,13 +8,15 @@
 // diagnostic tool, not part of the application.
 //
 //   incdaw-audiocheck [--seconds N] [--buffer N] [--rate N] [--freq HZ]
-//                     [--amplitude A] [--silent] [--list] [--device UID]
+//                     [--amplitude A] [--silent] [--list] [--device UID] [--midi]
 
 #include "engine/AudioEngine.h"
 #include "engine/core/RealtimeGuard.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/SineOscillatorNode.h"
 #include "engine/graph/RenderGraph.h"
+#include "platform/HostTime.h"
+#include "platform/MidiDevice.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -36,6 +38,7 @@ struct Options {
     float       amplitude = 0.05f;   // ~ -26 dBFS: audible, not alarming
     bool        listOnly  = false;
     std::string device;      ///< output device uid; empty selects the default
+    bool        midi = false;///< also open MIDI input and report what arrives
 };
 
 Options parseArguments(int argc, char** argv)
@@ -54,6 +57,7 @@ Options parseArguments(int argc, char** argv)
         else if (argument == "--silent")    options.amplitude = 0.0f;
         else if (argument == "--list")      options.listOnly  = true;
         else if (argument == "--device")    options.device    = next();
+        else if (argument == "--midi")      options.midi      = true;
     }
 
     return options;
@@ -107,6 +111,17 @@ int main(int argc, char** argv)
 
     if (options.listOnly) {
         printDevices(audioEngine);
+
+        if (const auto midi = platform::MidiDevice::create()) {
+            std::cout << "\nMIDI inputs:\n";
+            for (const auto& port : midi->enumerateInputs())
+                std::cout << "  " << port.name << "\n      uid: " << port.identifier << "\n";
+
+            std::cout << "MIDI outputs:\n";
+            for (const auto& port : midi->enumerateOutputs())
+                std::cout << "  " << port.name << "\n      uid: " << port.identifier << "\n";
+        }
+
         return 0;
     }
 
@@ -143,6 +158,20 @@ int main(int argc, char** argv)
     const engine::FrameCount graphLatency = graph->latencyFrames();
     audioEngine.setGraph(std::move(graph));
 
+    // MIDI input is opened after the device, so that the first block's host
+    // time is already established when messages start arriving.
+    std::unique_ptr<platform::MidiDevice> midiDevice;
+
+    if (options.midi) {
+        midiDevice = platform::MidiDevice::create();
+        std::string midiError;
+
+        if (midiDevice != nullptr && !midiDevice->open({}, audioEngine.midiInput(), midiError)) {
+            std::cerr << "warning: MIDI input unavailable: " << midiError << "\n";
+            midiDevice.reset();
+        }
+    }
+
     const double rate = audioEngine.sampleRate();
 
     std::cout << "Device      : " << audioEngine.deviceName() << "\n"
@@ -174,6 +203,10 @@ int main(int argc, char** argv)
     }
 
     const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
+    if (midiDevice != nullptr)
+        midiDevice->close();
+
     audioEngine.stop();
 
     const auto& profiler = audioEngine.profiler();
@@ -203,7 +236,15 @@ int main(int argc, char** argv)
               << "  rt allocations   : " << allocated << "\n"
               << "  rt frees         : " << freed << "\n";
 
-    const bool clean = blocks > 0 && overruns == 0 && allocated == 0 && freed == 0 && nonFinite == 0;
+    if (options.midi) {
+        const auto& midiInput = audioEngine.midiInput();
+        std::cout << "  midi received    : " << midiInput.receivedCount() << "\n"
+                  << "  midi dropped     : " << midiInput.droppedCount() << "\n"
+                  << "  midi late        : " << midiInput.lateCount() << "\n";
+    }
+
+    const bool clean = blocks > 0 && overruns == 0 && allocated == 0 && freed == 0 && nonFinite == 0
+                    && (!options.midi || audioEngine.midiInput().droppedCount() == 0);
 
     std::cout << "\n" << (clean ? "PASS" : "FAIL") << "\n";
     return clean ? 0 : 1;

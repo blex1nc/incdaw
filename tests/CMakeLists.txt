@@ -13,7 +13,8 @@ add_executable(incdaw_tests
     unit/DspTests.cpp
     unit/TempoMapTests.cpp
     unit/TransportTests.cpp
-    unit/ProjectFormatTests.cpp)
+    unit/ProjectFormatTests.cpp
+    unit/MidiTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.

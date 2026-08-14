@@ -2,6 +2,8 @@
 
 #include "engine/core/CallbackProfiler.h"
 #include "engine/graph/RenderGraph.h"
+#include "engine/midi/MidiBuffer.h"
+#include "engine/midi/MidiInput.h"
 #include "engine/transport/Transport.h"
 #include "platform/AudioDevice.h"
 
@@ -54,6 +56,14 @@ public:
 
     /// The single time authority. Nodes read position from the block plan this
     /// produces; nothing else in the engine keeps its own clock.
+    /// MIDI input, timestamp-aligned to the audio blocks this engine renders.
+    [[nodiscard]] MidiInput&       midiInput()       noexcept { return midiInput_; }
+    [[nodiscard]] const MidiInput& midiInput() const noexcept { return midiInput_; }
+
+    /// The messages collected for the block just rendered. Read from the audio
+    /// thread by nodes; exposed here for diagnostics and tests.
+    [[nodiscard]] const MidiBuffer& lastBlockMidi() const noexcept { return blockMidi_; }
+
     [[nodiscard]] Transport&       transport()       noexcept { return transport_; }
     [[nodiscard]] const Transport& transport() const noexcept { return transport_; }
 
@@ -78,7 +88,7 @@ public:
 
 private:
     void renderAudioBlock(float* const* outputChannels, std::size_t channelCount,
-                          std::int64_t frameCount) noexcept override;
+                          std::int64_t frameCount, std::uint64_t blockHostTimeNanos) noexcept override;
 
     void audioDeviceAboutToStart(double sampleRate, std::int64_t bufferSize) override;
     void audioDeviceStopped() override;
@@ -90,6 +100,8 @@ private:
 
     std::unique_ptr<platform::AudioDevice> device_;
     Transport                              transport_;
+    MidiInput                              midiInput_;
+    MidiBuffer                             blockMidi_;
 
     std::atomic<CompiledGraph*>                active_{nullptr};
     std::unique_ptr<CompiledGraph>             owned_;      ///< the installed graph

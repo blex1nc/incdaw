@@ -130,6 +130,9 @@ std::string AudioEngine::deviceName() const
 void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t blockSize)
 {
     profiler_.configure(sampleRateHz, blockSize);
+    midiInput_.resetCounters();
+    blockMidi_.clear();
+    blockMidi_.resetOverflowCount();
     blockCounter_.store(0, std::memory_order_release);
     nonFiniteBlocks_.store(0, std::memory_order_relaxed);
     rt::resetViolations();
@@ -138,7 +141,7 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
 void AudioEngine::audioDeviceStopped() {}
 
 void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t channelCount,
-                                   std::int64_t frameCount) noexcept
+                                   std::int64_t frameCount, std::uint64_t blockHostTimeNanos) noexcept
 {
     // Marks this thread realtime for the guard, and flushes denormals before any
     // DSP runs. Both must be the very first things in the callback.
@@ -149,6 +152,12 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
 
     const AudioBufferView output{outputChannels, channelCount, frameCount};
     output.clear();
+
+    // Collected once for the whole block, before it is split: MIDI offsets are
+    // relative to the block the device handed us, and each segment re-bases the
+    // ones that fall inside it.
+    midiInput_.collectForBlock(blockMidi_, blockHostTimeNanos, frameCount,
+                               device_ != nullptr ? device_->actualSampleRate() : 0.0);
 
     if (CompiledGraph* graph = active_.load(std::memory_order_acquire)) {
         // The transport decides how this block is divided. A loop wrap in the
@@ -177,7 +186,8 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
     }
 
     const auto finished = std::chrono::steady_clock::now();
-    profiler_.record(std::chrono::duration<double>(finished - started).count());
+    profiler_.record(std::chrono::duration<double>(finished - started).count(), frameCount,
+                     device_ != nullptr ? device_->actualSampleRate() : 0.0);
 
     blockCounter_.fetch_add(1, std::memory_order_acq_rel);
 }

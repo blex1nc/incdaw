@@ -43,11 +43,17 @@ public:
     /// Renders one block. Planar: `outputChannels[c]` is a contiguous array of
     /// `frameCount` samples.
     ///
+    /// `blockHostTimeNanos` is when the first frame of this block will be heard,
+    /// on the same clock as MIDI input timestamps (platform/HostTime.h). It is
+    /// what lets an incoming note be placed on an exact sample rather than at
+    /// the start of whichever block happened to notice it.
+    ///
     /// Bound by the prime directive (docs/AUDIO_ENGINE.md §1). Everything
     /// reachable from here must be allocation-free and lock-free.
     virtual void renderAudioBlock(float* const* outputChannels,
                                   std::size_t   channelCount,
-                                  std::int64_t  frameCount) noexcept = 0;
+                                  std::int64_t  frameCount,
+                                  std::uint64_t blockHostTimeNanos) noexcept = 0;
 
     /// Called off the realtime thread before the device starts, and again if the
     /// format changes. May allocate.

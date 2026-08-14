@@ -34,10 +34,20 @@ public:
         reset();
     }
 
-    /// Realtime-safe. `elapsedSeconds` is the measured callback duration.
-    void record(double elapsedSeconds) noexcept
+    /// Realtime-safe. `elapsedSeconds` is the measured callback duration and
+    /// `frameCount` is how many frames this callback actually rendered.
+    ///
+    /// The budget is computed per block rather than taken from the configured
+    /// buffer size, because the two can differ: when a device is shared with
+    /// another process, CoreAudio delivers whatever block size it is servicing,
+    /// not the size our property query reported. Dividing by the nominal figure
+    /// then understates the load — by 2x in the case that surfaced this.
+    void record(double elapsedSeconds, FrameCount frameCount, SampleRate sampleRate) noexcept
     {
-        const double budget = budgetSeconds_.load(std::memory_order_relaxed);
+        const double budget = sampleRate > 0.0 && frameCount > 0
+                                  ? static_cast<double>(frameCount) / sampleRate
+                                  : budgetSeconds_.load(std::memory_order_relaxed);
+
         if (budget <= 0.0)
             return;
 

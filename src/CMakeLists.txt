@@ -13,13 +13,16 @@
 # ── platform/ : the ONLY layer permitted to contain OS-specific code ──────────
 add_library(incdaw_platform STATIC
     platform/SystemInfo.cpp
-    platform/macos/CoreAudioDevice.cpp)
+    platform/macos/CoreAudioDevice.cpp
+    platform/macos/CoreMidiDevice.cpp
+    platform/macos/HostTime.cpp)
 target_include_directories(incdaw_platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_platform PRIVATE incdaw_warnings)
 
 if(APPLE)
     target_link_libraries(incdaw_platform PUBLIC
         "-framework CoreAudio"
+        "-framework CoreMIDI"
         "-framework AudioToolbox"
         "-framework CoreFoundation")
 endif()
@@ -36,6 +39,8 @@ add_library(incdaw_engine STATIC
     engine/dsp/SineOscillatorNode.cpp
     engine/dsp/GainNode.cpp
     engine/dsp/MetronomeNode.cpp
+    engine/midi/MidiInput.cpp
+    engine/midi/MidiRecorder.cpp
     engine/AudioEngine.cpp)
 target_include_directories(incdaw_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_engine
@@ -59,7 +64,8 @@ add_library(incdaw_project STATIC
     project/Identity.cpp
     project/Json.cpp
     project/Model.cpp
-    project/ProjectFile.cpp)
+    project/ProjectFile.cpp
+    project/MidiCapture.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_project
     PUBLIC  incdaw_engine

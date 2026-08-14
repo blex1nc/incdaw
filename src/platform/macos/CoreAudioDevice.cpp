@@ -1,5 +1,6 @@
 #include "platform/AudioDevice.h"
 
+#include "platform/HostTime.h"
 #include "platform/Platform.h"
 
 #if INCDAW_PLATFORM_MACOS
@@ -188,7 +189,7 @@ private:
                                      const AudioTimeStamp*    outputTime,
                                      void*                    clientData) noexcept;
 
-    void renderInto(AudioBufferList& outputData) noexcept;
+    void renderInto(AudioBufferList& outputData, std::uint64_t hostTimeNanos) noexcept;
 
     AudioObjectID    deviceID_  = kAudioObjectUnknown;
     AudioDeviceIOProcID procID_ = nullptr;
@@ -211,6 +212,11 @@ private:
     /// edge of the system.
     std::vector<float>  scratch_;
     std::vector<float*> scratchChannels_;
+
+    /// Frames the scratch can hold. Sized from the device's maximum, not its
+    /// current setting: a shared device delivers whatever block size CoreAudio
+    /// is servicing, which is not always what our property query reported.
+    std::int64_t        scratchCapacity_ = 0;
 };
 
 std::vector<AudioDeviceInfo> CoreAudioDevice::enumerateDevices() const
@@ -322,11 +328,31 @@ bool CoreAudioDevice::open(const AudioDeviceConfig& config, std::string& error)
     }
 
     // Planar scratch, allocated once here so the callback never has to.
-    scratch_.assign(outputChannels_ * static_cast<std::size_t>(bufferSize_), 0.0f);
+    //
+    // Sized from the device's maximum supported block, because the IOProc is
+    // not obliged to hand us the size we asked for — when another process has
+    // the device open, CoreAudio services whichever block size it is already
+    // running. Allocating only the nominal size would mean either a truncated
+    // block or, worse, silence.
+    AudioValueRange sizeRange{};
+    scratchCapacity_ = bufferSize_;
+
+    if (getProperty(deviceID_, address(kAudioDevicePropertyBufferFrameSizeRange,
+                                       kAudioObjectPropertyScopeOutput), sizeRange)
+        && sizeRange.mMaximum > static_cast<Float64>(scratchCapacity_))
+        scratchCapacity_ = static_cast<std::int64_t>(sizeRange.mMaximum);
+
+    // A floor, in case the range query fails on some driver.
+    if (scratchCapacity_ < bufferSize_ * 4)
+        scratchCapacity_ = bufferSize_ * 4;
+
+    const auto capacity = static_cast<std::size_t>(scratchCapacity_);
+
+    scratch_.assign(outputChannels_ * capacity, 0.0f);
     scratchChannels_.resize(outputChannels_);
 
     for (std::size_t channel = 0; channel < outputChannels_; ++channel)
-        scratchChannels_[channel] = scratch_.data() + channel * static_cast<std::size_t>(bufferSize_);
+        scratchChannels_[channel] = scratch_.data() + channel * capacity;
 
     return true;
 }
@@ -344,6 +370,7 @@ void CoreAudioDevice::close()
     callback_ = nullptr;
     scratch_.clear();
     scratchChannels_.clear();
+    scratchCapacity_ = 0;
 }
 
 bool CoreAudioDevice::start(AudioIOCallback& callback, std::string& error)
@@ -392,18 +419,31 @@ void CoreAudioDevice::stop()
         callback_->audioDeviceStopped();
 }
 
-OSStatus CoreAudioDevice::ioProcTrampoline(AudioObjectID, const AudioTimeStamp*,
+OSStatus CoreAudioDevice::ioProcTrampoline(AudioObjectID, const AudioTimeStamp* now,
                                            const AudioBufferList*, const AudioTimeStamp*,
-                                           AudioBufferList* outputData, const AudioTimeStamp*,
+                                           AudioBufferList* outputData, const AudioTimeStamp* outputTime,
                                            void* clientData) noexcept
 {
-    if (outputData != nullptr && clientData != nullptr)
-        static_cast<CoreAudioDevice*>(clientData)->renderInto(*outputData);
+    if (outputData == nullptr || clientData == nullptr)
+        return noErr;
+
+    // The OUTPUT timestamp, not `now`: it says when this block will actually be
+    // heard, which is what an incoming MIDI note has to be aligned against.
+    // Using `now` would bake the output latency into every recorded position.
+    std::uint64_t hostTime = 0;
+
+    if (outputTime != nullptr && (outputTime->mFlags & kAudioTimeStampHostTimeValid) != 0)
+        hostTime = outputTime->mHostTime;
+    else if (now != nullptr && (now->mFlags & kAudioTimeStampHostTimeValid) != 0)
+        hostTime = now->mHostTime;
+
+    static_cast<CoreAudioDevice*>(clientData)->renderInto(
+        *outputData, hostTime != 0 ? hostTimeToNanos(hostTime) : hostTimeNowNanos());
 
     return noErr;
 }
 
-void CoreAudioDevice::renderInto(AudioBufferList& outputData) noexcept
+void CoreAudioDevice::renderInto(AudioBufferList& outputData, std::uint64_t hostTimeNanos) noexcept
 {
     // This runs on CoreAudio's realtime thread, which the HAL has already joined
     // to the device's os_workgroup. Any additional worker threads INCDAW spawns
@@ -417,14 +457,20 @@ void CoreAudioDevice::renderInto(AudioBufferList& outputData) noexcept
     const auto deviceChannels = static_cast<std::size_t>(
         interleaved ? outputData.mBuffers[0].mNumberChannels : outputData.mNumberBuffers);
 
-    const auto frames = static_cast<std::int64_t>(
+    auto frames = static_cast<std::int64_t>(
         outputData.mBuffers[0].mDataByteSize
         / (sizeof(float) * (interleaved ? outputData.mBuffers[0].mNumberChannels : 1)));
 
-    if (frames <= 0 || frames > bufferSize_)
-        return;   // never write past the scratch allocated in open()
+    if (frames <= 0)
+        return;
 
-    callback_->renderAudioBlock(scratchChannels_.data(), outputChannels_, frames);
+    // Clamp rather than bail out. Returning here would emit silence for the
+    // whole block, turning an unexpected block size into an audible dropout;
+    // rendering what we have room for keeps audio flowing.
+    if (frames > scratchCapacity_)
+        frames = scratchCapacity_;
+
+    callback_->renderAudioBlock(scratchChannels_.data(), outputChannels_, frames, hostTimeNanos);
 
     if (interleaved) {
         auto* destination = static_cast<float*>(outputData.mBuffers[0].mData);
