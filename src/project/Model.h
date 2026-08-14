@@ -245,6 +245,14 @@ struct Channel {
     bool          muted  = false;
     bool          soloed = false;
 
+    /// The pitch a step sequencer step writes on this channel.
+    ///
+    /// Per channel rather than a global constant because a step grid and a
+    /// Piano Roll edit the same notes: a drum channel's steps have to land on
+    /// the key its sampler maps that drum to, or the two editors would disagree
+    /// about what the user just programmed.
+    int           stepKey = 60;
+
     /// The hosted instrument, if any. Empty uid means "no instrument yet".
     plugins::PluginIdentifier instrument;
 
@@ -332,6 +340,29 @@ public:
     AudioAsset&        addAudioAsset(std::string path);
     RoutingConnection& connect(EntityId source, EntityId destination);
 
+    /// Puts an existing entity back where it was, keeping its id.
+    ///
+    /// This is what undo needs and `addChannel` cannot provide: re-adding a
+    /// removed channel with a fresh id would break every reference to it —
+    /// pattern content, routing, and any command still on the redo stack.
+    /// `index` is clamped, so a shrunken project restores at the end rather
+    /// than out of bounds.
+    Channel& insertChannel(std::size_t index, Channel channel);
+    Pattern& insertPattern(std::size_t index, Pattern pattern);
+
+    /// Removes an entity by id. False when there is nothing to remove.
+    ///
+    /// Removing a channel does NOT remove its content from patterns: that
+    /// content is captured and restored by the command performing the removal,
+    /// which is the only party that can put it back.
+    bool removeChannel(EntityId id) noexcept;
+    bool removePattern(EntityId id) noexcept;
+
+    static constexpr std::size_t notFound = static_cast<std::size_t>(-1);
+
+    [[nodiscard]] std::size_t indexOfChannel(EntityId id) const noexcept;
+    [[nodiscard]] std::size_t indexOfPattern(EntityId id) const noexcept;
+
     [[nodiscard]] std::vector<Track>&             tracks()      noexcept { return tracks_; }
     [[nodiscard]] std::vector<Channel>&           channels()    noexcept { return channels_; }
     [[nodiscard]] std::vector<MixerNode>&         mixerNodes()  noexcept { return mixerNodes_; }
@@ -354,6 +385,7 @@ public:
 
     [[nodiscard]] const Track*     findTrack(EntityId id) const noexcept;
     [[nodiscard]] const Channel*   findChannel(EntityId id) const noexcept;
+    [[nodiscard]] Channel*         findChannel(EntityId id) noexcept;
     [[nodiscard]] const Pattern*   findPattern(EntityId id) const noexcept;
     [[nodiscard]] Pattern*         findPattern(EntityId id) noexcept;
     [[nodiscard]] const MixerNode* findMixerNode(EntityId id) const noexcept;

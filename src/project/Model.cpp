@@ -1,5 +1,6 @@
 #include "project/Model.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <utility>
 
@@ -37,6 +38,62 @@ Channel& Project::addChannel(std::string name)
 
     channels_.push_back(std::move(channel));
     return channels_.back();
+}
+
+Channel& Project::insertChannel(std::size_t index, Channel channel)
+{
+    ids_.observe(channel.id);
+
+    const std::size_t position = std::min(index, channels_.size());
+    return *channels_.insert(channels_.begin() + static_cast<std::ptrdiff_t>(position),
+                             std::move(channel));
+}
+
+Pattern& Project::insertPattern(std::size_t index, Pattern pattern)
+{
+    ids_.observe(pattern.id);
+
+    const std::size_t position = std::min(index, patterns_.size());
+    return *patterns_.insert(patterns_.begin() + static_cast<std::ptrdiff_t>(position),
+                             std::move(pattern));
+}
+
+bool Project::removeChannel(EntityId id) noexcept
+{
+    const std::size_t index = indexOfChannel(id);
+    if (index == notFound)
+        return false;
+
+    channels_.erase(channels_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
+bool Project::removePattern(EntityId id) noexcept
+{
+    const std::size_t index = indexOfPattern(id);
+    if (index == notFound)
+        return false;
+
+    patterns_.erase(patterns_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
+std::size_t Project::indexOfChannel(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < channels_.size(); ++index)
+        if (channels_[index].id == id)
+            return index;
+
+    return notFound;
+}
+
+std::size_t Project::indexOfPattern(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < patterns_.size(); ++index)
+        if (patterns_[index].id == id)
+            return index;
+
+    return notFound;
 }
 
 MixerNode& Project::addMixerNode(MixerNodeType type, std::string name)
@@ -170,6 +227,11 @@ const Channel* Project::findChannel(EntityId id) const noexcept
             return &channel;
 
     return nullptr;
+}
+
+Channel* Project::findChannel(EntityId id) noexcept
+{
+    return const_cast<Channel*>(std::as_const(*this).findChannel(id));
 }
 
 const Pattern* Project::findPattern(EntityId id) const noexcept

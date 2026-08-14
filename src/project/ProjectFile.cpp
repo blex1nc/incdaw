@@ -283,6 +283,7 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("pan", channel.pan);
         json.set("muted", channel.muted);
         json.set("soloed", channel.soloed);
+        json.set("stepKey", static_cast<std::int64_t>(channel.stepKey));
         json.set("instrument", toJson(channel.instrument));
         json.set("instrumentStateFile", channel.instrumentStateFile);
         channels.append(std::move(json));
@@ -602,6 +603,7 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         channel.pan                 = json["pan"].asDouble(0.0);
         channel.muted               = json["muted"].asBool(false);
         channel.soloed              = json["soloed"].asBool(false);
+        channel.stepKey             = static_cast<int>(json["stepKey"].asInt(60));
         channel.instrument          = pluginFrom(json["instrument"]);
         channel.instrumentStateFile = json["instrumentStateFile"].asString();
         project.channels().push_back(std::move(channel));
@@ -778,6 +780,16 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // the version they are reading. This hook remains the single place that
     // decides whether a path exists at all.
     if (major == 1 && minor == 0) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.1 -> 1.2. Purely additive: `Channel::stepKey` is absent from a 1.1
+    // document and its reader default is the value those projects behaved as if
+    // they had. Nothing to rewrite, but the path must still be declared here —
+    // an undeclared version is refused, and silently accepting unknown ones is
+    // how a loader starts dropping fields.
+    if (major == 1 && minor == 1) {
         result.succeeded = true;
         return result;
     }

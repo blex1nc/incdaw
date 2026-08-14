@@ -15,10 +15,14 @@ namespace incdaw::project {
 /// is stamped into the very first file INCDAW ever saves.
 inline constexpr int projectFormatMajor = 1;
 
-/// 1.1 (Phase 8): a pattern's notes are stored per channel rather than as one
+/// 1.1 (Phase 8a): a pattern's notes are stored per channel rather than as one
 /// flat list, and pattern clips are placed in ticks rather than frames. Both
 /// are read back from 1.0 files — see `ProjectFile::migrate`.
-inline constexpr int projectFormatMinor = 1;
+///
+/// 1.2 (Phase 8b): a channel carries the pitch its step sequencer steps are
+/// written at. A 1.1 file simply has no such field and reads back as middle C,
+/// which is what those projects meant.
+inline constexpr int projectFormatMinor = 2;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

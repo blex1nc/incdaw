@@ -576,6 +576,47 @@ TEST_CASE("the v1.0 fixture still loads")
     CHECK(project.mixerNodes()[1].inserts[0].plugin.uid == "com.acme.compressor");
 }
 
+TEST_CASE("the v1.1 fixture still loads")
+{
+    const fs::path fixture = fs::path{INCDAW_FIXTURE_DIR} / "v1.1" / "Fixture.incdaw";
+    REQUIRE(fs::exists(fixture));
+
+    Project project;
+    const auto result = ProjectFile::load(project, fixture);
+
+    REQUIRE(result.succeeded);
+    CHECK(result.migrated);
+    CHECK(result.migratedFrom == "1.1");
+
+    CHECK(project.metadata().title == "Format v1.1 fixture");
+
+    REQUIRE(project.channels().size() == 2);
+    CHECK(project.channels()[0].name == "Kick");
+    CHECK(project.channels()[0].volume == doctest::Approx(0.8));
+    CHECK(project.channels()[1].muted);
+
+    // 1.1 had no per-channel step key. Reading one back as middle C is the
+    // 1.2 default, and it is what those projects behaved as if they had.
+    CHECK(project.channels()[0].stepKey == 60);
+    CHECK(project.channels()[1].stepKey == 60);
+
+    // Per-channel pattern content, which is what 1.1 introduced, must survive
+    // the upgrade unchanged.
+    const Pattern* pattern = project.findPattern(EntityId{4});
+    REQUIRE(pattern != nullptr);
+    CHECK(pattern->swing == doctest::Approx(0.25));
+
+    const std::vector<MidiEvent>* kick = pattern->events(project.channels()[0].id);
+    REQUIRE(kick != nullptr);
+    REQUIRE(kick->size() == 1);
+    CHECK((*kick)[0].key == 36);
+
+    const std::vector<MidiEvent>* lead = pattern->events(project.channels()[1].id);
+    REQUIRE(lead != nullptr);
+    REQUIRE(lead->size() == 1);
+    CHECK((*lead)[0].tick == 480);
+}
+
 TEST_CASE("a fixture re-saved by this build still round-trips")
 {
     ScratchDirectory scratch{"fixture-resave"};
