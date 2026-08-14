@@ -1,0 +1,38 @@
+#pragma once
+
+#import <Cocoa/Cocoa.h>
+
+namespace incdaw::project { class Project; }
+namespace incdaw::app     { class CommandRegistry; }
+
+/// The playlist: tracks down the side, pattern clips on a timeline.
+///
+/// Owns no model state. Geometry and hit testing come from app::PlaylistModel
+/// and every edit goes through app::CommandRegistry, so playlist edits share
+/// the one undo stack with the Piano Roll and the Channel Rack.
+///
+/// CoreGraphics rather than Metal, like the Channel Rack (D-015): the viewport
+/// holds tens of clips, and culling in PlaylistModel keeps it that way however
+/// long the song gets.
+@interface INCDAWPlaylistView : NSView
+
+- (instancetype)initWithFrame:(NSRect)frame
+                      project:(incdaw::project::Project*)project
+                     registry:(incdaw::app::CommandRegistry*)registry;
+
+/// Pattern painted into empty timeline space, and shown in the toolbar.
+@property (nonatomic, assign) unsigned long long patternIdValue;
+
+/// Playhead position in ticks; negative hides it.
+@property (nonatomic, assign) long long playheadTick;
+
+/// Called after any edit, so the host can rebuild the playback graph.
+@property (nonatomic, copy) void (^onChange)(void);
+
+/// Called when the user clicks the ruler, to move the transport.
+@property (nonatomic, copy) void (^onSeekTick)(long long);
+
+/// Called when the user asks to start or stop playback (space bar).
+@property (nonatomic, copy) void (^onTransportToggle)(void);
+
+@end

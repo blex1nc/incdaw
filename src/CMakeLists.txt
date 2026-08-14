@@ -102,7 +102,8 @@ if(APPLE)
         ui/macos/PianoRollView.mm
         ui/macos/PianoRollRenderer.mm
         ui/macos/ChannelRackView.mm
-        ui/macos/PatternListView.mm)
+        ui/macos/PatternListView.mm
+        ui/macos/PlaylistView.mm)
     target_link_libraries(INCDAW
         PRIVATE incdaw_app incdaw_warnings
                 "-framework Cocoa"

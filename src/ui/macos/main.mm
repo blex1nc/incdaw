@@ -20,10 +20,12 @@
 #include "engine/AudioEngine.h"
 #include "platform/SystemInfo.h"
 #include "project/Model.h"
+#include "project/PatternCompiler.h"
 #include "project/ProjectGraphCompiler.h"
 #include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
+#include "ui/macos/PlaylistView.h"
 
 #include <memory>
 #include <string>
@@ -59,6 +61,9 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 @interface INCDAWAppDelegate : NSObject <NSApplicationDelegate>
 @property (strong) NSWindow*                window;
 @property (strong) INCDAWPianoRollView*     pianoRoll;
+@property (strong) INCDAWPlaylistView*      playlist;
+@property (strong) NSSegmentedControl*      editorSelector;
+@property (strong) NSSegmentedControl*      transportModeSelector;
 @property (strong) INCDAWChannelRackView*   channelRack;
 @property (strong) INCDAWPatternListView*   patternList;
 @property (strong) NSTextField*             statusField;
@@ -71,6 +76,11 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     NSTimer* _housekeeping;
     BOOL     _audioReady;
+
+    /// Song mode plays the arrangement; pattern mode loops the selected
+    /// pattern. FL calls these the same two things, and they are the same two
+    /// things everywhere: what the transport is looking at, not a UI filter.
+    BOOL     _songMode;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -80,9 +90,23 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     _project  = std::make_unique<project::Project>();
     _registry = std::make_unique<app::CommandRegistry>(*_project);
 
-    auto& channel = _project->addChannel("Channel 1");
-    auto& pattern = _project->addPattern("Pattern 1");
-    addStarterPhrase(pattern.contentFor(channel.id).events);
+    const project::EntityId channelId = _project->addChannel("Channel 1").id;
+    const project::EntityId patternId = _project->addPattern("Pattern 1").id;
+
+    project::Pattern& pattern = *_project->findPattern(patternId);
+    addStarterPhrase(pattern.contentFor(channelId).events);
+
+    // One track with the pattern placed on it, so switching to song mode plays
+    // something rather than presenting an empty timeline and silence. Ordinary
+    // project data — movable, deletable, undoable.
+    const project::EntityId trackId =
+        _project->addTrack(project::TrackType::instrument, "Track 1").id;
+
+    project::Clip& clip = _project->addClip(project::ClipType::pattern, trackId, patternId);
+    clip.startTick   = 0;
+    clip.lengthTicks = pattern.length;
+    clip.name        = pattern.name;
+    clip.colour      = pattern.colour;
 
     const NSRect frame = NSMakeRect(0, 0, 1180, 720);
 
@@ -100,34 +124,38 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     NSView* content = self.window.contentView;
 
     constexpr CGFloat statusHeight  = 26.0;
+    constexpr CGFloat toolbarHeight = 30.0;
     constexpr CGFloat listWidth     = 150.0;
     constexpr CGFloat rackHeight    = 220.0;
 
     const NSRect body = NSMakeRect(0, statusHeight, frame.size.width,
-                                   frame.size.height - statusHeight);
+                                   frame.size.height - statusHeight - toolbarHeight);
+
+    const NSRect editorFrame = NSMakeRect(0, 0, body.size.width - listWidth,
+                                          body.size.height - rackHeight);
 
     self.pianoRoll = [[INCDAWPianoRollView alloc]
-        initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, body.size.height - rackHeight)
+        initWithFrame:editorFrame
               project:_project.get()
              registry:_registry.get()];
 
-    self.pianoRoll.patternIdValue = pattern.id.value();
-    self.pianoRoll.channelIdValue = channel.id.value();
+    self.pianoRoll.patternIdValue = patternId.value();
+    self.pianoRoll.channelIdValue = channelId.value();
 
     self.channelRack = [[INCDAWChannelRackView alloc]
         initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, rackHeight)
               project:_project.get()
              registry:_registry.get()];
 
-    self.channelRack.patternIdValue         = pattern.id.value();
-    self.channelRack.selectedChannelIdValue = channel.id.value();
+    self.channelRack.patternIdValue         = patternId.value();
+    self.channelRack.selectedChannelIdValue = channelId.value();
 
     self.patternList = [[INCDAWPatternListView alloc]
         initWithFrame:NSMakeRect(0, 0, listWidth, body.size.height)
               project:_project.get()
              registry:_registry.get()];
 
-    self.patternList.selectedPatternIdValue = pattern.id.value();
+    self.patternList.selectedPatternIdValue = patternId.value();
 
     // Both panes scroll vertically; the rack scrolls its steps horizontally by
     // itself, so that the channel names stay pinned at the left edge.
@@ -143,11 +171,35 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     listScroll.drawsBackground     = NO;
     listScroll.documentView        = self.patternList;
 
+    self.playlist = [[INCDAWPlaylistView alloc]
+        initWithFrame:editorFrame
+              project:_project.get()
+             registry:_registry.get()];
+
+    self.playlist.patternIdValue = patternId.value();
+    self.playlist.hidden         = YES;
+
+    // The two editors share one region and are swapped rather than tiled: both
+    // want the whole window, and a DAW that shows half a Piano Roll above half a
+    // playlist shows neither.
+    NSView* editorContainer = [[NSView alloc] initWithFrame:editorFrame];
+    self.pianoRoll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    self.playlist.autoresizingMask  = NSViewWidthSizable | NSViewHeightSizable;
+    [editorContainer addSubview:self.pianoRoll];
+    [editorContainer addSubview:self.playlist];
+
     NSSplitView* editors = [[NSSplitView alloc]
         initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, body.size.height)];
     editors.vertical      = NO;
     editors.dividerStyle  = NSSplitViewDividerStyleThin;
-    [editors addSubview:self.pianoRoll];
+
+    // Without these the panes keep the size they were created at and the window
+    // grows a dead margin down its right edge.
+    editorContainer.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    rackScroll.autoresizingMask      = NSViewWidthSizable;
+    listScroll.autoresizingMask      = NSViewHeightSizable;
+
+    [editors addSubview:editorContainer];
     [editors addSubview:rackScroll];
 
     NSSplitView* workspace = [[NSSplitView alloc] initWithFrame:body];
@@ -161,6 +213,31 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     [workspace setPosition:listWidth ofDividerAtIndex:0];
     [editors setPosition:body.size.height - rackHeight ofDividerAtIndex:0];
+
+    [workspace adjustSubviews];
+    [editors adjustSubviews];
+
+    self.editorSelector = [NSSegmentedControl
+        segmentedControlWithLabels:@[@"Piano Roll", @"Playlist"]
+                      trackingMode:NSSegmentSwitchTrackingSelectOne
+                            target:self
+                            action:@selector(editorChanged:)];
+    self.editorSelector.selectedSegment = 0;
+    self.editorSelector.frame = NSMakeRect(10, frame.size.height - toolbarHeight + 3, 180, 24);
+
+    self.transportModeSelector = [NSSegmentedControl
+        segmentedControlWithLabels:@[@"Pattern", @"Song"]
+                      trackingMode:NSSegmentSwitchTrackingSelectOne
+                            target:self
+                            action:@selector(transportModeChanged:)];
+    self.transportModeSelector.selectedSegment = 0;
+    self.transportModeSelector.frame = NSMakeRect(200, frame.size.height - toolbarHeight + 3, 150, 24);
+
+    self.editorSelector.autoresizingMask        = NSViewMinYMargin;
+    self.transportModeSelector.autoresizingMask = NSViewMinYMargin;
+
+    [content addSubview:self.editorSelector];
+    [content addSubview:self.transportModeSelector];
 
     self.statusField = [NSTextField labelWithString:@""];
     self.statusField.frame = NSMakeRect(10, 4, frame.size.width - 20, statusHeight - 8);
@@ -181,13 +258,14 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     self.pianoRoll.onChange   = changed;
     self.channelRack.onChange = changed;
     self.patternList.onChange = changed;
+    self.playlist.onChange    = changed;
 
-    self.channelRack.onSelectChannel = ^(unsigned long long channelId) {
-        [weakSelf selectChannel:channelId];
+    self.channelRack.onSelectChannel = ^(unsigned long long selected) {
+        [weakSelf selectChannel:selected];
     };
 
-    self.patternList.onSelectPattern = ^(unsigned long long patternId) {
-        [weakSelf selectPattern:patternId];
+    self.patternList.onSelectPattern = ^(unsigned long long selected) {
+        [weakSelf selectPattern:selected];
     };
 
     [self startAudio];
@@ -196,6 +274,9 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     self.pianoRoll.onTransportToggle   = ^{ [weakAudioSelf toggleTransport]; };
     self.channelRack.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
     self.patternList.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
+    self.playlist.onTransportToggle    = ^{ [weakAudioSelf toggleTransport]; };
+
+    self.playlist.onSeekTick = ^(long long tick) { [weakAudioSelf seekToTick:tick]; };
 
     // Drives the playhead and reclaims retired graphs. Both are non-realtime
     // work that must happen off the audio thread; 30 Hz is smooth enough for a
@@ -232,6 +313,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     self.pianoRoll.patternIdValue           = patternId;
     self.channelRack.patternIdValue         = patternId;
     self.patternList.selectedPatternIdValue = patternId;
+    self.playlist.patternIdValue            = patternId;
 
     if (const project::Pattern* pattern = _project->findPattern(project::EntityId{patternId}))
         self.window.title = [NSString stringWithFormat:@"INCDAW — %s", pattern->name.c_str()];
@@ -241,6 +323,84 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     [self rebuildGraph];
     [self retargetLoop];
     [self.pianoRoll requestRedraw];
+    [self refreshStatus];
+}
+
+- (void)showPianoRoll:(id)sender
+{
+    (void)sender;
+    self.editorSelector.selectedSegment = 0;
+    [self showEditorAtSegment:0];
+}
+
+- (void)showPlaylist:(id)sender
+{
+    (void)sender;
+    self.editorSelector.selectedSegment = 1;
+    [self showEditorAtSegment:1];
+}
+
+- (void)usePatternMode:(id)sender
+{
+    (void)sender;
+    self.transportModeSelector.selectedSegment = 0;
+    [self transportModeChanged:self.transportModeSelector];
+}
+
+- (void)useSongMode:(id)sender
+{
+    (void)sender;
+    self.transportModeSelector.selectedSegment = 1;
+    [self transportModeChanged:self.transportModeSelector];
+}
+
+- (void)editorChanged:(NSSegmentedControl*)sender
+{
+    [self showEditorAtSegment:sender.selectedSegment];
+}
+
+- (void)showEditorAtSegment:(NSInteger)segment
+{
+    const BOOL playlistVisible = segment == 1;
+
+    self.pianoRoll.hidden = playlistVisible;
+    self.playlist.hidden  = !playlistVisible;
+
+    [self.window makeFirstResponder:playlistVisible ? (NSView*)self.playlist
+                                                    : (NSView*)self.pianoRoll];
+    [self.playlist setNeedsDisplay:YES];
+    [self.pianoRoll requestRedraw];
+}
+
+/// Pattern mode loops the selected pattern; song mode plays the arrangement.
+///
+/// This is a compile-time distinction, not a UI one: the graph is rebuilt with
+/// a different source, so the audio thread never learns there are two modes.
+- (void)transportModeChanged:(NSSegmentedControl*)sender
+{
+    _songMode = sender.selectedSegment == 1;
+
+    const BOOL wasPlaying = _audioReady && _audio->transport().isPlaying();
+    if (wasPlaying)
+        _audio->transport().stop();
+
+    [self rebuildGraph];
+    [self retargetLoop];
+
+    if (wasPlaying) {
+        _audio->transport().seek(0);
+        _audio->transport().play();
+    }
+
+    [self refreshStatus];
+}
+
+- (void)seekToTick:(long long)tick
+{
+    if (!_audioReady)
+        return;
+
+    _audio->transport().seekToTick(std::max<engine::Tick>(0, static_cast<engine::Tick>(tick)));
     [self refreshStatus];
 }
 
@@ -281,14 +441,15 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 /// microseconds.
 - (void)rebuildGraph
 {
-    if (!_audioReady || _project->patterns().empty())
+    if (!_audioReady || (_project->patterns().empty() && !_songMode))
         return;
 
     project::GraphCompileOptions options;
     options.sampleRate   = _audio->sampleRate();
     options.maxBlockSize = _audio->bufferSize();
     options.channelCount = _audio->outputChannels();
-    options.source       = project::PlaybackSource::pattern;
+    options.source       = _songMode ? project::PlaybackSource::arrangement
+                                     : project::PlaybackSource::pattern;
     options.pattern      = project::EntityId{self.pianoRoll.patternIdValue};
 
     auto compiled = project::compileProjectGraph(*_project, _audio->transport().tempoMap(), options);
@@ -310,11 +471,22 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     auto& transport = _audio->transport();
 
-    const project::Pattern* pattern =
-        _project->findPattern(project::EntityId{self.pianoRoll.patternIdValue});
+    Tick length = 0;
 
-    const Tick length = pattern != nullptr && pattern->length > 0 ? pattern->length
-                                                                  : ticksPerQuarterNote * 8;
+    if (_songMode) {
+        // The song loops over what was actually drawn. An empty arrangement
+        // falls back to the pattern's length rather than to a zero-length loop,
+        // which would sit at frame zero and play nothing forever.
+        length = project::arrangementLengthTicks(*_project);
+    }
+
+    if (length <= 0) {
+        const project::Pattern* pattern =
+            _project->findPattern(project::EntityId{self.pianoRoll.patternIdValue});
+
+        length = pattern != nullptr && pattern->length > 0 ? pattern->length
+                                                           : ticksPerQuarterNote * 8;
+    }
 
     transport.setLoopRange(0, transport.tempoMap().frameForTick(length));
     transport.setLoopEnabled(true);
@@ -352,6 +524,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     self.pianoRoll.playheadTick   = tick;
     self.channelRack.playheadTick = tick;
+    self.playlist.playheadTick    = tick;
 
     [self.pianoRoll requestRedraw];
     [self refreshStatus];
@@ -380,12 +553,14 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
         _project->findChannel(project::EntityId{self.pianoRoll.channelIdValue});
 
     self.statusField.stringValue = [NSString stringWithFormat:
-        @"INCDAW %s  ·  %s / %s  ·  %lu notes  ·  %@  ·  %@  ·  space: play   "
-        @"click: add or toggle step   ⌘Z: undo",
+        @"INCDAW %s  ·  %@  ·  %s / %s  ·  %lu notes  ·  %lu clips  ·  %@  ·  %@  ·  "
+        @"space: play   ⌘Z: undo",
         app::Version::string(),
+        _songMode ? @"song" : @"pattern",
         pattern != nullptr ? pattern->name.c_str() : "—",
         channel != nullptr ? channel->name.c_str() : "—",
-        static_cast<unsigned long>(noteCount), audio, undo];
+        static_cast<unsigned long>(noteCount),
+        static_cast<unsigned long>(_project->clips().size()), audio, undo];
 }
 
 - (void)buildMenu
@@ -398,6 +573,38 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     NSMenu* appMenu = [[NSMenu alloc] init];
     [appMenu addItemWithTitle:@"Quit INCDAW" action:@selector(terminate:) keyEquivalent:@"q"];
     appItem.submenu = appMenu;
+
+    // A View menu, so the panes are reachable by keyboard as well as by the
+    // toolbar. Every DAW binds its editors to keys; a workspace you can only
+    // reach with the mouse is one you stop using.
+    NSMenuItem* viewItem = [[NSMenuItem alloc] init];
+    [menuBar addItem:viewItem];
+
+    NSMenu* viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+
+    NSMenuItem* pianoRollItem = [viewMenu addItemWithTitle:@"Piano Roll"
+                                                    action:@selector(showPianoRoll:)
+                                             keyEquivalent:@"1"];
+    pianoRollItem.target = self;
+
+    NSMenuItem* playlistItem = [viewMenu addItemWithTitle:@"Playlist"
+                                                   action:@selector(showPlaylist:)
+                                            keyEquivalent:@"2"];
+    playlistItem.target = self;
+
+    [viewMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* patternModeItem = [viewMenu addItemWithTitle:@"Pattern Mode"
+                                                      action:@selector(usePatternMode:)
+                                               keyEquivalent:@"3"];
+    patternModeItem.target = self;
+
+    NSMenuItem* songModeItem = [viewMenu addItemWithTitle:@"Song Mode"
+                                                   action:@selector(useSongMode:)
+                                            keyEquivalent:@"4"];
+    songModeItem.target = self;
+
+    viewItem.submenu = viewMenu;
 
     NSMenuItem* editItem = [[NSMenuItem alloc] init];
     [menuBar addItem:editItem];
