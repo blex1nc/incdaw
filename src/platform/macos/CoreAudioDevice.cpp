@@ -167,6 +167,7 @@ public:
 
     [[nodiscard]] double       actualSampleRate()     const noexcept override { return sampleRate_; }
     [[nodiscard]] std::int64_t actualBufferSize()     const noexcept override { return bufferSize_; }
+    [[nodiscard]] std::int64_t maxServiceableBlockSize() const noexcept override { return scratchCapacity_; }
     [[nodiscard]] std::size_t  actualOutputChannels() const noexcept override { return outputChannels_; }
 
     [[nodiscard]] std::int64_t outputLatencyFrames() const noexcept override { return outputLatency_; }
@@ -217,6 +218,9 @@ private:
     /// current setting: a shared device delivers whatever block size CoreAudio
     /// is servicing, which is not always what our property query reported.
     std::int64_t        scratchCapacity_ = 0;
+
+    /// The shared device's buffer size before we changed it; restored in close.
+    UInt32              bufferSizeToRestore_ = 0;
 };
 
 std::vector<AudioDeviceInfo> CoreAudioDevice::enumerateDevices() const
@@ -299,6 +303,16 @@ bool CoreAudioDevice::open(const AudioDeviceConfig& config, std::string& error)
     }
 
     if (config.bufferSize > 0) {
+        // The buffer size is a property of the SHARED device, not of this
+        // process: forcing it changes it for every application using the
+        // device, and a Bluetooth output driven at a size it cannot sustain
+        // crackles system-wide. The previous value is recorded here and put
+        // back in close(), so quitting INCDAW leaves the machine as it was.
+        UInt32 before = 0;
+        if (getProperty(deviceID_, address(kAudioDevicePropertyBufferFrameSize,
+                                           kAudioObjectPropertyScopeOutput), before))
+            bufferSizeToRestore_ = before;
+
         const auto requested = static_cast<UInt32>(config.bufferSize);
         setProperty(deviceID_, address(kAudioDevicePropertyBufferFrameSize, kAudioObjectPropertyScopeOutput),
                     requested);
@@ -366,6 +380,15 @@ void CoreAudioDevice::close()
         procID_ = nullptr;
     }
 
+    // Put the shared device's buffer size back the way it was found. Leaving
+    // our value behind is how "the DAW broke my computer's sound" happens.
+    if (bufferSizeToRestore_ != 0 && deviceID_ != kAudioObjectUnknown
+        && bufferSizeToRestore_ != static_cast<UInt32>(bufferSize_)) {
+        setProperty(deviceID_, address(kAudioDevicePropertyBufferFrameSize, kAudioObjectPropertyScopeOutput),
+                    bufferSizeToRestore_);
+    }
+
+    bufferSizeToRestore_ = 0;
     deviceID_ = kAudioObjectUnknown;
     callback_ = nullptr;
     scratch_.clear();

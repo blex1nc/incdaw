@@ -72,6 +72,10 @@ public:
 
     [[nodiscard]] double       sampleRate() const noexcept;
     [[nodiscard]] std::int64_t bufferSize() const noexcept;
+
+    /// Largest block the device may hand the callback; what the render graph's
+    /// buffers must be sized for. See AudioDevice::maxServiceableBlockSize.
+    [[nodiscard]] std::int64_t maxServiceableBlockSize() const noexcept;
     [[nodiscard]] std::size_t  outputChannels() const noexcept;
     [[nodiscard]] std::int64_t totalOutputLatencyFrames() const noexcept;
     [[nodiscard]] std::string  deviceName() const;

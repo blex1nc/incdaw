@@ -112,6 +112,11 @@ std::int64_t AudioEngine::bufferSize() const noexcept
     return device_ != nullptr ? device_->actualBufferSize() : 0;
 }
 
+std::int64_t AudioEngine::maxServiceableBlockSize() const noexcept
+{
+    return device_ != nullptr ? device_->maxServiceableBlockSize() : 0;
+}
+
 std::size_t AudioEngine::outputChannels() const noexcept
 {
     return device_ != nullptr ? device_->actualOutputChannels() : 0;

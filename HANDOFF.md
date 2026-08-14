@@ -1015,9 +1015,17 @@ Things to be careful about:
     deliberately allocate must call ::operator new directly, not use a
     new-expression, or they silently pass in Release.
   - A device shared with another process delivers whatever block size CoreAudio
-    is servicing, not the one the property query reports. Both the scratch
-    sizing and the profiler budget now account for this; do not reintroduce an
-    assumption that they match.
+    is servicing, not the one the property query reports. The scratch sizing,
+    the profiler budget AND the render graph's buffers (GraphCompileOptions
+    .maxBlockSize must come from AudioEngine::maxServiceableBlockSize, never
+    from bufferSize) all account for this; do not reintroduce an assumption
+    that they match. A graph compiled smaller than a delivered block renders
+    the first part and leaves the rest silent, which the ear hears as a buzz —
+    this actually happened with AirPods (range 15..960) and a 256-frame graph.
+  - The buffer size is a property of the SHARED output device. CoreAudioDevice
+    now records the value it found and restores it in close(); never remove
+    that, or quitting INCDAW leaves every other application's audio broken.
+    The default request is 512 because Bluetooth cannot sustain less.
 
 ---
 

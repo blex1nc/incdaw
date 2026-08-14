@@ -85,6 +85,15 @@ public:
     /// request, and every latency figure depends on which one is true.
     [[nodiscard]] virtual double       actualSampleRate() const noexcept = 0;
     [[nodiscard]] virtual std::int64_t actualBufferSize() const noexcept = 0;
+
+    /// The largest block the device may ever hand the callback.
+    ///
+    /// Not the same as `actualBufferSize`: a device shared with another process
+    /// delivers whatever block size CoreAudio is already servicing, not the one
+    /// our property query reported. Anything sized per block — the render
+    /// graph's buffers above all — must be sized from THIS, or an oversized
+    /// callback gets truncated into an audible buzz.
+    [[nodiscard]] virtual std::int64_t maxServiceableBlockSize() const noexcept = 0;
     [[nodiscard]] virtual std::size_t  actualOutputChannels() const noexcept = 0;
 
     /// Latency in frames, as reported by the device.

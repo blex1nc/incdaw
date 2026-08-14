@@ -468,7 +468,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     platform::AudioDeviceConfig config;
     config.sampleRate     = 48000.0;
-    config.bufferSize     = 256;
+
+    // 512 rather than the lowest the hardware allows: this is set on the SHARED
+    // device, and Bluetooth outputs cannot sustain small blocks without
+    // crackling. Latency tuning belongs in audio settings (Phase 18), per
+    // device, not in a hardcoded aggressive default.
+    config.bufferSize     = 512;
     config.outputChannels = 2;
 
     std::string error;
@@ -504,7 +509,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     project::GraphCompileOptions options;
     options.sampleRate   = _audio->sampleRate();
-    options.maxBlockSize = _audio->bufferSize();
+
+    // The device's maximum, not its current setting: a shared device delivers
+    // whatever block CoreAudio is servicing, and a graph compiled smaller than
+    // that renders the first part of each block and leaves the rest silent —
+    // which the ear hears as a buzz.
+    options.maxBlockSize = _audio->maxServiceableBlockSize();
     options.channelCount = _audio->outputChannels();
     options.source       = _songMode ? project::PlaybackSource::arrangement
                                      : project::PlaybackSource::pattern;
