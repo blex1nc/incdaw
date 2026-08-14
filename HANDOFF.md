@@ -965,9 +965,10 @@ Next step: Phase 11 (automation), then 12 (recording/audio editor).
 
   a) a mixer window. Everything it needs exists: CompiledProjectGraph returns
      mixerOrder and mixerStripNodes, and the strips carry peak and RMS.
-  b) a pattern list. AddPattern/Duplicate/Delete are implemented and tested but
-     nothing invokes them, so the app can only ever edit the one pattern it
-     opens with.
+  b) DONE (2026-08-14): the channel rack now has pattern tabs — select,
+     shift-click to duplicate, right-click to delete, "+ pattern" to add.
+     Selecting retargets the Piano Roll, the step grid and the playlist
+     together.
 
   Practical note for whoever continues: the seam is now
   project::compileProjectGraph (src/project/GraphCompiler.cpp). Every phase

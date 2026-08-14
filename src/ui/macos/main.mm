@@ -206,6 +206,18 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
         [weakSelf refreshStatus];
     };
 
+    self.channelRack.onPatternSelected = ^{
+        const unsigned long long selected = weakSelf.channelRack.patternIdValue;
+
+        weakSelf.pianoRoll.patternIdValue = selected;
+        weakSelf.playlist.patternIdValue  = selected;
+
+        [weakSelf rebuildGraph];
+        [weakSelf.pianoRoll requestRedraw];
+        [weakSelf.playlist requestRedraw];
+        [weakSelf refreshStatus];
+    };
+
     self.channelRack.onChannelSelected = ^{
         weakSelf.pianoRoll.channelIdValue = weakSelf.channelRack.selectedChannelIdValue;
         [weakSelf.pianoRoll requestRedraw];

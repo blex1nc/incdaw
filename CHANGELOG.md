@@ -8,6 +8,21 @@ public version yet.
 
 ## [Unreleased]
 
+### Pattern list — 2026-08-14
+
+**Added**
+
+- Pattern tabs in the channel rack: click to select, shift-click to duplicate,
+  right-click to delete, `+ pattern` to add. Selecting a pattern retargets the
+  Piano Roll, the step grid and the playlist's placement together, and rebuilds
+  the graph.
+
+  The commands behind this were implemented and tested in Phase 8; nothing
+  invoked them, so the app could only ever edit the pattern it opened with. The
+  last pattern cannot be deleted — a project with none has nothing for the Piano
+  Roll to show and no obvious way back.
+
+
 ### Phase 10 — Mixer and routing — 2026-08-14
 
 **Added**

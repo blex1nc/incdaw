@@ -38,6 +38,10 @@ namespace incdaw::app     { class CommandRegistry; }
 /// Called when the user selects a different channel.
 @property (nonatomic, copy) void (^onChannelSelected)(void);
 
+/// Called when the user selects, adds or removes a pattern. The host reads
+/// `patternIdValue` for the new selection.
+@property (nonatomic, copy) void (^onPatternSelected)(void);
+
 /// Height the rack needs for a given number of channels, so the window can lay
 /// it out without duplicating the row arithmetic.
 + (double)heightForChannelCount:(std::size_t)count;

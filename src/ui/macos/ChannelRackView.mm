@@ -13,7 +13,11 @@ using namespace incdaw;
 namespace {
 
 constexpr double rowHeight     = 30.0;
-constexpr double headerHeight  = 22.0;
+constexpr double patternHeight = 24.0;
+constexpr double headerHeight  = 22.0 + patternHeight;
+
+/// Width of one pattern tab, in points.
+constexpr double patternTabWidth = 104.0;
 constexpr double nameWidth     = 168.0;
 constexpr double buttonSize    = 16.0;
 constexpr double stepSpacing   = 2.0;
@@ -80,6 +84,19 @@ void drawText(NSString* text, NSPoint origin, double size, NSColor* colour)
     return (available - stepSpacing * (maximumSteps - 1)) / maximumSteps;
 }
 
+- (NSRect)patternTabRect:(std::size_t)index
+{
+    return NSMakeRect(8.0 + static_cast<double>(index) * (patternTabWidth + 4.0),
+                      22.0 + 2.0, patternTabWidth, patternHeight - 5.0);
+}
+
+/// The tab past the last pattern adds one, the same way the row past the last
+/// channel adds a channel.
+- (NSRect)addPatternRect
+{
+    return [self patternTabRect:_project->patterns().size()];
+}
+
 - (NSRect)rowRect:(std::size_t)row
 {
     return NSMakeRect(0.0, headerHeight + static_cast<double>(row) * rowHeight,
@@ -123,6 +140,15 @@ void drawText(NSString* text, NSPoint origin, double size, NSColor* colour)
     return headerHeight + static_cast<double>(count + 1) * rowHeight;
 }
 
+- (void)selectPattern:(project::EntityId)pattern
+{
+    _patternIdValue = pattern.value();
+    [self setNeedsDisplay:YES];
+
+    if (self.onPatternSelected != nil)
+        self.onPatternSelected();
+}
+
 // ── Drawing ───────────────────────────────────────────────────────────────────
 
 - (void)drawRect:(NSRect)dirtyRect
@@ -147,12 +173,30 @@ void drawText(NSString* text, NSPoint origin, double size, NSColor* colour)
     const NSRect header = NSMakeRect(0.0, 0.0, self.bounds.size.width, headerHeight);
     fillRect(header, [NSColor colorWithCalibratedWhite:0.17 alpha:1.0]);
 
-    const project::Pattern* pattern = grid.pattern();
-    NSString* title = pattern != nullptr
-                          ? [NSString stringWithFormat:@"CHANNEL RACK · %s", pattern->name.c_str()]
-                          : @"CHANNEL RACK";
+    drawText(@"CHANNEL RACK", NSMakePoint(8.0, 5.0), 10.0,
+             [NSColor colorWithCalibratedWhite:0.55 alpha:1.0]);
 
-    drawText(title, NSMakePoint(8.0, 5.0), 10.0, [NSColor colorWithCalibratedWhite:0.55 alpha:1.0]);
+    // Pattern tabs. A pattern-based DAW that can only ever edit one pattern is
+    // a pattern editor, so this is not decoration.
+    const auto& patterns = _project->patterns();
+
+    for (std::size_t index = 0; index < patterns.size(); ++index) {
+        const NSRect rect     = [self patternTabRect:index];
+        const bool   selected = patterns[index].id.value() == _patternIdValue;
+
+        fillRect(rect, selected ? colourFromArgb(patterns[index].colour, 0.85)
+                                : [NSColor colorWithCalibratedWhite:0.20 alpha:1.0]);
+
+        drawText([NSString stringWithUTF8String:patterns[index].name.c_str()],
+                 NSMakePoint(rect.origin.x + 6.0, rect.origin.y + 4.0), 10.0,
+                 selected ? [NSColor colorWithCalibratedWhite:0.05 alpha:1.0]
+                          : [NSColor colorWithCalibratedWhite:0.70 alpha:1.0]);
+    }
+
+    const NSRect addRect = [self addPatternRect];
+    fillRect(addRect, [NSColor colorWithCalibratedWhite:0.16 alpha:1.0]);
+    drawText(@"+ pattern", NSMakePoint(addRect.origin.x + 6.0, addRect.origin.y + 4.0), 10.0,
+             [NSColor colorWithCalibratedWhite:0.42 alpha:1.0]);
 
     // Beat markers over the step columns, so the grid reads as bars rather than
     // sixteen identical boxes.
@@ -251,6 +295,12 @@ void drawText(NSString* text, NSPoint origin, double size, NSColor* colour)
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     const auto&   channels = _project->channels();
 
+    if (point.y < headerHeight) {
+        [self handlePatternClickAt:point
+                         duplicate:(event.modifierFlags & NSEventModifierFlagShift) != 0];
+        return;
+    }
+
     // The row past the last channel adds one.
     if (point.y >= headerHeight) {
         const auto row = static_cast<std::size_t>((point.y - headerHeight) / rowHeight);
@@ -294,11 +344,51 @@ void drawText(NSString* text, NSPoint origin, double size, NSColor* colour)
     [self toggleStepAt:point inRow:row channel:channel];
 }
 
+- (void)handlePatternClickAt:(NSPoint)point duplicate:(bool)duplicate
+{
+    const auto& patterns = _project->patterns();
+
+    for (std::size_t index = 0; index < patterns.size(); ++index) {
+        if (!NSPointInRect(point, [self patternTabRect:index]))
+            continue;
+
+        if (!duplicate) {
+            [self selectPattern:patterns[index].id];
+            return;
+        }
+
+        auto command = std::make_unique<app::DuplicatePatternCommand>(patterns[index].id);
+        app::DuplicatePatternCommand* pointer = command.get();
+
+        if (_registry->execute(std::move(command)))
+            [self selectPattern:pointer->createdPattern()];
+
+        return;
+    }
+
+    if (!NSPointInRect(point, [self addPatternRect]))
+        return;
+
+    const std::string name = "Pattern " + std::to_string(patterns.size() + 1);
+
+    auto command = std::make_unique<app::AddPatternCommand>(name);
+    app::AddPatternCommand* pointer = command.get();
+
+    if (_registry->execute(std::move(command)))
+        [self selectPattern:pointer->createdPattern()];
+}
+
 - (void)rightMouseDown:(NSEvent*)event
 {
     // Right-click on a step clears it; on a name, deletes the channel. Both go
     // through commands, so both are undoable.
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+
+    if (point.y < headerHeight) {
+        [self deletePatternAt:point];
+        return;
+    }
+
     const std::size_t row = [self rowAtPoint:point];
 
     if (row == static_cast<std::size_t>(-1))
@@ -314,6 +404,33 @@ void drawText(NSString* text, NSPoint origin, double size, NSColor* colour)
     }
 
     [self toggleStepAt:point inRow:row channel:channel];
+}
+
+- (void)deletePatternAt:(NSPoint)point
+{
+    const auto& patterns = _project->patterns();
+
+    // The last pattern stays. A project with no patterns has nothing for the
+    // Piano Roll to show and no obvious way back.
+    if (patterns.size() <= 1)
+        return;
+
+    for (std::size_t index = 0; index < patterns.size(); ++index) {
+        if (!NSPointInRect(point, [self patternTabRect:index]))
+            continue;
+
+        const project::EntityId doomed = patterns[index].id;
+
+        if (!_registry->execute(std::make_unique<app::DeletePatternCommand>(doomed)))
+            return;
+
+        if (_patternIdValue == doomed.value() && !_project->patterns().empty())
+            [self selectPattern:_project->patterns().front().id];
+        else
+            [self notifyChanged];
+
+        return;
+    }
 }
 
 - (void)toggleStepAt:(NSPoint)point inRow:(std::size_t)row channel:(project::EntityId)channel
