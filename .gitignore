@@ -29,3 +29,4 @@ compile_commands.json
 build-release/
 build-dmg-stage/
 third_party/
+dist/

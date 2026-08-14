@@ -12,17 +12,36 @@
 
 # ── platform/ : the ONLY layer permitted to contain OS-specific code ──────────
 add_library(incdaw_platform STATIC
-    platform/SystemInfo.cpp)
+    platform/SystemInfo.cpp
+    platform/macos/CoreAudioDevice.cpp)
 target_include_directories(incdaw_platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_platform PRIVATE incdaw_warnings)
 
+if(APPLE)
+    target_link_libraries(incdaw_platform PUBLIC
+        "-framework CoreAudio"
+        "-framework AudioToolbox"
+        "-framework CoreFoundation")
+endif()
+
 # ── engine/ : realtime core. Knows nothing above it, no OS symbols ────────────
 add_library(incdaw_engine STATIC
-    engine/core/Time.cpp)
+    engine/core/Time.cpp
+    engine/core/AudioBufferPool.cpp
+    engine/core/CallbackProfiler.cpp
+    engine/core/RealtimeGuard.cpp
+    engine/graph/RenderGraph.cpp
+    engine/dsp/SineOscillatorNode.cpp
+    engine/dsp/GainNode.cpp
+    engine/AudioEngine.cpp)
 target_include_directories(incdaw_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_engine
     PUBLIC  incdaw_platform
     PRIVATE incdaw_warnings)
+
+if(INCDAW_REALTIME_GUARD)
+    target_compile_definitions(incdaw_engine PUBLIC INCDAW_REALTIME_GUARD=1)
+endif()
 
 # ── plugins/ : plugin hosting (Phase 13) ──────────────────────────────────────
 add_library(incdaw_plugins STATIC

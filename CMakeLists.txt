@@ -46,6 +46,10 @@ file(WRITE "${CMAKE_BINARY_DIR}/VERSION" "${PROJECT_VERSION}")
 # ── Layers ────────────────────────────────────────────────────────────────────
 add_subdirectory(src)
 
+# ── Diagnostic tools ──────────────────────────────────────────────────────────
+add_executable(incdaw-audiocheck tools/audiocheck/main.cpp)
+target_link_libraries(incdaw-audiocheck PRIVATE incdaw_engine incdaw_warnings)
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 option(INCDAW_BUILD_TESTS "Build the test suite" ON)
 if(INCDAW_BUILD_TESTS)
