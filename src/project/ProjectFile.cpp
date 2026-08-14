@@ -87,6 +87,7 @@ Json toJson(const MidiEvent& event)
     json.set("pan", event.pan);
     json.set("fineTune", event.fineTune);
     json.set("label", event.label);
+    json.set("channelId", toJson(event.channelId));
     return json;
 }
 
@@ -104,6 +105,7 @@ MidiEvent midiEventFrom(const Json& json)
     event.pan          = json["pan"].asDouble(0.0);
     event.fineTune     = json["fineTune"].asDouble(0.0);
     event.label        = json["label"].asString();
+    event.channelId    = idFrom(json["channelId"]);   // absent in 1.0: resolves to the first channel
     return event;
 }
 
@@ -372,6 +374,18 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("name", pattern.name);
         json.set("colour", static_cast<std::int64_t>(pattern.colour));
         json.set("length", static_cast<std::int64_t>(pattern.length));
+        json.set("stepDivision", static_cast<std::int64_t>(pattern.stepDivision));
+        json.set("swing", pattern.swing);
+
+        Json channelSettings = Json::array();
+        for (const PatternChannelSettings& settings : pattern.channelSettings) {
+            Json entry = Json::object();
+            entry.set("channel", toJson(settings.channel));
+            entry.set("length", static_cast<std::int64_t>(settings.length));
+            entry.set("swing", settings.swing);
+            channelSettings.append(std::move(entry));
+        }
+        json.set("channelSettings", std::move(channelSettings));
 
         Json events = Json::array();
         for (const MidiEvent& event : pattern.events)
@@ -624,6 +638,16 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         pattern.name   = patternJson["name"].asString();
         pattern.colour = static_cast<std::uint32_t>(patternJson["colour"].asInt(0xFF808080));
         pattern.length = patternJson["length"].asInt(engine::ticksPerQuarterNote * 4);
+        pattern.stepDivision = patternJson["stepDivision"].asInt(engine::ticksPerQuarterNote / 4);
+        pattern.swing        = patternJson["swing"].asDouble(0.0);
+
+        for (const Json& settingJson : patternJson["channelSettings"].elements()) {
+            PatternChannelSettings channelSetting;
+            channelSetting.channel = idFrom(settingJson["channel"]);
+            channelSetting.length  = settingJson["length"].asInt(0);
+            channelSetting.swing   = settingJson["swing"].asDouble(-1.0);
+            pattern.channelSettings.push_back(channelSetting);
+        }
 
         for (const Json& event : patternJson["events"].elements())
             pattern.events.push_back(midiEventFrom(event));
@@ -655,6 +679,17 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     (void)document;
 
     Result result;
+
+    // 1.0 -> 1.1: notes gained a channel id, patterns gained a step division,
+    // a swing amount and per-channel settings. Nothing has to be rewritten:
+    // every reader in this file takes a default for an absent field, and the
+    // defaults are exactly what a 1.0 project meant. A note with no channel id
+    // plays on the project's first channel, which is where every note in a 1.0
+    // project already played.
+    if (major == 1 && minor == 0) {
+        result.succeeded = true;
+        return result;
+    }
 
     // Migrations form a chain (v1.0 -> v1.1 -> v2.0); there is deliberately no
     // direct path between distant versions to maintain. Version 1.0 is the

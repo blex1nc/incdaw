@@ -14,7 +14,7 @@ namespace incdaw::project {
 /// CLAUDE.md §2 is absolute: never create an unversioned project format. This
 /// is stamped into the very first file INCDAW ever saves.
 inline constexpr int projectFormatMajor = 1;
-inline constexpr int projectFormatMinor = 0;
+inline constexpr int projectFormatMinor = 1;   ///< 1.1 added channel-tagged notes, swing and step division
 
 [[nodiscard]] std::string projectFormatVersionString();
 

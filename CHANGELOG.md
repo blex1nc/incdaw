@@ -8,6 +8,56 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 8 — Pattern system — 2026-08-14
+
+**Added**
+
+- `project/GraphCompiler` — the single project → render-graph compiler. One
+  instrument node and one channel strip per channel, into a master gain, built
+  on a non-realtime thread and installed with one atomic swap (D-013).
+- `project/InstrumentFactory` — turns a channel's persisted plugin identifier
+  into an instrument. A format INCDAW cannot host yet renders silence and keeps
+  its place in the graph rather than being dropped from the project.
+- `engine/dsp/ChannelStripNode` — a channel's own volume, pan and mute, with a
+  constant-power pan law and smoothed gains. Not the mixer; Phase 10 sits
+  downstream of it.
+- Multi-channel patterns: a note carries the id of the channel that plays it
+  (D-012). One pattern holds a whole kit.
+- Polymetric patterns: a channel may loop at a shorter length than the pattern
+  it lives in, so a three-step figure drifts across a sixteen-step bar.
+- Swing, pattern-wide or per channel, applied when the pattern is compiled and
+  never written into the notes — so turning it off restores the exact timing.
+- Song mode: `compileArrangement` flattens the pattern clips on the timeline
+  into what each channel plays. Every placement of a pattern is compiled with
+  the same seed, so probability cannot make two placements differ.
+- `app/StepSequencerModel` — the step grid as a view over the pattern's notes,
+  not a second data model. It also reports the notes it *cannot* show.
+- `app/commands/PatternCommands` — add / duplicate / delete / rename pattern,
+  pattern and per-channel length, swing, add / delete / rename channel, channel
+  volume, pan, mute, solo, step toggle, and pattern clip placement. All
+  undoable; fader and length drags merge into one undo entry.
+- 22 tests covering the Phase 8 exit criterion, channel ownership, polymetry,
+  swing, step editing, command identity across undo/redo, and the compiled
+  graph.
+
+**Changed**
+
+- Project format 1.1: notes gained `channelId`; patterns gained `stepDivision`,
+  `swing` and `channelSettings`. Backward-compatible — a 1.0 package loads
+  through an empty migration and means exactly what it meant before.
+- `plugins::Format` gained `builtin`, for INCDAW's own instruments. A new
+  channel is created with the built-in synth, so it makes a sound immediately.
+- `compilePattern` gained a `bounded` option. A pattern's length is a loop
+  marker, not a guillotine; a clip's span is a boundary, and content is confined
+  to it.
+
+**Fixed**
+
+- `ChannelStripNode` commits its smoother state once per block rather than per
+  channel, so a buffer with more than two channels ramps identically in all of
+  them.
+
+
 ### Phase 0 — Research and architecture — 2026-08-14
 
 **Added**

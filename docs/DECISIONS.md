@@ -326,3 +326,78 @@ pipelines, this decision should be revisited — it would then require Xcode.
 
 **Date:** 2026-08-14
 **Status:** ACCEPTED
+
+
+---
+
+## D-012 — A note carries its channel; a pattern does not carry per-channel note lists
+
+**Context:** Phase 8 needs one pattern to hold the material for several channels
+at once — the property that makes a pattern clip play a whole kit rather than
+one instrument's part. The existing model stores a pattern's notes in one flat
+`std::vector<MidiEvent>`, and every editor and command in the project addresses
+a note by its index into that vector.
+
+**Options:**
+- Split `Pattern::events` into per-channel lanes, each with its own note vector
+- Tag each note with the id of the channel that plays it
+- Reuse the existing MIDI channel number (0–15) as the channel reference
+
+**Chosen:** Tag each note with an `EntityId channelId`; keep the flat vector.
+
+**Reason:** Lanes would have re-indexed every note in the project. Note commands,
+piano roll selection, hit testing, quantize and the undo stack all identify a
+note by its index, and that indexing is safe today only because the undo stack
+is LIFO. Introducing a second axis would have invalidated that argument
+everywhere at once, for no gain in what the model can express — a tag and a lane
+carry exactly the same information. Reusing the MIDI channel number was rejected
+outright: it is a wire-protocol field that a hosted plugin, a MIDI controller and
+an exported SMF all interpret, and overloading it would make routing and MPE
+support mutually exclusive later.
+
+The settings that genuinely differ per channel — a shorter loop length, which is
+what makes a pattern polymetric, and a per-channel swing — live in
+`Pattern::channelSettings`, which holds no note data at all.
+
+**Tradeoffs:** An untagged note is not an error, it is a note on the project's
+first channel; that rule is what lets every v1.0 project open unchanged, but it
+means "which channel is first" is load-bearing, and deleting the first channel
+changes what untagged notes mean. `DeleteChannelCommand` resolves the default
+before it deletes anything for exactly this reason. Filtering a pattern by
+channel is a linear scan; at pattern sizes this does not register, but a project
+with very large patterns and many channels would want an index.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-013 — The project-to-graph compiler lives in `project/`, and there is only one of them
+
+**Context:** Until Phase 8 the render graph was assembled by hand in `main.mm`
+from `patterns()[0]`. Everything after Phase 8 — playlist, mixer, automation,
+plugins — adds nodes to that graph, and the assembly cannot stay in the UI.
+
+**Options:**
+- Build the graph in `engine/`, from a description the project layer hands down
+- Build it in `project/`, reading the model directly
+- Let each UI surface build the part of the graph it owns
+
+**Chosen:** One function, `project::compileProjectGraph`, in `project/`.
+
+**Reason:** `engine/` sits below `project/` and must not know that a Pattern, a
+Channel or a Clip exists — that is the layering rule the build enforces. So the
+translation can only live above the engine. Making it *one* function is the part
+that matters: everything the audio thread will ever execute is decided in one
+place, on a non-realtime thread, and installed with a single atomic swap. A
+graph assembled from several places would have no single point at which it is
+known to be complete and consistent.
+
+**Tradeoffs:** Every edit rebuilds the whole graph. At human editing speed this
+costs microseconds and buys the guarantee that the audio thread never sees a
+partially updated graph. If a project ever grows large enough for a full rebuild
+to be measurable, the fix is incremental compilation *inside* this function, not
+a second place that builds graphs.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED

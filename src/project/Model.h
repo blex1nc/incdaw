@@ -50,6 +50,17 @@ struct MidiEvent {
     double        fineTune     = 0.0; ///< semitones
     std::string   label;              ///< user-visible note name
 
+    /// Which Channel sounds this note.
+    ///
+    /// A pattern holds the note data for *several* channels at once — that is
+    /// what makes one pattern a musical idea rather than a single instrument's
+    /// part, and it is why a pattern clip on the timeline plays a whole drum
+    /// kit. An invalid id means "the project's first channel", which is what
+    /// every note written before channels existed resolves to.
+    ///
+    /// Distinct from `channel` above, which is the MIDI channel number.
+    EntityId      channelId;
+
     [[nodiscard]] friend bool operator==(const MidiEvent&, const MidiEvent&) = default;
 };
 
@@ -87,6 +98,22 @@ struct AutomationLane {
 
 // ── Patterns ──────────────────────────────────────────────────────────────────
 
+/// Per-channel overrides inside one pattern.
+///
+/// Note data is NOT stored here — it stays in `Pattern::events`, tagged with a
+/// channel id. Splitting the notes into per-channel containers would mean two
+/// places to keep in step and would break every editor that addresses a note by
+/// its index in the pattern. This carries only the settings that genuinely
+/// differ per channel: a shorter loop length (polymetric patterns) and a
+/// per-channel swing.
+struct PatternChannelSettings {
+    EntityId channel;
+    Tick     length = 0;    ///< 0 = follow the pattern's own length
+    double   swing  = -1.0; ///< < 0 = follow the pattern's own swing
+
+    [[nodiscard]] friend bool operator==(const PatternChannelSettings&, const PatternChannelSettings&) = default;
+};
+
 /// Reusable, independently editable musical content.
 ///
 /// A pattern placed several times in the arrangement is the *same* pattern:
@@ -98,8 +125,29 @@ struct Pattern {
     std::string            name;
     std::uint32_t          colour = 0xFF808080u;
     Tick                   length = engine::ticksPerQuarterNote * 4;
+
+    /// Step-sequencer grid. One step is this many ticks; the default is a
+    /// sixteenth note, the division every step sequencer opens on.
+    Tick                   stepDivision = engine::ticksPerQuarterNote / 4;
+
+    /// Shuffle applied to off-grid steps, 0..1. 0 is straight; 1 delays every
+    /// second step by half a step. Applied when the pattern is compiled, not
+    /// stored into the notes, so that turning it off restores the original
+    /// timing exactly.
+    double                 swing = 0.0;
+
     std::vector<MidiEvent> events;
+    std::vector<PatternChannelSettings> channelSettings;
     std::vector<EntityId>  automationLanes;
+
+    /// Settings for one channel inside this pattern, or nullptr if it uses the
+    /// pattern's own length and swing.
+    [[nodiscard]] const PatternChannelSettings* settingsFor(EntityId channel) const noexcept;
+
+    /// The length this channel repeats at. Equal to `length` unless the channel
+    /// carries a shorter one — which is what makes a pattern polymetric.
+    [[nodiscard]] Tick lengthFor(EntityId channel) const noexcept;
+    [[nodiscard]] double swingFor(EntityId channel) const noexcept;
 
     [[nodiscard]] friend bool operator==(const Pattern&, const Pattern&) = default;
 };
@@ -301,6 +349,19 @@ public:
     [[nodiscard]] const Track*     findTrack(EntityId id) const noexcept;
     [[nodiscard]] const Pattern*   findPattern(EntityId id) const noexcept;
     [[nodiscard]] const MixerNode* findMixerNode(EntityId id) const noexcept;
+    [[nodiscard]] const Channel*   findChannel(EntityId id) const noexcept;
+    [[nodiscard]] const Clip*      findClip(EntityId id) const noexcept;
+
+    [[nodiscard]] Pattern* findPatternForEdit(EntityId id) noexcept;
+    [[nodiscard]] Channel* findChannelForEdit(EntityId id) noexcept;
+
+    /// The channel a note with no channel of its own belongs to: the first one
+    /// in the project, or invalid when the project has no channels yet.
+    [[nodiscard]] EntityId defaultChannel() const noexcept;
+
+    /// True when at least one channel is soloed, in which case the unsoloed
+    /// ones are silent regardless of their own mute state.
+    [[nodiscard]] bool anyChannelSoloed() const noexcept;
 
     /// Assets whose file cannot be found. A project with missing media still
     /// opens (docs/PROJECT_FORMAT.md §4); this is what the relink dialog lists.

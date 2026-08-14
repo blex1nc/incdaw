@@ -38,6 +38,7 @@ add_library(incdaw_engine STATIC
     engine/transport/Transport.cpp
     engine/dsp/SineOscillatorNode.cpp
     engine/dsp/GainNode.cpp
+    engine/dsp/ChannelStripNode.cpp
     engine/dsp/MetronomeNode.cpp
     engine/midi/MidiInput.cpp
     engine/midi/MidiRecorder.cpp
@@ -70,10 +71,12 @@ add_library(incdaw_project STATIC
     project/Model.cpp
     project/ProjectFile.cpp
     project/MidiCapture.cpp
-    project/PatternCompiler.cpp)
+    project/PatternCompiler.cpp
+    project/InstrumentFactory.cpp
+    project/GraphCompiler.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_project
-    PUBLIC  incdaw_engine
+    PUBLIC  incdaw_engine incdaw_plugins
     PRIVATE incdaw_warnings)
 
 # ── app/ : command registry, undo, session ────────────────────────────────────
@@ -81,7 +84,9 @@ add_library(incdaw_app STATIC
     app/Version.cpp
     app/CommandRegistry.cpp
     app/PianoRollModel.cpp
-    app/commands/NoteCommands.cpp)
+    app/StepSequencerModel.cpp
+    app/commands/NoteCommands.cpp
+    app/commands/PatternCommands.cpp)
 target_include_directories(incdaw_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_app
     PUBLIC  incdaw_project

@@ -3,7 +3,7 @@
 Status: **Phase 0 — design only. Not implemented.**
 Target: Phase 4.
 
-    INCDAW_PROJECT_VERSION = 1.0
+    INCDAW_PROJECT_VERSION = 1.1
 
 CLAUDE.md §2 is absolute: **never create an unversioned project format.** The
 version is written from the very first project file INCDAW ever saves.
@@ -169,3 +169,34 @@ makes the project format usable with version control.
 5. **Corruption:** truncated and malformed files are rejected cleanly, never
    crash, never silently lose data.
 6. **Fuzz:** randomly corrupted project files must not crash the loader.
+
+
+---
+
+## Version history
+
+### v1.0 — Phase 4
+
+The first format. Package layout, manifest, `project.json`, one file per
+pattern, deterministic JSON encoding.
+
+### v1.1 — Phase 8
+
+Additive and backward-compatible; a 1.0 package loads and is upgraded in place
+on save.
+
+| Added | Where | Meaning when absent (i.e. in a 1.0 file) |
+|---|---|---|
+| `channelId` | note event | the project's first channel |
+| `stepDivision` | pattern | a sixteenth note (240 ticks) |
+| `swing` | pattern | 0.0, straight timing |
+| `channelSettings` | pattern | no per-channel overrides |
+
+The `1.0 → 1.1` migration rewrites nothing. Every reader in `ProjectFile.cpp`
+takes a default for an absent field, and the defaults above are exactly what a
+1.0 project meant. The migration hook still runs and still records
+`migratedFrom`, because a migration that happens to be empty and a migration
+that does not exist must not look the same to the loader.
+
+Fixtures: `tests/fixtures/v1.0/` and `tests/fixtures/v1.1/`. Both are
+hand-written and both must load forever.

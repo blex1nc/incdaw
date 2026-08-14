@@ -78,11 +78,11 @@ Project makePopulatedProject()
     auto& pattern = project.addPattern("Verse");
     pattern.length = engine::ticksPerQuarterNote * 8;
     pattern.events.push_back(MidiEvent{MidiEventType::note, 0, 480, 0, 60, 100, 64,
-                                       0.85, -0.2, 0.05, "root"});
+                                       0.85, -0.2, 0.05, "root", EntityId{}});
     pattern.events.push_back(MidiEvent{MidiEventType::note, 480, 240, 0, 64, 90, 64,
-                                       1.0, 0.0, 0.0, "third"});
+                                       1.0, 0.0, 0.0, "third", EntityId{}});
     pattern.events.push_back(MidiEvent{MidiEventType::controlChange, 960, 0, 0, 74, 42, 0,
-                                       1.0, 0.0, 0.0, ""});
+                                       1.0, 0.0, 0.0, "", EntityId{}});
 
     auto& clip = project.addClip(ClipType::pattern, track.id, pattern.id);
     clip.start  = 96000;
@@ -264,7 +264,7 @@ TEST_CASE("the format version is stamped from the very first save")
     REQUIRE(ProjectFile::save(project, packagePath));
 
     CHECK(ProjectFile::isProjectPackage(packagePath));
-    CHECK(ProjectFile::versionOf(packagePath) == "1.0");
+    CHECK(ProjectFile::versionOf(packagePath) == "1.1");
     CHECK(fs::exists(packagePath / "manifest.json"));
     CHECK(fs::exists(packagePath / "project.json"));
     CHECK(fs::is_directory(packagePath / "patterns"));
@@ -525,7 +525,8 @@ TEST_CASE("the v1.0 fixture still loads")
     const auto result = ProjectFile::load(project, fixture);
 
     REQUIRE(result.succeeded);
-    CHECK_FALSE(result.migrated);   // 1.0 is the current version
+    CHECK(result.migrated);                  // 1.0 is no longer the current version
+    CHECK(result.migratedFrom == "1.0");
 
     CHECK(project.metadata().title == "Format v1.0 fixture");
 
@@ -548,6 +549,15 @@ TEST_CASE("the v1.0 fixture still loads")
     CHECK(pattern->events[0].label == "root");
     CHECK(pattern->events[0].probability == doctest::Approx(0.85));
 
+    // 1.0 knew nothing about per-note channels, per-channel settings or swing.
+    // The defaults must mean what a 1.0 project meant: every note on the first
+    // channel, straight timing, a sixteenth-note step grid.
+    CHECK_FALSE(pattern->events[0].channelId.isValid());
+    CHECK(pattern->lengthFor(project.defaultChannel()) == pattern->length);
+    CHECK(pattern->swingFor(project.defaultChannel()) == doctest::Approx(0.0));
+    CHECK(pattern->stepDivision == engine::ticksPerQuarterNote / 4);
+    CHECK(pattern->channelSettings.empty());
+
     CHECK(project.clips()[0].gain == doctest::Approx(0.707));
     CHECK(project.clips()[0].normalize);
 
@@ -557,6 +567,34 @@ TEST_CASE("the v1.0 fixture still loads")
 
     REQUIRE(project.mixerNodes()[1].inserts.size() == 1);
     CHECK(project.mixerNodes()[1].inserts[0].plugin.uid == "com.acme.compressor");
+}
+
+TEST_CASE("the v1.1 fixture still loads")
+{
+    const fs::path fixture = fs::path{INCDAW_FIXTURE_DIR} / "v1.1" / "Fixture.incdaw";
+    REQUIRE(fs::exists(fixture));
+
+    Project project;
+    const auto result = ProjectFile::load(project, fixture);
+
+    REQUIRE(result.succeeded);
+    CHECK_FALSE(result.migrated);   // 1.1 is the current version
+
+    CHECK(project.metadata().title == "Format v1.1 fixture");
+
+    const Pattern* pattern = project.findPattern(EntityId{6});
+    REQUIRE(pattern != nullptr);
+    REQUIRE(pattern->events.size() == 2);
+
+    CHECK(pattern->stepDivision == 240);
+    CHECK(pattern->swing == doctest::Approx(0.32));
+
+    REQUIRE(project.channels().size() == 1);
+    const EntityId channel = project.channels()[0].id;
+
+    CHECK(pattern->events[0].channelId == channel);
+    CHECK(pattern->lengthFor(channel) == 1920);          // polymetric: shorter than the pattern
+    CHECK(pattern->swingFor(channel) == doctest::Approx(0.5));
 }
 
 TEST_CASE("a fixture re-saved by this build still round-trips")

@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "title": "Format v1.1 fixture",
+    "artist": "INCDAW",
+    "comment": "Hand-written. Must load forever."
+  },
+  "tempo": {
+    "events": [
+      { "tick": 0, "bpm": 128 },
+      { "tick": 15360, "bpm": 92.5 }
+    ],
+    "timeSignatures": [
+      { "tick": 0, "numerator": 4, "denominator": 4 },
+      { "tick": 15360, "numerator": 7, "denominator": 8 }
+    ]
+  },
+  "masterMixerNode": 1,
+  "nextEntityId": 20,
+  "mixerNodes": [
+    {
+      "id": 1, "type": 2, "name": "Master", "colour": 4278255360,
+      "volume": 1, "pan": 0, "muted": false, "soloed": false,
+      "polarityFlip": false, "inserts": []
+    },
+    {
+      "id": 2, "type": 1, "name": "Drum Bus", "colour": 4282253619,
+      "volume": 0.8, "pan": -0.25, "muted": false, "soloed": false,
+      "polarityFlip": false,
+      "inserts": [
+        { "id": 3, "plugin": "clap:com.acme.compressor", "bypassed": false, "stateFile": "3.state" }
+      ]
+    }
+  ],
+  "tracks": [
+    {
+      "id": 4, "type": 0, "name": "Lead", "colour": 4289343812,
+      "parent": 0, "outputMixerNode": 2, "muted": false, "soloed": false, "height": 64
+    }
+  ],
+  "channels": [
+    {
+      "id": 5, "name": "Sampler", "colour": 4286611584, "outputMixerNode": 1,
+      "volume": 0.6, "pan": 0, "muted": false, "soloed": false,
+      "instrument": "au:aumu:samp:appl", "instrumentStateFile": "sampler.state"
+    }
+  ],
+  "clips": [
+    {
+      "id": 7, "type": 1, "track": 4, "source": 6,
+      "start": 96000, "length": 192000, "sourceOffset": 0,
+      "gain": 0.707, "pan": 0.33, "normalize": true, "reversed": false,
+      "muted": false, "locked": false, "fadeInFrames": 512, "fadeOutFrames": 0,
+      "pitchSemitones": -2.5, "stretchRatio": 1, "name": "Verse A", "colour": 4285164236
+    }
+  ],
+  "automation": [
+    {
+      "id": 8, "targetEntity": 2, "parameterKey": "volume",
+      "points": [
+        { "tick": 0, "value": 0, "curve": 0, "tension": 0 },
+        { "tick": 960, "value": 1, "curve": 2, "tension": 0.4 }
+      ]
+    }
+  ],
+  "audioAssets": [
+    {
+      "id": 9, "relativePath": "", "absolutePath": "/definitely/not/here.wav",
+      "contentHash": "deadbeef", "embedded": false,
+      "sampleRate": 44100, "frameCount": 123456, "channelCount": 2
+    }
+  ],
+  "routing": [
+    { "id": 10, "source": 2, "destination": 1, "gain": 0.25, "isSend": true, "preFader": true, "sidechain": false }
+  ],
+  "patterns": [
+    { "id": 6, "file": "6.pat" }
+  ]
+}

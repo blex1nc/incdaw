@@ -10,10 +10,14 @@ namespace incdaw::plugins {
 /// there is no lawful route for a new closed-source product to support it. See
 /// docs/DECISIONS.md D-007.
 enum class Format {
+    builtin,    ///< INCDAW's own instruments and effects — not hosted, not scanned
     clap,       ///< implemented first — cleanest ABI, MIT licensed
     audioUnit,  ///< native to macOS
     vst3,       ///< widest availability; SDK 3.8.x is MIT licensed
 };
+
+/// The built-in polyphonic synth every new channel starts with.
+inline constexpr const char* builtinSynthUid = "incdaw.synth";
 
 [[nodiscard]] const char* formatName(Format format) noexcept;
 
@@ -28,7 +32,7 @@ enum class Format {
 /// project file stores, so that a moved plugin is still found and a replaced
 /// one is still recognised.
 struct PluginIdentifier {
-    Format      format = Format::clap;
+    Format      format = Format::builtin;
     std::string uid;    ///< format-native unique id (CLAP id, AU subtype/manu, VST3 CID)
 
     [[nodiscard]] bool isValid() const noexcept { return !uid.empty(); }

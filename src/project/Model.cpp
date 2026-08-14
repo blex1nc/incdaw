@@ -1,6 +1,7 @@
 #include "project/Model.h"
 
 #include <filesystem>
+#include <utility>
 
 namespace incdaw::project {
 
@@ -33,6 +34,12 @@ Channel& Project::addChannel(std::string name)
     channel.id   = ids_.next();
     channel.name = std::move(name);
     channel.outputMixerNode = master_;
+
+    // A new channel makes a sound immediately. A channel that is silent until
+    // an instrument is chosen is a channel the user has to debug before they
+    // can hear anything, and every step sequencer in existence gives you a
+    // sound the moment you add a row.
+    channel.instrument = {plugins::Format::builtin, plugins::builtinSynthUid};
 
     channels_.push_back(std::move(channel));
     return channels_.back();
@@ -128,6 +135,76 @@ const MixerNode* Project::findMixerNode(EntityId id) const noexcept
             return &node;
 
     return nullptr;
+}
+
+const Channel* Project::findChannel(EntityId id) const noexcept
+{
+    for (const Channel& channel : channels_)
+        if (channel.id == id)
+            return &channel;
+
+    return nullptr;
+}
+
+const Clip* Project::findClip(EntityId id) const noexcept
+{
+    for (const Clip& clip : clips_)
+        if (clip.id == id)
+            return &clip;
+
+    return nullptr;
+}
+
+Pattern* Project::findPatternForEdit(EntityId id) noexcept
+{
+    return const_cast<Pattern*>(std::as_const(*this).findPattern(id));
+}
+
+Channel* Project::findChannelForEdit(EntityId id) noexcept
+{
+    return const_cast<Channel*>(std::as_const(*this).findChannel(id));
+}
+
+EntityId Project::defaultChannel() const noexcept
+{
+    return channels_.empty() ? EntityId{} : channels_.front().id;
+}
+
+bool Project::anyChannelSoloed() const noexcept
+{
+    for (const Channel& channel : channels_)
+        if (channel.soloed)
+            return true;
+
+    return false;
+}
+
+const PatternChannelSettings* Pattern::settingsFor(EntityId channel) const noexcept
+{
+    for (const PatternChannelSettings& settings : channelSettings)
+        if (settings.channel == channel)
+            return &settings;
+
+    return nullptr;
+}
+
+Tick Pattern::lengthFor(EntityId channel) const noexcept
+{
+    const PatternChannelSettings* settings = settingsFor(channel);
+
+    // A per-channel length longer than the pattern is ignored rather than
+    // honoured: the pattern's length is what the arrangement places, so a
+    // channel that ran past it would be cut off mid-note at every placement.
+    if (settings != nullptr && settings->length > 0 && settings->length < length)
+        return settings->length;
+
+    return length;
+}
+
+double Pattern::swingFor(EntityId channel) const noexcept
+{
+    const PatternChannelSettings* settings = settingsFor(channel);
+    return (settings != nullptr && settings->swing >= 0.0) ? settings->swing : swing;
 }
 
 std::vector<EntityId> Project::missingAssets() const

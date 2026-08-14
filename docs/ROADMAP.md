@@ -120,6 +120,11 @@ length, polymetric lengths.
 **Exit criterion:** one pattern placed multiple times in the arrangement plays
 identically at each placement; editing it updates all placements.
 
+**Status: MET (2026-08-14).** `tests/unit/PatternTests.cpp`, "one pattern placed
+twice plays identically at both placements". Velocity, probability, swing,
+pattern length and polymetric per-channel lengths are implemented and tested;
+per-step parameters beyond velocity and probability are not.
+
 ---
 
 ## Phase 9 — Playlist / arrangement
