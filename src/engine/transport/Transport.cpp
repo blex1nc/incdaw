@@ -33,6 +33,11 @@ void Transport::seek(FramePosition frame) noexcept
 {
     seekTarget_.store(frame < 0 ? 0 : frame, std::memory_order_relaxed);
     seekRequested_.store(true, std::memory_order_release);
+
+    // Counted so that loop-record placement can tell "the timeline moved
+    // because the loop wrapped" (arithmetic can reconstruct that) from "the
+    // user jumped somewhere" (it cannot). Wraps do not come through here.
+    seekCount_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Transport::setLoopRange(FramePosition start, FramePosition end) noexcept

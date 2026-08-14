@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  355 test cases, 146,709 assertions, green in both Debug and Release.
+  362 test cases, 146,764 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -1126,18 +1126,17 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step (phases 0-11 COMPLETE; Phase 12 tail shrinking — input monitoring
-is DONE: engine monitor ring, InputMonitorNode with a drift cap, Audio menu
-toggle):
+Next step (phases 0-11 COMPLETE; Phase 12 tail nearly done — input
+monitoring AND loop/punch recording are DONE: stacked takes per pass with
+comping-ready muting, punch as a placement decision, a transport seek
+counter guarding the wrap arithmetic):
 
-    - loop/punch recording: per-segment anchoring (D-024 records why the
-      current linear map cannot survive a seek or wrap mid-take); latch-mode
-      automation overdub rides the same work (D-026)
     - the pre-record buffer / Audio Logger (a capture-side ring that is
       always running; the recorder's machinery already fits it)
     - editor polish: markers, regions, cut/copy/paste between files
     - deferred small items: normalize on STREAMED clips (cached peak),
-      automation point-editing surface, touch/latch modes
+      automation point-editing surface, touch/latch modes, latch-mode
+      loop-aware automation overdub (D-026)
 
   Or start Phase 13 (plugin hosting, CLAP first per D-007) — the plugin
   host is the long pole for the whole product and everything it needs from

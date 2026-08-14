@@ -278,9 +278,14 @@ output clock domains; `InputMonitorNode` drains it into the master with a
 drift cap and underrun-as-silence. Toggled from the Audio menu; the input
 opens on demand, exactly like record arming.
 
-Outstanding within this phase: loop/punch recording (per-segment
-anchoring), the pre-record buffer / Audio Logger, and editor polish
-(markers, regions, cut/copy/paste).
+Part 7: loop and punch recording. The capture is one continuous file;
+placement cuts it per loop pass (stacked takes, newest audible) with the
+fold resolved against the arm-time playhead, guarded by a transport seek
+counter — any mid-take interference falls back to straight placement.
+Punch trims placements, never the capture.
+
+Outstanding within this phase: the pre-record buffer / Audio Logger, and
+editor polish (markers, regions, cut/copy/paste).
 
 ---
 

@@ -21,6 +21,17 @@ namespace incdaw::project {
 /// model directly would be the one mutation path that bypassed undo.
 class RecordingSession {
 public:
+    /// One placed piece of the take: a range of the FILE at a timeline
+    /// position. A straight take is one slice; a loop-recorded take is one
+    /// per pass over the loop, every pass but the last muted — stacked
+    /// takes, ready for comping rather than playing all at once.
+    struct Slice {
+        engine::FramePosition startFrame   = 0;
+        engine::FrameCount    sourceOffset = 0;
+        engine::FrameCount    length       = 0;
+        bool                  muted        = false;
+    };
+
     struct Placement {
         bool        succeeded = false;
         std::string error;
@@ -37,14 +48,52 @@ public:
         /// stopped transport.
         bool placedAgainstPlayback = false;
 
+        /// The take cut against the loop (and punch range) it was recorded
+        /// under. Meaningful only when `sliced`; empty-with-sliced means the
+        /// punch window excluded the whole take and nothing lands.
+        bool               sliced = false;
+        std::vector<Slice> slices;
+
         explicit operator bool() const noexcept { return succeeded; }
     };
+
+    /// Everything the slicing arithmetic needs, gathered at arm and finish.
+    /// Separated out so the algorithm is a pure function tests can hammer
+    /// without a device or an engine anywhere in sight.
+    struct TakeGeometry {
+        engine::FrameCount    takeFrames  = 0;
+        engine::FramePosition takeStart   = 0;   ///< timeline frame of the take's first frame, unfolded
+        engine::FramePosition loopStart   = 0;
+        engine::FramePosition loopEnd     = 0;
+        bool                  loopEnabled = false;
+
+        /// Punch window; equal values disable punching.
+        engine::FramePosition punchIn  = 0;
+        engine::FramePosition punchOut = 0;
+    };
+
+    /// Cuts a take into placed slices: at every loop wrap the file continues
+    /// but the timeline snaps back, so each pass becomes its own slice; the
+    /// punch window then trims every slice (adjusting its source offset), and
+    /// every slice but the last audible one is muted.
+    [[nodiscard]] static std::vector<Slice> computeSlices(const TakeGeometry& geometry);
 
     /// Starts capturing into a fresh take file inside `directory` (created if
     /// missing) and installs the recorder as the engine's capture sink.
     /// Fails when the engine has no input channels open.
+    ///
+    /// The loop state, seek counter and playhead are sampled here: if the
+    /// loop range survives the whole take untouched and no explicit seek
+    /// happens, a wrapped take is sliced per pass; any interference falls
+    /// back to the straight single-clip placement.
     [[nodiscard]] bool arm(engine::AudioEngine& audioEngine,
                            const std::filesystem::path& directory, std::string& error);
+
+    /// Punch: when armed, only audio inside the loop range (as it stands at
+    /// arm time) lands in the timeline. The capture itself is continuous —
+    /// punching is a placement decision, not a capture gate.
+    void setPunchToLoop(bool enabled) noexcept { punchToLoop_ = enabled; }
+    [[nodiscard]] bool punchToLoop() const noexcept { return punchToLoop_; }
 
     /// Stops, drains to disk, and computes where the take belongs.
     ///
@@ -63,6 +112,15 @@ public:
 
 private:
     engine::AudioRecorder recorder_;
+
+    bool                  punchToLoop_ = false;
+
+    // Sampled at arm, checked at finish.
+    engine::FramePosition armLoopStart_   = 0;
+    engine::FramePosition armLoopEnd_     = 0;
+    bool                  armLoopEnabled_ = false;
+    engine::FramePosition armPosition_    = 0;
+    std::uint32_t         armSeekCount_   = 0;
 };
 
 } // namespace incdaw::project

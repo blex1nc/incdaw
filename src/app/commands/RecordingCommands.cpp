@@ -8,6 +8,11 @@ bool InsertRecordedTakeCommand::execute(Project& project)
         if (!placement_.succeeded || placement_.frameCount <= 0)
             return false;
 
+        // A sliced take whose punch window excluded everything lands nothing
+        // — the file stays on disk, but the arrangement is left alone.
+        if (placement_.sliced && placement_.slices.empty())
+            return false;
+
         // The first audio track takes recordings; without one, one appears.
         project::Track* target = nullptr;
         for (project::Track& track : project.tracks())
@@ -27,17 +32,35 @@ bool InsertRecordedTakeCommand::execute(Project& project)
         asset.frameCount   = placement_.frameCount;
         asset.channelCount = placement_.channelCount;
 
-        project::Clip& clip = project.addClip(project::ClipType::audio, target->id, asset.id);
-        clip.start  = placement_.startFrame;
-        clip.length = placement_.frameCount;
-        clip.name   = placement_.path.stem().string();
-        clip.colour = 0xFFCC7755u;   // recordings read as a family in the playlist
-
         asset_      = asset;
-        clip_       = clip;
         assetIndex_ = project.audioAssets().size() - 1;
-        clipIndex_  = project.clips().size() - 1;
-        minted_     = true;
+
+        // A straight take is one slice covering the whole file; a
+        // loop-recorded one is one per pass, earlier passes muted.
+        std::vector<project::RecordingSession::Slice> slices = placement_.slices;
+        if (slices.empty())
+            slices.push_back({placement_.startFrame, 0, placement_.frameCount, false});
+
+        const std::string stem = placement_.path.stem().string();
+
+        for (std::size_t index = 0; index < slices.size(); ++index) {
+            const auto& slice = slices[index];
+
+            project::Clip& clip = project.addClip(project::ClipType::audio,
+                                                  target->id, asset_.id);
+            clip.start        = slice.startFrame;
+            clip.length       = slice.length;
+            clip.sourceOffset = slice.sourceOffset;
+            clip.muted        = slice.muted;
+            clip.name         = slices.size() > 1
+                                    ? stem + " #" + std::to_string(index + 1) : stem;
+            clip.colour       = 0xFFCC7755u;   // recordings read as a family
+
+            clips_.push_back(clip);
+            clipIndices_.push_back(project.clips().size() - 1);
+        }
+
+        minted_ = true;
         return true;
     }
 
@@ -47,13 +70,18 @@ bool InsertRecordedTakeCommand::execute(Project& project)
         project.insertTrack(trackIndex_, track_);
 
     project.insertAudioAsset(assetIndex_, asset_);
-    project.insertClip(clipIndex_, clip_);
+
+    for (std::size_t index = 0; index < clips_.size(); ++index)
+        project.insertClip(clipIndices_[index], clips_[index]);
+
     return true;
 }
 
 void InsertRecordedTakeCommand::undo(Project& project)
 {
-    (void)project.removeClip(clip_.id);
+    for (auto clip = clips_.rbegin(); clip != clips_.rend(); ++clip)
+        (void)project.removeClip(clip->id);
+
     (void)project.removeAudioAsset(asset_.id);
 
     if (trackCreated_)

@@ -83,6 +83,11 @@ public:
     [[nodiscard]] bool           isPlaying() const noexcept { return state() != TransportState::stopped; }
 
     [[nodiscard]] FramePosition position() const noexcept { return position_.load(std::memory_order_acquire); }
+
+    /// How many explicit seeks have been requested. Loop wraps are not
+    /// seeks; this is what lets a recording session prove the timeline
+    /// stayed arithmetically reconstructable for the whole take.
+    [[nodiscard]] std::uint32_t seekCount() const noexcept { return seekCount_.load(std::memory_order_relaxed); }
     [[nodiscard]] Tick          positionInTicks() const noexcept { return tempoMap_.tickForFrame(position()); }
     [[nodiscard]] MusicalPosition musicalPosition() const noexcept
     {
@@ -110,6 +115,7 @@ private:
 
     std::atomic<TransportState> state_{TransportState::stopped};
     std::atomic<FramePosition>  position_{0};
+    std::atomic<std::uint32_t>  seekCount_{0};
 
     std::atomic<bool>          seekRequested_{false};
     std::atomic<FramePosition> seekTarget_{0};

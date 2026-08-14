@@ -1,6 +1,8 @@
 #include "project/RecordingSession.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <system_error>
 
 namespace incdaw::project {
@@ -30,6 +32,66 @@ std::filesystem::path takePath(const std::filesystem::path& directory)
 }
 
 } // namespace
+
+std::vector<RecordingSession::Slice> RecordingSession::computeSlices(const TakeGeometry& geometry)
+{
+    std::vector<Slice> slices;
+
+    if (geometry.takeFrames <= 0)
+        return slices;
+
+    const engine::FrameCount loopFrames = geometry.loopEnd - geometry.loopStart;
+
+    if (!geometry.loopEnabled || loopFrames <= 0 || geometry.takeStart >= geometry.loopEnd) {
+        // No loop in play: the whole take is one straight slice.
+        slices.push_back({geometry.takeStart, 0, geometry.takeFrames, false});
+    } else {
+        // Walk the file against the timeline: play runs to the loop end, the
+        // file keeps going, the timeline snaps back. Works unchanged for a
+        // take armed before the loop — the first slice is simply longer.
+        engine::FramePosition position = geometry.takeStart;
+        engine::FrameCount    consumed = 0;
+
+        while (consumed < geometry.takeFrames) {
+            const engine::FrameCount room  = geometry.loopEnd - position;
+            const engine::FrameCount chunk = room < geometry.takeFrames - consumed
+                                                 ? room : geometry.takeFrames - consumed;
+
+            slices.push_back({position, consumed, chunk, false});
+            consumed += chunk;
+            position = geometry.loopStart;
+        }
+    }
+
+    // Punch is a placement decision over a continuous capture: trim every
+    // slice to the window, keeping the file offset honest.
+    if (geometry.punchOut > geometry.punchIn) {
+        std::vector<Slice> punched;
+
+        for (Slice slice : slices) {
+            const engine::FramePosition from = std::max(slice.startFrame, geometry.punchIn);
+            const engine::FramePosition to =
+                std::min(slice.startFrame + slice.length, geometry.punchOut);
+
+            if (from >= to)
+                continue;
+
+            slice.sourceOffset += from - slice.startFrame;
+            slice.length        = to - from;
+            slice.startFrame    = from;
+            punched.push_back(slice);
+        }
+
+        slices = std::move(punched);
+    }
+
+    // Stacked takes: every pass but the newest is muted, so the stack is
+    // ready for comping instead of playing all at once.
+    for (std::size_t index = 0; index + 1 < slices.size(); ++index)
+        slices[index].muted = true;
+
+    return slices;
+}
 
 bool RecordingSession::arm(engine::AudioEngine& audioEngine,
                            const std::filesystem::path& directory, std::string& error)
@@ -61,6 +123,16 @@ bool RecordingSession::arm(engine::AudioEngine& audioEngine,
         error = started.error;
         return false;
     }
+
+    // The loop-record contract is sampled here and re-checked at finish: if
+    // any of it changed mid-take, the wrap arithmetic is void and placement
+    // falls back to one straight clip.
+    const auto& transport = audioEngine.transport();
+    armLoopStart_   = transport.loopStart();
+    armLoopEnd_     = transport.loopEnd();
+    armLoopEnabled_ = transport.isLoopEnabled();
+    armPosition_    = transport.position();
+    armSeekCount_   = transport.seekCount();
 
     audioEngine.setCaptureSink(&recorder_);
     return true;
@@ -101,6 +173,45 @@ RecordingSession::Placement RecordingSession::finish(engine::AudioEngine& audioE
         // take's start is a host time with input latency already subtracted.
         placement.startFrame            = anchor.frameAt(take.startHostTimeNanos);
         placement.placedAgainstPlayback = true;
+
+        // Loop recording: the linear map above FOLDS a wrapped take (the
+        // anchor frame is inside the loop; subtracting a long take walks out
+        // of it). Unfold by choosing the loop pass that puts the take's
+        // start where the playhead actually was at arm time, then slice per
+        // pass. Engaged only when the contract sampled at arm held.
+        const auto& transport   = audioEngine.transport();
+        const auto  loopFrames  = armLoopEnd_ - armLoopStart_;
+        const bool  contractHeld =
+            armLoopEnabled_ && transport.isLoopEnabled()
+            && transport.loopStart() == armLoopStart_ && transport.loopEnd() == armLoopEnd_
+            && transport.seekCount() == armSeekCount_
+            && loopFrames >= 256;   // a loop shorter than a block is not a take workflow
+
+        if (contractHeld) {
+            engine::FramePosition takeStart = placement.startFrame;
+
+            const auto passes = static_cast<engine::FramePosition>(std::llround(
+                static_cast<double>(armPosition_ - takeStart) / static_cast<double>(loopFrames)));
+            takeStart += passes * loopFrames;
+
+            TakeGeometry geometry;
+            geometry.takeFrames  = take.frameCount;
+            geometry.takeStart   = std::max<engine::FramePosition>(0, takeStart);
+            geometry.loopStart   = armLoopStart_;
+            geometry.loopEnd     = armLoopEnd_;
+            geometry.loopEnabled = true;
+
+            if (punchToLoop_) {
+                geometry.punchIn  = armLoopStart_;
+                geometry.punchOut = armLoopEnd_;
+            }
+
+            placement.sliced = true;
+            placement.slices = computeSlices(geometry);
+
+            if (!placement.slices.empty())
+                placement.startFrame = placement.slices.front().startFrame;
+        }
     } else {
         // Stopped transport: the take lands at the playhead, which is where
         // the user parked it. Negative cannot happen here, but a mapped

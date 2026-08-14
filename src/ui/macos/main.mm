@@ -539,6 +539,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                        _audio->transport().positionInTicks(), normalized);
 }
 
+- (void)togglePunch:(NSMenuItem*)sender
+{
+    _recording.setPunchToLoop(!_recording.punchToLoop());
+    sender.state = _recording.punchToLoop() ? NSControlStateValueOn : NSControlStateValueOff;
+}
+
 - (void)toggleInputMonitoring:(NSMenuItem*)sender
 {
     if (!_audioReady)
@@ -1084,6 +1090,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                                                    action:@selector(toggleInputMonitoring:)
                                             keyEquivalent:@""];
     monitorItem.target = self;
+
+    // Punch: with loop recording, only audio inside the loop range lands.
+    NSMenuItem* punchItem = [audioMenu addItemWithTitle:@"Punch to Loop Range"
+                                                 action:@selector(togglePunch:)
+                                          keyEquivalent:@""];
+    punchItem.target = self;
 
     audioItem.submenu = audioMenu;
 

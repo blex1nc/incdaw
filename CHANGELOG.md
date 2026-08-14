@@ -8,6 +8,33 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 12 (part 7) — Loop and punch recording — 2026-08-15
+
+**Added**
+
+- `RecordingSession::computeSlices` — the capture stays one continuous
+  file; placement cuts it against the loop it was recorded under. Each pass
+  over the loop becomes its own slice (same asset, advancing source
+  offset), stacked on the track with every pass but the newest muted —
+  takes ready for comping rather than playing all at once. A take armed
+  before the loop runs linearly into it, then wraps.
+- The linear anchor map folds a wrapped take; `finish` unfolds it by
+  choosing the loop pass that puts the take's start where the playhead
+  stood at arm time. Engaged only when the contract sampled at arm held:
+  same loop range, loop still on, and no explicit seek — `Transport` now
+  counts seeks so a user jump (which arithmetic cannot reconstruct) is
+  distinguishable from a wrap (which it can). Any interference falls back
+  to the straight single-clip placement.
+- Punch: a placement decision over a continuous capture, not a capture
+  gate. "Punch to Loop Range" in the Audio menu trims every slice to the
+  loop window with honest file offsets; a take that never enters the window
+  lands nothing (the file still exists on disk).
+- `InsertRecordedTakeCommand` lands one clip per slice — one asset, N
+  views of it — as a single undo; redo restores identical ids.
+- `tests/unit/LoopRecordingTests.cpp` — straight, wrapped, armed-pre-loop,
+  punch trims, punch-excludes-everything, multi-clip landing/undo/redo,
+  and the every-file-frame-lands-exactly-once invariant.
+
 ### Phase 12 (part 6) — Input monitoring — 2026-08-15
 
 **Added**
