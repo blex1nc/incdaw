@@ -36,7 +36,38 @@ public version yet.
 - macOS first; Windows a later target behind `platform/` isolation.
 - Distribution as an ad-hoc-signed, un-notarized `.dmg`.
 
-**Not implemented**
+### Phase 1 — Foundation and build system — 2026-08-14
 
-No source code, no build system, no dependencies installed. Phase 1 has not
-started.
+CMake 3.28+/Ninja build, six layer libraries, warnings as errors, doctest
+harness, `tools/check_layering.py` wired into ctest, and `tools/make-dmg.sh`
+producing a verified, ad-hoc-signed DMG.
+
+### Phase 2 — Audio engine foundation — 2026-08-14
+
+CoreAudio HAL device layer, realtime-safety guard, lock-free SPSC queue,
+denormal control, audio buffer pool and views, render graph with topological
+sort and cycle rejection, atomic graph swap with deferred reclamation, sine
+and gain nodes, callback profiler, `tools/audiocheck`.
+
+Verified: 440 Hz through real hardware, 0 overruns, 0 realtime allocations.
+
+### Phase 3 — Transport — 2026-08-14
+
+Tempo map with precomputed segment frames, time-signature map, transport
+state machine, block-splitting plan for loop wraps, metronome.
+
+Verified: click events land on the tempo map's exact frame across tempo
+changes, loop boundaries, and every block size from 32 to 1024.
+
+### Phase 4 — Project model and format — 2026-08-14
+
+Deterministic ordered JSON, the full entity model (§24-compliant, nothing
+collapsed), `.incdaw` package v1.0 with staged writes, migration hook, and a
+hand-written permanent v1.0 fixture.
+
+Verified: round-trip equality, byte-identical repeat saves, corrupt-pattern
+containment, newer-format refusal, missing-media survival.
+
+**Current state**
+
+123 test cases, 29.5k assertions passing. Phases 5-20 not started.

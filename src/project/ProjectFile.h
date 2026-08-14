@@ -1,0 +1,58 @@
+#pragma once
+
+#include "project/Model.h"
+#include "project/Json.h"
+
+#include <filesystem>
+#include <string>
+#include <vector>
+
+namespace incdaw::project {
+
+/// The format version written by this build.
+///
+/// CLAUDE.md §2 is absolute: never create an unversioned project format. This
+/// is stamped into the very first file INCDAW ever saves.
+inline constexpr int projectFormatMajor = 1;
+inline constexpr int projectFormatMinor = 0;
+
+[[nodiscard]] std::string projectFormatVersionString();
+
+/// Reads and writes `.incdaw` packages (docs/PROJECT_FORMAT.md).
+///
+/// A package is a directory, not a single opaque file: partial saves, streaming
+/// loads, and per-file corruption resilience all follow from that, and a
+/// corrupted pattern costs one pattern rather than the session.
+class ProjectFile {
+public:
+    struct Result {
+        bool        succeeded = false;
+        std::string error;
+
+        /// Set when a project was written by an older format and upgraded on
+        /// load. The original is preserved in `history/` first.
+        bool        migrated = false;
+        std::string migratedFrom;
+
+        explicit operator bool() const noexcept { return succeeded; }
+    };
+
+    /// Writes `project` to `path`, creating the package if needed.
+    ///
+    /// Writes are staged and then moved into place, so an interrupted save
+    /// leaves the previous version intact rather than a half-written one.
+    [[nodiscard]] static Result save(const Project& project, const std::filesystem::path& path);
+
+    [[nodiscard]] static Result load(Project& project, const std::filesystem::path& path);
+
+    /// True if `path` looks like an INCDAW package.
+    [[nodiscard]] static bool isProjectPackage(const std::filesystem::path& path);
+
+    /// Version stamped in a package's manifest, or empty if unreadable.
+    [[nodiscard]] static std::string versionOf(const std::filesystem::path& path);
+
+private:
+    [[nodiscard]] static Result migrate(Json& document, int major, int minor);
+};
+
+} // namespace incdaw::project

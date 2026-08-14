@@ -56,7 +56,10 @@ target_link_libraries(incdaw_plugins
 
 # ── project/ : data model, serialization, versioning ──────────────────────────
 add_library(incdaw_project STATIC
-    project/Identity.cpp)
+    project/Identity.cpp
+    project/Json.cpp
+    project/Model.cpp
+    project/ProjectFile.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_project
     PUBLIC  incdaw_engine

@@ -78,15 +78,28 @@ requires a migration step.
 
 ## 3. Text vs binary
 
-| Data | Encoding | Reason |
+| Data | Encoding in v1.0 | Reason |
 |---|---|---|
 | `manifest.json`, `project.json` | JSON (UTF-8) | Human-readable, diffable, inspectable, debuggable |
-| Patterns, automation | Binary, little-endian, versioned header | Millions of events; JSON would be unusably slow and large |
+| Patterns (`patterns/*.pat`) | JSON, one file per pattern | See below |
 | Plugin state | Opaque binary | Owned by the plugin; INCDAW never interprets it |
 | Media | Native audio format | No transcoding on save |
 
-Binary blocks carry their own version header so they can evolve independently of
-the JSON schema.
+**Why patterns are JSON in v1.0, not binary.** The original plan called for a
+binary pattern encoding on the grounds that JSON would be too slow for millions
+of events. That is a real concern eventually, but it is not one that has been
+measured, and docs/PERFORMANCE.md §4 forbids optimising ahead of measurement.
+
+What v1.0 does commit to is the part that makes the change cheap later: each
+pattern is **its own file**, indexed from `project.json` by id and filename.
+The encoding of an individual pattern file can therefore change — to binary, or
+to anything else — without touching `project.json`, without a format major
+version bump for the rest of the document, and without invalidating any other
+file in the package. The decision is deferred, not foreclosed.
+
+INCDAW's own JSON writer is used rather than a library, because the determinism
+requirement in §7 rules out any implementation that iterates object keys in hash
+order.
 
 ---
 

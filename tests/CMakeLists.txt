@@ -12,7 +12,8 @@ add_executable(incdaw_tests
     unit/RenderGraphTests.cpp
     unit/DspTests.cpp
     unit/TempoMapTests.cpp
-    unit/TransportTests.cpp)
+    unit/TransportTests.cpp
+    unit/ProjectFormatTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.
@@ -21,6 +22,9 @@ target_link_libraries(incdaw_tests
             incdaw_project
             incdaw_plugins
             incdaw_warnings)
+
+target_compile_definitions(incdaw_tests PRIVATE
+    INCDAW_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 add_test(NAME unit COMMAND incdaw_tests)
 
