@@ -352,8 +352,9 @@ public:
     [[nodiscard]] const Channel*   findChannel(EntityId id) const noexcept;
     [[nodiscard]] const Clip*      findClip(EntityId id) const noexcept;
 
-    [[nodiscard]] Pattern* findPatternForEdit(EntityId id) noexcept;
-    [[nodiscard]] Channel* findChannelForEdit(EntityId id) noexcept;
+    [[nodiscard]] Pattern*   findPatternForEdit(EntityId id) noexcept;
+    [[nodiscard]] Channel*   findChannelForEdit(EntityId id) noexcept;
+    [[nodiscard]] MixerNode* findMixerNodeForEdit(EntityId id) noexcept;
 
     /// The channel a note with no channel of its own belongs to: the first one
     /// in the project, or invalid when the project has no channels yet.

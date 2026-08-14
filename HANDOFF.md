@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.1
-Status: PHASES 0-9 COMPLETE (9 PARTIAL) / PHASE 10 NEXT
+Version: 1.2
+Status: PHASES 0-10 COMPLETE (9 AND 10 PARTIAL) / PHASE 11 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -126,7 +126,8 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 Current phase:
 
 PHASES 0-8 COMPLETE (2026-08-14)
-PHASE 9 (playlist) — PARTIAL: pattern clips yes, audio clips no
+PHASE 9  (playlist) — PARTIAL: pattern clips yes, audio clips no
+PHASE 10 (mixer) — PARTIAL: routing and PDC yes, inserts and UI no
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -138,7 +139,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  260 test cases, 35,476 assertions, green.
+  272 test cases, 35,534 assertions, green.
   Zero compiler warnings (-Werror is on).
 
 Implemented:
@@ -267,10 +268,37 @@ Phase 9 — PARTIAL. Done and tested:
   which need a file reader and a sample-playing node): audio clips, time
   stretching, fades and crossfades, markers and regions, clip grouping, lanes.
 
+Phase 10 — PARTIAL. Done and tested:
+
+  PDC                            GraphBuilder::compile inserts DelayLineNodes on
+                                 the paths that arrive early (D-016). Exit
+                                 criterion MET: an impulse through a 128-frame
+                                 latent path and a dry path into one bus gives
+                                 two spikes without compensation and one with.
+  engine/dsp/DelayLineNode       whole-frame delay that REPORTS its latency.
+                                 Same object for compensation and for look-ahead
+                                 effects, on purpose.
+  mixer in the graph             each mixer node compiles to a summing point and
+                                 a strip (D-017) — pre-fader sends need somewhere
+                                 to tap, and inserts will hang between them.
+  routing                        DAG edges, sends with gain, pre/post-fader,
+                                 default-to-master, cycle REJECTED with an error
+                                 (the previous graph is kept).
+  strip                          volume, constant-power pan, polarity, mute,
+                                 peak and RMS. One class for channel strips and
+                                 mixer strips; the DSP is identical.
+
+  NOT done in Phase 10: insert chains (need Phase 13 plugins or Phase 15 DSP),
+  sidechain routing (edges deliberately skipped — with no plugin key input, the
+  edge would sum the sidechain into the main input), and THE MIXER UI. Faders,
+  sends and meters work and are tested; nothing draws them.
+
 WHAT THE APP STILL DOES NOT DO:
 
-  - no mixer: the signal path is instrument -> channel strip -> master gain ->
-    device. MixerNode/RoutingConnection serialize but nothing evaluates them.
+  - no mixer UI: the signal path is now instrument -> channel strip -> mixer
+    strip(s) -> master, with PDC, but there is no window showing it. Editing a
+    fader means editing the model.
+  - no insert effects: the chain position exists in the graph, nothing fills it.
   - no automation: AutomationLane serializes, nothing reads it.
   - no audio clips: the playlist arranges pattern clips only. Clip::source can
     name an AudioAsset and it will serialize, but nothing renders it.
@@ -285,18 +313,18 @@ WHAT THE APP STILL DOES NOT DO:
 
 Not started:
 
-  Phase 10 Mixer/routing (model exists,    Phase 15  Built-in DSP
-           no signal path)                 Phase 16  MIDI hardware
-  Phase 11 Automation (model exists,       Phase 17  Render/export
-           no evaluation)                  Phase 18  Performance
-  Phase 12 Recording/audio editor          Phase 19  QA
-  Phase 13 Plugin hosting                  Phase 20  Release
-  Phase 14 Sampler
+  Phase 11 Automation (model exists,       Phase 16  MIDI hardware
+           no evaluation)                  Phase 17  Render/export
+  Phase 12 Recording/audio editor          Phase 18  Performance
+  Phase 13 Plugin hosting                  Phase 19  QA
+  Phase 14 Sampler                         Phase 20  Release
+  Phase 15 Built-in DSP
 
-Important: MixerNode, RoutingConnection and AutomationLane still SERIALIZE but
-are not WIRED INTO THE AUDIO GRAPH. They are data, not behaviour. Do not
-describe the mixer or automation as working. Channel and Clip are now real:
-channels compile into the graph, and pattern clips play in song mode.
+Important: AutomationLane still SERIALIZES but is not WIRED INTO THE AUDIO
+GRAPH. It is data, not behaviour — do not describe automation as working.
+Channel, Clip, MixerNode and RoutingConnection are now real: channels and mixer
+nodes compile into the graph, pattern clips play in song mode, and routing edges
+become graph edges with delay compensation.
 
 Environment (verified 2026-08-14):
 
@@ -904,14 +932,14 @@ All systems must share the same underlying transport, timing, project state and 
 
 # 22. CURRENT HANDOFF MESSAGE
 
-Phases 0-9 are implemented, tested and committed (9 partial — no audio
-clips). The engine makes sound, keeps
+Phases 0-10 are implemented, tested and committed (9 and 10 partial — no
+audio clips, no insert effects, no mixer UI). The engine makes sound, keeps
 sample-accurate time, saves and loads a versioned project, and now plays what
 the project model says rather than what the UI hardcodes.
 
 Read first:
 
-1. docs/DECISIONS.md    — what was decided and why (D-001..D-015)
+1. docs/DECISIONS.md    — what was decided and why (D-001..D-017)
 2. docs/ARCHITECTURE.md — layers, threading, data model, commands
 3. docs/ROADMAP.md      — phases and their exit criteria
 4. git log              — each phase is one commit with its rationale
@@ -922,14 +950,24 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 10 (mixer), then 11 (automation).
+Next step: Phase 11 (automation), then 12 (recording/audio editor).
 
-  In dependency order:
-
-  10 the mixer: make MixerNode and RoutingConnection compile into the render
-     graph, with PDC. ChannelStripNode already gives each channel its volume
-     and pan; the mixer goes between the strips and the master.
   11 automation: AutomationLane is generic and serializes; nothing evaluates it.
+     The shape of the work: a lane names a target entity and a parameter key, so
+     the evaluator belongs in project/ beside the graph compiler — it resolves
+     keys to the strip and instrument nodes the compiler already returns, and
+     feeds them per-block values. Curves (linear/hold/smooth/exponential with
+     tension) are in the model already. Recording automation and automation
+     clips come after evaluation works.
+
+  Before that, two small pieces of UI debt worth clearing, in order of how much
+  they hurt:
+
+  a) a mixer window. Everything it needs exists: CompiledProjectGraph returns
+     mixerOrder and mixerStripNodes, and the strips carry peak and RMS.
+  b) a pattern list. AddPattern/Duplicate/Delete are implemented and tested but
+     nothing invokes them, so the app can only ever edit the one pattern it
+     opens with.
 
   Practical note for whoever continues: the seam is now
   project::compileProjectGraph (src/project/GraphCompiler.cpp). Every phase
@@ -977,6 +1015,9 @@ Things to be careful about:
   - A pattern's length is a loop marker, not a guillotine: compilePattern only
     truncates when `bounded` is set or the content repeats. Clips set it;
     pattern mode does not.
+  - A compiled graph contains nodes the project never created: delay
+    compensation inserts them. Anything asserting on nodeCount must expect
+    them, and GraphBuilder::compensationNodesInserted() reports how many.
   - Clip positions are FRAMES, not ticks. compileArrangement converts through
     the tempo map. That means a clip does not follow a tempo change the way a
     note does — a known consequence of the Phase 4 model, worth revisiting if

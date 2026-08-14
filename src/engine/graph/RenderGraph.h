@@ -86,6 +86,21 @@ public:
     /// The node whose output reaches the device.
     void setMaster(NodeIndex node) noexcept { master_ = node; }
 
+    /// Whether the compiler inserts delay lines so that paths meeting at a
+    /// summing point arrive together.
+    ///
+    /// On by default, and there is no musical reason to turn it off: without it,
+    /// any node that reports latency — a look-ahead limiter, a linear-phase EQ,
+    /// most plugins — pulls its path late against every parallel one, and a
+    /// parallel path arriving late is comb filtering, not a mix. It exists as a
+    /// switch so a test can show the difference (docs/AUDIO_ENGINE.md §7).
+    void setDelayCompensationEnabled(bool enabled) noexcept { compensate_ = enabled; }
+    [[nodiscard]] bool delayCompensationEnabled() const noexcept { return compensate_; }
+
+    /// Delay lines the last `compile` inserted. Zero means every path already
+    /// agreed. Exposed for diagnostics and tests.
+    [[nodiscard]] std::size_t compensationNodesInserted() const noexcept { return compensationNodes_; }
+
     [[nodiscard]] std::size_t nodeCount() const noexcept { return nodes_.size(); }
 
     /// Reason the last `compile` failed. Empty on success.
@@ -106,10 +121,18 @@ private:
         NodeIndex destination = invalidNode;
     };
 
+    /// Inserts delay lines so that every path into a summing node carries the
+    /// same accumulated latency. Returns the number inserted.
+    std::size_t insertCompensationDelays(const std::vector<NodeIndex>& order,
+                                         const std::vector<std::vector<NodeIndex>>& sources,
+                                         std::size_t channelCount);
+
     std::vector<std::unique_ptr<Node>> nodes_;
     std::vector<Connection>            connections_;
     NodeIndex                          master_ = invalidNode;
     std::string                        error_;
+    bool                               compensate_ = true;
+    std::size_t                        compensationNodes_ = 0;
 };
 
 } // namespace incdaw::engine

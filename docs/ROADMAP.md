@@ -161,6 +161,19 @@ with cycle detection; sidechain routing; metering (peak, RMS, LUFS-ready);
 **Exit criterion:** PDC test — a chain with artificial latency stays
 phase-aligned with an uncompensated parallel path.
 
+**Status: MET (2026-08-14).** `tests/unit/MixerTests.cpp`, "a latent chain stays
+phase-aligned with an uncompensated parallel path": an impulse through a
+128-frame latent path and a dry path into one bus produces two spikes with
+compensation disabled and one with it enabled. A three-way version with 256,
+64 and 0 frames also collapses to a single onset.
+
+Mixer nodes, buses, subgroups, the master, arbitrary DAG routing with cycle
+rejection, sends with gain and pre/post-fader tapping, polarity, mute, solo,
+and peak/RMS metering are implemented and tested. **Not implemented:** insert
+chains (they need plugins or built-in effects — Phases 13 and 15), sidechain
+routing (the model carries it; the compiler skips those edges rather than
+summing a sidechain into a main input), and the mixer UI.
+
 ---
 
 ## Phase 11 — Automation

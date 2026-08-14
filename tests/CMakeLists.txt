@@ -19,16 +19,15 @@ add_executable(incdaw_tests
     unit/PianoRollTests.cpp
     unit/InstrumentTests.cpp
     unit/PatternTests.cpp
-    unit/PlaylistTests.cpp)
+    unit/PlaylistTests.cpp
+    unit/MixerTests.cpp)
 
-# incdaw_project pulls in engine -> platform transitively; listing them again
-# here puts the same archive on the link line twice and ld warns about it.
-# incdaw_app pulls in project -> engine -> platform transitively; listing them
-# again here puts the same archive on the link line twice and ld warns about it.
+# incdaw_app pulls in project -> plugins -> engine -> platform transitively.
+# Listing any of them again here puts the same archive on the link line twice
+# and ld warns about it.
 target_link_libraries(incdaw_tests
     PRIVATE doctest
             incdaw_app
-            incdaw_plugins
             incdaw_warnings)
 
 target_compile_definitions(incdaw_tests PRIVATE

@@ -516,8 +516,11 @@ TEST_CASE("every channel becomes an instrument and a strip in the graph")
     CHECK(compiled.stripNodes.size() == 2);
     CHECK(compiled.lengthTicks == pattern.length);
 
-    // instrument + strip per channel, plus the master.
-    CHECK(compiled.graph->nodeCount() == 5);
+    // Instrument and strip per channel, the master mixer node's summing point
+    // and strip, and the master gain.
+    CHECK(compiled.graph->nodeCount() == 7);
+    CHECK(compiled.mixerOrder.size() == 1);          // a new project has a master
+    CHECK(compiled.compensationNodes == 0);          // nothing here reports latency
 
     // Each instrument got only its own channel's note.
     CHECK(compiled.instrumentNodes[0]->sequence().noteCount() == 1);

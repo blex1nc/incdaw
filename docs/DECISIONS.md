@@ -467,3 +467,68 @@ and a parent cycle in it must not hang the compiler;
 
 **Date:** 2026-08-14
 **Status:** ACCEPTED
+
+
+---
+
+## D-016 — Delay compensation inserts real nodes on the short paths
+
+**Context:** Any node that reports latency — a look-ahead limiter, a
+linear-phase EQ, most plugins — pulls its path late against every parallel one.
+A parallel path arriving late is comb filtering, not a mix. Phase 10's exit
+criterion is that this does not happen.
+
+**Options:**
+- Give each compiled step a per-input delay, with ring buffers owned by the graph
+- Insert real delay nodes on the short paths during compilation
+- Report total latency and let the user compensate manually
+
+**Chosen:** Insert `dsp::DelayLineNode` instances during `GraphBuilder::compile`,
+on the inputs that arrive early.
+
+**Reason:** It introduces no new concept. The graph already knows how to own
+nodes, order them, allocate their buffers and prepare them, so compensation
+reuses all of it and a graph dump shows exactly what the compiler did. The
+per-input variant would have added a second, parallel delay mechanism living
+inside `CompiledGraph::process` — a place where nothing should be doing anything
+clever. Compensating on the *inputs* rather than at a node's output is what makes
+it correct for a node with several sources: a send and a direct path into the
+same bus can need different amounts.
+
+**Tradeoffs:** The compiled graph contains nodes the user never created, so a
+node count is no longer the number of things in the project — tests and
+diagnostics have to expect them, and `compensationNodesInserted()` exists so
+they can. Compilation runs the topological sort twice when compensation is
+needed. Compensation is whole-frame only; sub-sample latency belongs to the
+resampling path.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-017 — A mixer strip is two nodes
+
+**Context:** A mixer node has to sum its inputs, host an insert chain (Phase 13),
+apply fader, pan and polarity, meter itself, and offer both pre-fader and
+post-fader sends.
+
+**Options:**
+- One node doing all of it
+- Two nodes: a summing point and a strip, with the inserts between them
+
+**Chosen:** Two nodes.
+
+**Reason:** A pre-fader send taps the signal *before* the fader. With one node
+there is nowhere to tap: the only thing downstream code can see is the node's
+output, which is post-everything. Splitting also gives the insert chain an
+obvious home — inserts hang between the summing point and the strip — so Phase 13
+adds nodes to an existing seam rather than restructuring one.
+
+**Tradeoffs:** Two nodes per mixer node, so a large mixer costs more graph
+entries and one more buffer each. Measured against a block of audio the extra
+summing pass does not register; if it ever does, the fix is buffer reuse in the
+graph compiler, which is a separate and already-identified optimisation.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED

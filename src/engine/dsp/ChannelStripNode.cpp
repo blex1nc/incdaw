@@ -33,9 +33,15 @@ void ChannelStripNode::process(const ProcessContext& context) noexcept
     for (std::size_t index = 0; index < context.inputCount; ++index)
         context.output.addFrom(context.input(index));
 
-    const Sample volume = muted_.load(std::memory_order_relaxed)
-                              ? Sample{0}
-                              : volume_.load(std::memory_order_relaxed);
+    Sample volume = muted_.load(std::memory_order_relaxed)
+                        ? Sample{0}
+                        : volume_.load(std::memory_order_relaxed);
+
+    // Folded into the gain rather than applied as a separate pass: an inversion
+    // is a gain of -1, and doing it in the same multiply costs nothing and
+    // cannot introduce a one-block disagreement between the two.
+    if (polarity_.load(std::memory_order_relaxed))
+        volume = -volume;
 
     Sample panLeft = Sample{1};
     Sample panRight = Sample{1};
@@ -58,7 +64,8 @@ void ChannelStripNode::process(const ProcessContext& context) noexcept
         ? static_cast<Sample>(1.0 - std::exp(-1.0 / (smoothingSeconds * rate)))
         : Sample{1};
 
-    Sample peak = Sample{0};
+    Sample peak   = Sample{0};
+    double energy = 0.0;
 
     // Captured before the loop: every left channel must start its smoother
     // from the same state, or a four-channel buffer would ramp differently in
@@ -79,6 +86,7 @@ void ChannelStripNode::process(const ProcessContext& context) noexcept
 
             const Sample magnitude = samples[frame] < Sample{0} ? -samples[frame] : samples[frame];
             peak = magnitude > peak ? magnitude : peak;
+            energy += static_cast<double>(samples[frame]) * static_cast<double>(samples[frame]);
         }
 
         // Left and right advance their own smoothers; committing inside the
@@ -90,6 +98,12 @@ void ChannelStripNode::process(const ProcessContext& context) noexcept
     }
 
     peak_.store(peak, std::memory_order_relaxed);
+
+    const auto sampleCount = static_cast<double>(context.frameCount)
+                           * static_cast<double>(context.output.channelCount());
+
+    rms_.store(sampleCount > 0.0 ? static_cast<Sample>(std::sqrt(energy / sampleCount)) : Sample{0},
+               std::memory_order_relaxed);
 }
 
 } // namespace incdaw::engine::dsp

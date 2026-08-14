@@ -60,6 +60,15 @@ struct CompiledProjectGraph {
     std::vector<engine::InstrumentNode*>          instrumentNodes;
     std::vector<engine::dsp::ChannelStripNode*>   stripNodes;
 
+    /// Mixer node ids in the order their strips were added, and the strips
+    /// themselves — what the mixer's meters read.
+    std::vector<EntityId>                         mixerOrder;
+    std::vector<engine::dsp::ChannelStripNode*>   mixerStripNodes;
+
+    /// Delay lines the compiler inserted to keep parallel paths aligned. Zero
+    /// means nothing in the graph reported latency.
+    std::size_t compensationNodes = 0;
+
     [[nodiscard]] explicit operator bool() const noexcept { return graph != nullptr; }
 };
 

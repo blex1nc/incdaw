@@ -8,6 +8,42 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 10 — Mixer and routing — 2026-08-14
+
+**Added**
+
+- Plugin delay compensation. `GraphBuilder::compile` now inserts delay lines on
+  the paths that arrive early, so everything meeting at a summing point meets in
+  phase (D-016). `setDelayCompensationEnabled` exists so a test can show the
+  difference; there is no musical reason to turn it off.
+- `engine/dsp/DelayLineNode` — a whole-frame delay that reports the latency it
+  introduces. It is what compensation inserts and what a look-ahead effect
+  behaves like, deliberately the same object.
+- The mixer compiles into the render graph. Mixer nodes become a summing point
+  and a strip (D-017); channels route into their mixer node; routing connections
+  become edges, with sends tapping pre- or post-fader and carrying their own
+  gain; anything with no explicit output reaches the master.
+- Polarity flip and RMS metering on the strip, alongside the existing peak.
+- A routing cycle is rejected with an error and the previous graph is kept,
+  rather than being broken at an arbitrary edge.
+- 12 tests: the PDC exit criterion, a three-way alignment case, delay-line
+  correctness, bus faders, cycle rejection, sends as extra paths, orphaned
+  channels, metering, and a realtime-safety pass over a compensated mixer graph.
+
+**Changed**
+
+- `ChannelStripNode` now serves both a channel's strip and a mixer node's. The
+  DSP is identical and two copies of a pan law is two places for it to be wrong.
+
+**Known gaps**
+
+- Sidechain routing serializes but its edges are skipped: with no plugins to
+  receive a key input, adding the edge would sum the sidechain into the
+  destination's main input.
+- No mixer UI yet. Faders, sends and meters exist and are tested; nothing draws
+  them.
+
+
 ### Phase 9 — Playlist / arrangement — 2026-08-14
 
 **Added**

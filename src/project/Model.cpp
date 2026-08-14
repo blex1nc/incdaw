@@ -166,6 +166,11 @@ Channel* Project::findChannelForEdit(EntityId id) noexcept
     return const_cast<Channel*>(std::as_const(*this).findChannel(id));
 }
 
+MixerNode* Project::findMixerNodeForEdit(EntityId id) noexcept
+{
+    return const_cast<MixerNode*>(std::as_const(*this).findMixerNode(id));
+}
+
 EntityId Project::defaultChannel() const noexcept
 {
     return channels_.empty() ? EntityId{} : channels_.front().id;

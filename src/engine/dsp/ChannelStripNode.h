@@ -6,13 +6,13 @@
 
 namespace incdaw::engine::dsp {
 
-/// A channel's own volume, pan and mute.
+/// Volume, pan, polarity, mute and metering for one strip.
 ///
-/// This is NOT the mixer (Phase 10). A channel's level and position are
-/// properties of the sound source itself — they exist before any mixer track is
-/// assigned, they are what the channel rack shows, and they are saved with the
-/// channel. The mixer, when it arrives, sits downstream of this and does not
-/// replace it.
+/// Used for both a channel's own strip and a mixer node's, because the DSP is
+/// identical and two copies of a pan law is two places for it to be wrong. The
+/// two are still distinct in the model and in the graph: a channel strip sits
+/// at the source and is saved with the channel, a mixer strip sits downstream
+/// and is saved with the mixer node. This class does not know which it is.
 ///
 /// Pan is constant-power: a centred signal and a hard-panned one have the same
 /// perceived loudness, which linear panning does not give. Both gains are
@@ -31,13 +31,28 @@ public:
     void setPan(Sample pan) noexcept { pan_.store(pan, std::memory_order_relaxed); }
     void setMuted(bool muted) noexcept { muted_.store(muted, std::memory_order_relaxed); }
 
+    /// Inverts the signal. A polarity flip is not a 180° phase shift and the
+    /// distinction matters: this is what fixes a mis-wired pair of mics, and it
+    /// is applied before the fader so that metering shows what the strip
+    /// actually contributes.
+    void setPolarityFlipped(bool flipped) noexcept { polarity_.store(flipped, std::memory_order_relaxed); }
+    [[nodiscard]] bool polarityFlipped() const noexcept { return polarity_.load(std::memory_order_relaxed); }
+
     [[nodiscard]] Sample volume() const noexcept { return volume_.load(std::memory_order_relaxed); }
     [[nodiscard]] Sample pan()    const noexcept { return pan_.load(std::memory_order_relaxed); }
     [[nodiscard]] bool   muted()  const noexcept { return muted_.load(std::memory_order_relaxed); }
 
-    /// Peak absolute sample of the last block, per channel pair. Read by the
-    /// UI for the channel rack meters; never read by the audio thread.
+    /// Peak absolute sample of the last block. Read by the UI for the meters;
+    /// never read by the audio thread.
     [[nodiscard]] Sample lastPeak() const noexcept { return peak_.load(std::memory_order_relaxed); }
+
+    /// Root mean square of the last block.
+    ///
+    /// Peak alone is a poor loudness display — it reacts to a single sample and
+    /// says nothing about how loud a passage feels. RMS is the cheap, honest
+    /// second number, and it is the quantity a LUFS meter integrates over time,
+    /// so the loudness work in Phase 17 extends this rather than replacing it.
+    [[nodiscard]] Sample lastRms() const noexcept { return rms_.load(std::memory_order_relaxed); }
 
     [[nodiscard]] const char* name() const noexcept override { return "Channel"; }
 
@@ -46,6 +61,8 @@ private:
     std::atomic<Sample> pan_{Sample{0}};
     std::atomic<bool>   muted_{false};
     std::atomic<Sample> peak_{Sample{0}};
+    std::atomic<Sample> rms_{Sample{0}};
+    std::atomic<bool>   polarity_{false};
 
     Sample     currentLeft_  = Sample{1};
     Sample     currentRight_ = Sample{1};
