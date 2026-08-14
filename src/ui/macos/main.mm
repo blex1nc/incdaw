@@ -33,6 +33,9 @@
 #include "ui/macos/MixerView.h"
 #include "ui/macos/PlaylistView.h"
 
+#include <chrono>
+#include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -537,6 +540,73 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     _autoWrite.capture(project::EntityId{nodeId}, key,
                        _audio->transport().positionInTicks(), normalized);
+}
+
+- (void)toggleAudioLogger:(NSMenuItem*)sender
+{
+    if (!_audioReady)
+        return;
+
+    auto& logger = _audio->logger();
+    logger.setEnabled(!logger.isEnabled());
+    sender.state = logger.isEnabled() ? NSControlStateValueOn : NSControlStateValueOff;
+    [self refreshStatus];
+}
+
+- (void)grabAudioLog:(id)sender
+{
+    (void)sender;
+
+    if (!_audioReady)
+        return;
+
+    engine::AudioFileData data;
+    const auto frames = _audio->logger().grab(data);
+
+    if (frames <= 0) {
+        _lastRecordError = @"audio logger: nothing captured yet";
+        [self refreshStatus];
+        return;
+    }
+
+    NSString* music = [NSSearchPathForDirectoriesInDomains(NSMusicDirectory,
+                                                           NSUserDomainMask, YES) firstObject];
+    const std::filesystem::path directory =
+        std::filesystem::path{music.UTF8String} / "INCDAW" / "Recordings";
+
+    std::error_code code;
+    std::filesystem::create_directories(directory, code);
+
+    const auto now  = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm parts{};
+    localtime_r(&now, &parts);
+
+    char stamp[40];
+    std::snprintf(stamp, sizeof(stamp), "log-%04d%02d%02d-%02d%02d%02d.wav",
+                  parts.tm_year + 1900, parts.tm_mon + 1, parts.tm_mday,
+                  parts.tm_hour, parts.tm_min, parts.tm_sec);
+
+    const std::filesystem::path path = directory / stamp;
+
+    if (const auto wrote = engine::WavFile::write(path, data); !wrote) {
+        _lastRecordError = @(wrote.error.c_str());
+        [self refreshStatus];
+        return;
+    }
+
+    // The grab ENDS now: it lands so its last frame sits at the playhead.
+    project::RecordingSession::Placement placement;
+    placement.succeeded    = true;
+    placement.path         = path;
+    placement.frameCount   = frames;
+    placement.channelCount = data.channelCount;
+    placement.sampleRate   = data.sampleRate;
+    placement.startFrame   =
+        std::max<engine::FramePosition>(0, _audio->transport().position() - frames);
+
+    (void)_registry->execute(std::make_unique<app::InsertRecordedTakeCommand>(placement));
+
+    [self audioAssetChanged];
 }
 
 - (void)togglePunch:(NSMenuItem*)sender
@@ -1096,6 +1166,21 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                                                  action:@selector(togglePunch:)
                                           keyEquivalent:@""];
     punchItem.target = self;
+
+    [audioMenu addItem:[NSMenuItem separatorItem]];
+
+    // The Audio Logger: the master's last minute, retrievable after the
+    // fact. Off by default — 23 MB and a "was that being kept?" question
+    // the user should answer, not inherit.
+    NSMenuItem* loggerItem = [audioMenu addItemWithTitle:@"Audio Logger"
+                                                  action:@selector(toggleAudioLogger:)
+                                           keyEquivalent:@""];
+    loggerItem.target = self;
+
+    NSMenuItem* grabItem = [audioMenu addItemWithTitle:@"Grab Last 60 Seconds"
+                                                action:@selector(grabAudioLog:)
+                                         keyEquivalent:@""];
+    grabItem.target = self;
 
     audioItem.submenu = audioMenu;
 

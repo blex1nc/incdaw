@@ -54,6 +54,7 @@ add_library(incdaw_engine STATIC
     engine/audio/AudioEdits.cpp
     engine/audio/WaveformOverview.cpp
     engine/audio/AudioRecorder.cpp
+    engine/audio/AudioLogger.cpp
     engine/audio/AudioClipNode.cpp
     engine/AudioEngine.cpp)
 target_include_directories(incdaw_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -284,8 +284,13 @@ fold resolved against the arm-time playhead, guarded by a transport seek
 counter — any mid-take interference falls back to straight placement.
 Punch trims placements, never the capture.
 
-Outstanding within this phase: the pre-record buffer / Audio Logger, and
-editor polish (markers, regions, cut/copy/paste).
+Part 8: the Audio Logger — the master's last minute as a keep-newest
+circle, grabbed from the Audio menu and landed as a clip ending at the
+playhead. Off by default; what was heard is exactly what comes back.
+
+Outstanding within this phase: editor polish (markers, regions,
+cut/copy/paste) and an input-side pre-record buffer (deliberately separate
+from the master logger).
 
 ---
 

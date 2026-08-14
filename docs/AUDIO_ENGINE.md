@@ -190,6 +190,15 @@ on later. It is therefore specified here in Phase 0 and implemented in Phase 12.
 
 At 48 kHz stereo float32, 60 seconds costs ~23 MB of resident memory. Acceptable.
 
+**Implemented (Phase 12, part 8):** `engine/audio/AudioLogger` — a
+keep-newest circle fed at the end of every rendered block, so a grab
+retrieves exactly what was heard. `grab` snapshots the monotonic write
+count, copies, and trims whatever the writer overran during the copy: at
+worst a few milliseconds short at the oldest end, never torn, never a lock
+near the callback. Off by default (the memory and the "was that being
+kept?" question belong to the user); toggled and grabbed from the Audio
+menu, the grab landing as a clip whose last frame sits at the playhead.
+
 ---
 
 ## 9. Offline rendering

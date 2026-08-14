@@ -171,6 +171,13 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
             * (device_ != nullptr ? std::max<std::size_t>(device_->actualInputChannels(), 1) : 1),
         0.0f);
 
+    // The Audio Logger holds the master's last minute. Prepared for the
+    // granted format; whether it RUNS stays whatever the user set.
+    logger_.prepare(sampleRateHz,
+                    device_ != nullptr ? std::max<std::size_t>(device_->actualOutputChannels(), 1)
+                                       : 2,
+                    60.0);
+
     rt::resetViolations();
 }
 
@@ -236,6 +243,11 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
             nonFiniteBlocks_.fetch_add(1, std::memory_order_relaxed);
         }
     }
+
+    // The Audio Logger sees exactly what the device is about to play —
+    // post-graph, post-containment — so what a grab retrieves is what was
+    // actually heard.
+    logger_.log(outputChannels, channelCount, frameCount);
 
     const auto finished = std::chrono::steady_clock::now();
     profiler_.record(std::chrono::duration<double>(finished - started).count(), frameCount,

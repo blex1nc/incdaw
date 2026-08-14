@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  362 test cases, 146,764 assertions, green in both Debug and Release.
+  366 test cases, 149,822 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -1126,22 +1126,22 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step (phases 0-11 COMPLETE; Phase 12 tail nearly done — input
-monitoring AND loop/punch recording are DONE: stacked takes per pass with
-comping-ready muting, punch as a placement decision, a transport seek
-counter guarding the wrap arithmetic):
+Next step (phases 0-11 COMPLETE; Phase 12 is functionally done — capture,
+recording into the timeline, streaming, the editor, monitoring, loop/punch
+recording and the Audio Logger all work. What remains in it is polish):
 
-    - the pre-record buffer / Audio Logger (a capture-side ring that is
-      always running; the recorder's machinery already fits it)
     - editor polish: markers, regions, cut/copy/paste between files
+    - input-side pre-record buffer (deliberately separate from the master
+      logger — privacy: the mic must not be kept when the user believes
+      only playback is)
     - deferred small items: normalize on STREAMED clips (cached peak),
       automation point-editing surface, touch/latch modes, latch-mode
       loop-aware automation overdub (D-026)
 
-  Or start Phase 13 (plugin hosting, CLAP first per D-007) — the plugin
-  host is the long pole for the whole product and everything it needs from
-  the engine now exists. Vendoring the CLAP SDK headers needs dependency
-  approval (CLAUDE.md §41) before implementation can start.
+  RECOMMENDED: start Phase 13 (plugin hosting, CLAP first per D-007) — the
+  plugin host is the long pole for the whole product and everything it
+  needs from the engine now exists. Vendoring the CLAP SDK headers needs
+  dependency approval (CLAUDE.md §41) before implementation can start.
 
 Things to be careful about:
 

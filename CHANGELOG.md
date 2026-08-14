@@ -8,6 +8,30 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 12 (part 8) — The Audio Logger — 2026-08-15
+
+**Added**
+
+- `engine/audio/AudioLogger` — the master's last 60 seconds, continuously:
+  a keep-newest circle (the recorder's ring is keep-oldest) fed at the end
+  of every rendered block, so a grab retrieves exactly what was heard.
+  `grab` snapshots the monotonic write count, copies, and trims what the
+  writer overran mid-copy — at worst milliseconds short at the oldest end,
+  never torn, never a lock near the callback. Logging is wait-free and
+  allocation-free under the guard.
+- Audio menu: an Audio Logger toggle (off by default — 23 MB and a "was
+  that being kept?" question the user should answer, not inherit) and
+  "Grab Last 60 Seconds", which writes the window to the recordings folder
+  and lands it as a clip whose last frame sits at the playhead — one undo,
+  like every other landing.
+- `tests/unit/AudioLoggerTests.cpp` — ordered wrap-around, partial fills,
+  disabled-keeps-nothing, allocation-free logging, and an engine-level
+  check that the grab equals the rendered output bit for bit.
+
+An input-side pre-record buffer is deliberately separate, deferred work:
+conflating it with the master logger would keep microphone audio while the
+user believed only playback was kept.
+
 ### Phase 12 (part 7) — Loop and punch recording — 2026-08-15
 
 **Added**

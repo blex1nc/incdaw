@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/audio/AudioLogger.h"
 #include "engine/core/CallbackProfiler.h"
 #include "engine/core/SampleRingBuffer.h"
 #include "engine/graph/RenderGraph.h"
@@ -112,6 +113,12 @@ public:
 
     [[nodiscard]] SampleRingBuffer* monitorRing() noexcept { return &monitorRing_; }
 
+    /// The Audio Logger: the master's last minute, continuously (§8 of
+    /// docs/AUDIO_ENGINE.md). Fed at the end of every rendered block while
+    /// enabled; prepared when the device starts.
+    [[nodiscard]] AudioLogger&       logger()       noexcept { return logger_; }
+    [[nodiscard]] const AudioLogger& logger() const noexcept { return logger_; }
+
     /// The most recent block's host-time <-> timeline correlation.
     ///
     /// Published from the audio thread through a seqlock — the audio thread
@@ -213,6 +220,8 @@ private:
     SampleRingBuffer    monitorRing_;
     std::vector<Sample> monitorScratch_;   ///< interleave scratch, sized on start
     std::atomic<bool>   monitorEnabled_{false};
+
+    AudioLogger logger_;
 };
 
 } // namespace incdaw::engine
