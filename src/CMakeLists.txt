@@ -51,6 +51,8 @@ add_library(incdaw_engine STATIC
     engine/audio/WavStreamWriter.cpp
     engine/audio/WavStreamReader.cpp
     engine/audio/AudioStream.cpp
+    engine/audio/AudioEdits.cpp
+    engine/audio/WaveformOverview.cpp
     engine/audio/AudioRecorder.cpp
     engine/audio/AudioClipNode.cpp
     engine/AudioEngine.cpp)
@@ -102,7 +104,8 @@ add_library(incdaw_app STATIC
     app/commands/ClipCommands.cpp
     app/commands/MixerCommands.cpp
     app/commands/AutomationCommands.cpp
-    app/commands/RecordingCommands.cpp)
+    app/commands/RecordingCommands.cpp
+    app/commands/AudioEditCommands.cpp)
 target_include_directories(incdaw_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_app
     PUBLIC  incdaw_project
