@@ -147,6 +147,19 @@ track folders and lanes; markers and regions.
 **Exit criterion:** a full arrangement plays back sample-accurately; clip gain
 and normalize are applied pre-mixer and are recallable from the project file.
 
+**9a — pattern arrangement: COMPLETE (2026-08-14).** Tracks, pattern clips,
+placement, drag, resize, duplicate, mute, box selection and snap; a Pattern/Song
+transport mode (D-017); track mute and solo resolved when the arrangement
+compiles (D-018). The first half of the exit criterion — a full arrangement
+playing back sample-accurately — is tested through the compiled graph in
+`tests/unit/PlaylistTests.cpp`.
+
+**9b — audio clips: NOT STARTED.** Clip gain, normalize, fades, crossfades,
+stretch and reverse are audio-clip properties, and INCDAW has no audio file
+reader or disk streamer yet; that infrastructure belongs with Phase 12. The
+second half of the exit criterion is therefore outstanding, and **Phase 9 is not
+complete**. Automation clips wait on Phase 11.
+
 ---
 
 ## Phase 10 — Mixer and routing

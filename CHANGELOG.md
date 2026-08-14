@@ -8,6 +8,41 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 9a — Playlist: the pattern arrangement — 2026-08-14
+
+**Added**
+
+- `app/commands/TrackCommands` — add, remove (with the track's clips), rename,
+  mute, solo, height.
+- `app/commands/ClipCommands` — add, remove, move (mergeable), resize
+  (mergeable), duplicate, mute. Clips are addressed by id, not by index.
+- `app/PlaylistModel` — culling, hit testing, resize handles, box selection and
+  snap, headless.
+- `ui/macos/PlaylistView` — ruler, track headers, clips, drag/resize/paint,
+  ruler seeking, playhead.
+- A Pattern/Song transport mode, and a View menu binding the editors to ⌘1/⌘2
+  and the modes to ⌘3/⌘4.
+- `Project::insertTrack` / `insertClip` / `removeTrack` / `removeClip` /
+  `indexOfTrack` / `indexOfClip` / `findClip`.
+- `tests/unit/PlaylistTests.cpp` — 13 cases, including the roadmap exit
+  criterion through the compiled graph, and a recompile measurement.
+
+**Changed**
+
+- `project::compileArrangement` honours track mute and solo (D-018).
+- A new project opens with one track and the pattern placed on it, so song mode
+  plays something.
+- Editor panes now resize with the window; they previously kept their initial
+  size and left a dead margin down the right edge.
+
+**Known gaps**
+
+- No audio clips, and therefore no clip gain or normalize: Phase 9b, which needs
+  a file reader and a streamer. **Phase 9 is not complete.**
+- No automation clips (Phase 11), no fades, crossfades, stretch or reverse.
+- Live mouse interaction was not verified this session; the headless tests cover
+  the edits.
+
 ### Phase 8b — Channel Rack, pattern list, step sequencer — 2026-08-14
 
 **Added**

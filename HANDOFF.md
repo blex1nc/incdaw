@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.1
-Status: PHASES 0-8 COMPLETE / PHASE 9 NEXT
+Version: 1.2
+Status: PHASES 0-8 COMPLETE, PHASE 9a COMPLETE / PHASE 9b AND 10 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -126,9 +126,9 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 Current phase:
 
 PHASES 0-8 COMPLETE (2026-08-14)
-PHASE 8a (pattern model + compilation) — COMPLETE
-PHASE 8b (Channel Rack / pattern list / step sequencer UI) — COMPLETE
-PHASE 9 (playlist) — NOT STARTED
+PHASE 9a (playlist: pattern arrangement) — COMPLETE
+PHASE 9b (playlist: audio clips) — NOT STARTED, needs a file reader
+PHASE 10 (mixer) — NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -140,7 +140,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  254 test cases, 30,895 assertions, green in both Debug and Release.
+  268 test cases, 31,031 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -179,6 +179,35 @@ Phase 6 — COMPLETE. Done and tested:
   right edge to resize, right-click to delete, shift-drag to box select,
   Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
   scroll to pan, Cmd+scroll to zoom.
+
+Phase 9a — COMPLETE. Done and tested:
+
+  app/commands/TrackCommands    add, remove (takes the track's clips with it),
+                                rename, mute, solo, height
+  app/commands/ClipCommands     add, remove, move, resize, duplicate, mute —
+                                addressed by id, because every track's clips
+                                share one vector
+  app/PlaylistModel             culling, hit testing, resize handles, box
+                                selection, snap — headless
+  ui/macos/PlaylistView         ruler, track headers, clips, drag/resize/paint,
+                                ruler seeking, playhead
+  project/PatternCompiler       track mute and solo resolved at compile time
+                                (D-018)
+
+  Pattern/Song transport mode (D-017): the mode picks PlaybackSource when the
+  graph is compiled, so the audio thread never learns there are two modes.
+  ⌘1/⌘2 switch editors, ⌘3/⌘4 switch modes.
+
+  Measured (Release): recompiling an arrangement of 512 clips over 64 notes
+  costs 0.088 ms — which is what makes recompiling on every mouse move during a
+  drag defensible.
+
+  Exit criterion, first half: "a pattern placed twice plays identically at both
+  placements, through the graph" in tests/unit/PlaylistTests.cpp.
+
+  NOT verified live: mouse gestures. The window was captured and inspected, but
+  the machine was in use and synthetic clicks went to the frontmost application,
+  so drag/resize/paint rest on the headless tests for now.
 
 Phase 8b — COMPLETE. Done and tested:
 
@@ -253,6 +282,11 @@ Phase 7 — COMPLETE. Done and tested:
 
 WHAT THE APP STILL DOES NOT DO:
 
+  - no audio clips at all: there is no WAV reader, no decoder and no disk
+    streaming anywhere in the tree. Clip gain, normalize, fades, crossfades,
+    stretch and reverse are audio-clip properties and are therefore all
+    outstanding. THIS IS PHASE 9b, and it is why Phase 9 is not complete.
+
   - patterns can carry automation lanes in the model; nothing evaluates them.
   - drag-painting steps leaves one undo entry per cell, not one per stroke.
   - channel colour and step key have commands but nothing in the UI reaches
@@ -267,7 +301,7 @@ WHAT THE APP STILL DOES NOT DO:
 
 Not started:
 
-  Phase 9  Playlist                        Phase 15  Built-in DSP
+  Phase 9b Audio clips (needs a reader)    Phase 15  Built-in DSP
   Phase 10 Mixer/routing (model exists,    Phase 16  MIDI hardware
            no signal path)                 Phase 17  Render/export
   Phase 11 Automation (model exists,       Phase 18  Performance
@@ -903,20 +937,24 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 9 (the playlist), then 10 (the mixer).
+Next step: Phase 10 (the mixer), with Phase 9b (audio clips) waiting on a file
+reader that belongs with Phase 12.
 
-  Phase 9 is where patterns stop being the whole song. What it needs:
+  Phase 10 is the mixer, and it is the last structural gap: MixerNode and
+  RoutingConnection serialize but nothing evaluates them, and the signal path is
+  still instrument -> channel gain -> master gain. What it needs:
 
-    - tracks in the playlist, and pattern clips placed on them by tick
-      (Clip::startTick already exists and serializes; nothing draws or plays it)
-    - project::compileArrangement is written and tested — switching the graph
-      compiler from PlaybackSource::pattern to ::arrangement is the seam
-    - a playlist view, and a transport that loops the song rather than a pattern
-    - the exit criterion is in docs/ROADMAP.md: a full arrangement plays back
-      sample-accurately, and clip gain and normalize are applied pre-mixer
+    - compile MixerNode and RoutingConnection into the render graph, with cycle
+      detection, and route channels to mixer tracks instead of to the master
+    - inserts, sends, buses, and plugin delay compensation
+    - the exit criterion in docs/ROADMAP.md is the PDC test: a chain with
+      artificial latency stays phase-aligned with an uncompensated parallel path
+    - channel pan belongs here, not in ProjectGraphCompiler, which deliberately
+      does not apply it
 
-  main.mm's rebuildGraph is one call to compileProjectGraph, so the arrangement
-  becomes audible by changing the options it passes, not by rewriting the UI.
+  Phase 9b (audio clips) needs a WAV reader and a disk streamer, which is a
+  subsystem rather than a feature; it is the natural neighbour of Phase 12's
+  recording work, and clip gain and normalize come with it.
 
 Things to be careful about:
 

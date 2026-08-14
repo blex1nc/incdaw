@@ -250,9 +250,23 @@ The Channel Rack and the Piano Roll edit *the same notes*: a step is an ordinary
 so nothing for the two views to disagree about.
 
 Rendering is chosen per pane by measurement, not by policy: the Piano Roll is
-Metal because it must cull ten thousand notes inside a frame, the rack and the
-pattern list are CoreGraphics because they are tens of rectangles and mostly
-text (D-015).
+Metal because it must cull ten thousand notes inside a frame, the rack, the
+pattern list and the playlist are CoreGraphics because they are tens of
+rectangles and mostly text (D-015).
+
+### Patterns, tracks and the two transport modes
+
+A channel makes sound; a track holds placements. They are deliberately not the
+same axis, and CLAUDE.md §9 forbids assuming a 1:1 track-to-mixer relationship.
+A pattern clip on a track plays whatever channels that pattern is programmed on,
+so one clip can sound on eight channels and one channel can sound from clips on
+several tracks.
+
+Playback has two modes, and the difference is decided when the project is
+compiled, never on the audio thread (D-017): pattern mode compiles one pattern
+and loops it, song mode compiles the arrangement and loops its length. Track
+mute and solo are resolved in the same pass (D-018), so a silenced track's notes
+are never compiled rather than rendered and multiplied by zero.
 
 ---
 

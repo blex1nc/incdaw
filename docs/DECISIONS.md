@@ -486,3 +486,65 @@ Project format 1.1 → 1.2 for the new field, additive and defaulted.
 **Date:** 2026-08-14
 **Status:** ACCEPTED
 
+---
+
+## D-017 — Pattern mode and song mode are a compile-time distinction
+
+**Context:** A pattern-based DAW plays either one pattern on loop or the
+arrangement. Phase 9a has to add the second without the first becoming a special
+case of it.
+
+**Options:**
+- One graph that always plays the arrangement, with pattern mode as a temporary
+  one-clip arrangement
+- A transport flag the audio thread reads to choose between two note sources
+- Two compilations of the same graph shape, selected when the graph is built
+
+**Chosen:** The mode selects `PlaybackSource` when the project is compiled. The
+audio thread has no idea there are two modes: it plays the notes the graph
+carries, and the loop range comes from the pattern's length or from
+`arrangementLengthTicks`.
+
+**Reason:** A flag read on the audio thread means a branch in the hot path and a
+race on every mode change. A synthetic one-clip arrangement means pattern mode
+stops being the thing the user edits. Recompiling is already what every edit
+does, and it costs 0.088 ms for an arrangement of 512 clips — far below the
+threshold where a mode switch would feel like anything at all.
+
+**Tradeoffs:** Switching mode while playing restarts from zero, because the
+sequence the instrument nodes hold is replaced. FL restarts too; a mode change
+that continued mid-bar from a different note source would be worse than a
+restart, not better.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-018 — Track mute and solo are resolved when the arrangement compiles
+
+**Context:** Clips sit on tracks, but sound comes from the channel a pattern is
+programmed on. Track mute therefore cannot be a gain: there is no per-track node
+to silence.
+
+**Options:**
+- Give every track a gain node in the graph and mute that
+- Skip muted tracks' clips when the arrangement compiles
+- Filter notes on the audio thread by track
+
+**Chosen:** Skip them at compile time, exactly as channel mute already works.
+
+**Reason:** A muted track's notes are then never compiled, never scheduled and
+never rendered, rather than rendered and multiplied by zero. It also keeps the
+graph shape independent of the arrangement: tracks are an organisational layer,
+not a signal-path one, and inventing a node per track now would collide with the
+real mixer in Phase 10.
+
+**Tradeoffs:** Unmuting recompiles rather than flipping a gain, which is
+measured and cheap. A muted track does not shorten the song —
+`arrangementLengthTicks` counts what the user drew, so unmuting cannot move the
+end of the song.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
