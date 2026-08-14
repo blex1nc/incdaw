@@ -8,6 +8,27 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 12 (part 6) — Input monitoring — 2026-08-15
+
+**Added**
+
+- `engine/audio/InputMonitorNode` — plays the live input through the graph:
+  drains the engine's monitor ring into the master strip. The ring bridges
+  the input and output clock domains; the node caps the drift (a backlog
+  past four blocks is skipped so monitoring latency cannot grow without
+  bound) and plays silence on underrun rather than waiting.
+- `AudioEngine` — a monitor ring allocated once for the engine's lifetime
+  (graph nodes keep the pointer across device restarts); the capture
+  callback interleaves into it while monitoring is enabled, wait-free.
+- Audio menu: Monitor Input toggle — opens the input on demand (same flow
+  as record arming) and rebuilds the graph, since the monitor node exists
+  exactly when monitoring is on. Graph monitoring, stated honestly: input
+  latency + one ring hop + output latency; direct hardware monitoring would
+  be a device-layer feature.
+- `tests/unit/InputMonitorTests.cpp` — pass-through fidelity, mono fan-out,
+  underrun silence, the drift cap, allocation-free path under the guard,
+  compiler wiring through the master.
+
 ### Phase 11b — Automation placement and recording — 2026-08-15
 
 **Added**

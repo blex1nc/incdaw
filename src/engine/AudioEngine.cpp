@@ -4,6 +4,7 @@
 #include "engine/core/Denormals.h"
 #include "engine/core/RealtimeGuard.h"
 
+#include <algorithm>
 #include <chrono>
 
 namespace incdaw::engine {
@@ -20,7 +21,13 @@ constexpr std::uint64_t retirementGraceBlocks = 2;
 
 } // namespace
 
-AudioEngine::AudioEngine() : device_(platform::AudioDevice::create()) {}
+AudioEngine::AudioEngine() : device_(platform::AudioDevice::create())
+{
+    // ~1.4 s of interleaved stereo at 48 kHz. Allocated once for the
+    // engine's lifetime so monitor nodes can hold the pointer across device
+    // restarts; capacity is samples, so the channel count is free to change.
+    monitorRing_.reset(1u << 17);
+}
 
 AudioEngine::~AudioEngine()
 {
@@ -156,6 +163,14 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
     // possibly the wrong sample rate. Zero means "never published".
     anchorVersion_.store(0, std::memory_order_release);
 
+    // Interleave scratch for the monitor path, sized for the largest block
+    // the input device may deliver. Allocated here, never on the capture
+    // thread.
+    monitorScratch_.assign(
+        static_cast<std::size_t>(device_ != nullptr ? device_->maxServiceableBlockSize() : 0)
+            * (device_ != nullptr ? std::max<std::size_t>(device_->actualInputChannels(), 1) : 1),
+        0.0f);
+
     rt::resetViolations();
 }
 
@@ -239,6 +254,27 @@ void AudioEngine::captureAudioBlock(const float* const* inputChannels, std::size
 
     if (AudioCaptureSink* sink = captureSink_.load(std::memory_order_acquire))
         sink->captureAudioBlock(inputChannels, channelCount, frameCount, blockHostTimeNanos);
+
+    // The monitor path: interleave into the ring for the output side to
+    // drain. Whole frames only, dropped when full — a full ring means the
+    // output side stopped reading, and blocking here is never an option.
+    if (monitorEnabled_.load(std::memory_order_acquire) && channelCount > 0 && frameCount > 0) {
+        const std::size_t samples =
+            static_cast<std::size_t>(frameCount) * channelCount;
+
+        if (samples <= monitorScratch_.size()) {
+            for (std::int64_t frame = 0; frame < frameCount; ++frame)
+                for (std::size_t channel = 0; channel < channelCount; ++channel)
+                    monitorScratch_[static_cast<std::size_t>(frame) * channelCount + channel] =
+                        inputChannels[channel][frame];
+
+            const std::size_t fitFrames = monitorRing_.freeSpace() / channelCount;
+            const std::size_t frames    = std::min<std::size_t>(
+                static_cast<std::size_t>(frameCount), fitFrames);
+
+            (void)monitorRing_.write(monitorScratch_.data(), frames * channelCount);
+        }
+    }
 }
 
 } // namespace incdaw::engine

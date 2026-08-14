@@ -30,7 +30,8 @@ add_executable(incdaw_tests
     unit/DiskStreamingTests.cpp
     unit/AudioEditsTests.cpp
     unit/AudioClipEditingTests.cpp
-    unit/AutomationClipTests.cpp)
+    unit/AutomationClipTests.cpp
+    unit/InputMonitorTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.

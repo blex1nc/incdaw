@@ -1,6 +1,7 @@
 #include "project/ProjectGraphCompiler.h"
 
 #include "engine/audio/AudioClipNode.h"
+#include "engine/audio/InputMonitorNode.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/SimpleSynth.h"
@@ -375,6 +376,16 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             builder.connect(source, destination != stripIndices.end() ? destination->second
                                                                       : master);
         }
+    }
+
+    // ── Input monitoring ────────────────────────────────────────────────────
+    // Session state, not project data: the engine's monitor ring drains into
+    // the master when monitoring is on. Rebuilding the graph is how the
+    // toggle takes effect, exactly like every other topology change.
+    if (options.monitorRing != nullptr && options.monitorChannelCount > 0) {
+        const auto monitor = builder.addNode(std::make_unique<engine::InputMonitorNode>(
+            options.monitorRing, options.monitorChannelCount));
+        builder.connect(monitor, master);
     }
 
     // ── Automation ──────────────────────────────────────────────────────────

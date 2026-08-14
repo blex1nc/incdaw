@@ -273,10 +273,14 @@ writes the recorded result), and the editor pane itself: waveform,
 selection, zoom; opened by double-clicking an audio clip; verbs in the
 Audio menu; every edit immediately audible via a graph rebuild.
 
-Outstanding within this phase: input monitoring, loop/punch recording
-(per-segment anchoring), the pre-record buffer / Audio Logger, and editor
-polish (markers, regions, cut/copy/paste). Audio-clip move/resize in the
-playlist is 9b.
+Part 6: input monitoring. The engine's monitor ring bridges the input and
+output clock domains; `InputMonitorNode` drains it into the master with a
+drift cap and underrun-as-silence. Toggled from the Audio menu; the input
+opens on demand, exactly like record arming.
+
+Outstanding within this phase: loop/punch recording (per-segment
+anchoring), the pre-record buffer / Audio Logger, and editor polish
+(markers, regions, cut/copy/paste).
 
 ---
 

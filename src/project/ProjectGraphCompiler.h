@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/audio/AudioStream.h"
+#include "engine/core/SampleRingBuffer.h"
 #include "engine/graph/RenderGraph.h"
 #include "engine/instrument/Instrument.h"
 #include "engine/automation/AutomationNode.h"
@@ -68,6 +69,13 @@ struct GraphCompileOptions {
     /// application (or the test); graphs only weak-reference it via the
     /// streams they register.
     engine::DiskStreamer* diskStreamer = nullptr;
+
+    /// Input monitoring: when set, an InputMonitorNode draining this ring
+    /// feeds the master strip. The ring is the engine's and outlives every
+    /// graph; `monitorChannelCount` is the input channel count at compile
+    /// time (the ring itself is channel-agnostic).
+    engine::SampleRingBuffer* monitorRing         = nullptr;
+    std::size_t               monitorChannelCount = 0;
 
     /// Applied at the master strip, on top of the master mixer node's own
     /// volume. Headroom for a project that has not been mixed yet, not a

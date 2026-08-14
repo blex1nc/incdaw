@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/core/CallbackProfiler.h"
+#include "engine/core/SampleRingBuffer.h"
 #include "engine/graph/RenderGraph.h"
 #include "engine/midi/MidiBuffer.h"
 #include "engine/midi/MidiInput.h"
@@ -93,6 +94,23 @@ public:
     {
         return captureSink_.load(std::memory_order_acquire);
     }
+
+    /// Input monitoring: while enabled, captured blocks are also interleaved
+    /// into the monitor ring, which an InputMonitorNode in the graph drains
+    /// on the output side. The ring lives as long as the engine (allocated
+    /// once, never resized), which is what lets graph nodes keep a raw
+    /// pointer across device restarts.
+    void setMonitoringEnabled(bool enabled) noexcept
+    {
+        monitorEnabled_.store(enabled, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool isMonitoringEnabled() const noexcept
+    {
+        return monitorEnabled_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] SampleRingBuffer* monitorRing() noexcept { return &monitorRing_; }
 
     /// The most recent block's host-time <-> timeline correlation.
     ///
@@ -191,6 +209,10 @@ private:
     /// even when the payload is consistent. Zero means "never published".
     std::atomic<std::uint64_t> anchorVersion_{0};
     TimelineAnchor             anchor_;
+
+    SampleRingBuffer    monitorRing_;
+    std::vector<Sample> monitorScratch_;   ///< interleave scratch, sized on start
+    std::atomic<bool>   monitorEnabled_{false};
 };
 
 } // namespace incdaw::engine

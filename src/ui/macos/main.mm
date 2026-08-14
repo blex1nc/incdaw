@@ -539,6 +539,30 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                        _audio->transport().positionInTicks(), normalized);
 }
 
+- (void)toggleInputMonitoring:(NSMenuItem*)sender
+{
+    if (!_audioReady)
+        return;
+
+    if (_audio->isMonitoringEnabled()) {
+        _audio->setMonitoringEnabled(false);
+        sender.state = NSControlStateValueOff;
+    } else {
+        if (![self ensureInputOpen]) {
+            [self refreshStatus];
+            return;
+        }
+
+        _audio->setMonitoringEnabled(true);
+        sender.state = NSControlStateValueOn;
+    }
+
+    // The toggle is a topology change: the monitor node exists exactly when
+    // monitoring is on.
+    [self rebuildGraph];
+    [self refreshStatus];
+}
+
 - (void)toggleAutomationWrite:(NSMenuItem*)sender
 {
     if (_autoWrite.isEnabled()) {
@@ -675,6 +699,11 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                                      : project::PlaybackSource::pattern;
     options.pattern      = project::EntityId{self.pianoRoll.patternIdValue};
     options.diskStreamer = _diskStreamer.get();
+
+    if (_audio->isMonitoringEnabled() && _audio->inputChannels() > 0) {
+        options.monitorRing         = _audio->monitorRing();
+        options.monitorChannelCount = _audio->inputChannels();
+    }
 
     auto compiled = project::compileProjectGraph(*_project, _audio->transport().tempoMap(), options);
     if (!compiled) {
@@ -1050,6 +1079,11 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                                                  action:@selector(toggleAutomationWrite:)
                                           keyEquivalent:@""];
     writeItem.target = self;
+
+    NSMenuItem* monitorItem = [audioMenu addItemWithTitle:@"Monitor Input"
+                                                   action:@selector(toggleInputMonitoring:)
+                                            keyEquivalent:@""];
+    monitorItem.target = self;
 
     audioItem.submenu = audioMenu;
 

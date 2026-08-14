@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  350 test cases, 146,050 assertions, green in both Debug and Release.
+  355 test cases, 146,709 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -1126,10 +1126,10 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step (11b is DONE — phases 0-11 are all COMPLETE; what remains before
-Phase 13 (plugins) is the tail of Phase 12):
+Next step (phases 0-11 COMPLETE; Phase 12 tail shrinking — input monitoring
+is DONE: engine monitor ring, InputMonitorNode with a drift cap, Audio menu
+toggle):
 
-    - input monitoring (input -> a strip, with the usual latency caveats)
     - loop/punch recording: per-segment anchoring (D-024 records why the
       current linear map cannot survive a seek or wrap mid-take); latch-mode
       automation overdub rides the same work (D-026)
@@ -1139,9 +1139,10 @@ Phase 13 (plugins) is the tail of Phase 12):
     - deferred small items: normalize on STREAMED clips (cached peak),
       automation point-editing surface, touch/latch modes
 
-  Or start Phase 13 (plugin hosting, CLAP first per D-007) and pick up the
-  Phase 12 tail alongside — the plugin host is the long pole for the whole
-  product and everything it needs from the engine now exists.
+  Or start Phase 13 (plugin hosting, CLAP first per D-007) — the plugin
+  host is the long pole for the whole product and everything it needs from
+  the engine now exists. Vendoring the CLAP SDK headers needs dependency
+  approval (CLAUDE.md §41) before implementation can start.
 
 Things to be careful about:
 
