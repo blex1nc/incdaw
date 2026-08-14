@@ -151,6 +151,11 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
     blockMidi_.resetOverflowCount();
     blockCounter_.store(0, std::memory_order_release);
     nonFiniteBlocks_.store(0, std::memory_order_relaxed);
+
+    // A previous run's anchor would map host times against a dead clock and
+    // possibly the wrong sample rate. Zero means "never published".
+    anchorVersion_.store(0, std::memory_order_release);
+
     rt::resetViolations();
 }
 
@@ -183,6 +188,17 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
         BlockSegment      plan[Transport::maxSegmentsPerBlock];
         const std::size_t segmentCount =
             transport_.processBlock(frameCount, plan, Transport::maxSegmentsPerBlock);
+
+        // Publish this block's host-time <-> timeline correlation for whoever
+        // needs to place captured audio. Seqlock: odd while writing.
+        if (segmentCount > 0) {
+            anchorVersion_.fetch_add(1, std::memory_order_release);
+            anchor_.hostTimeNanos = blockHostTimeNanos;
+            anchor_.timelineFrame = plan[0].startFrame;
+            anchor_.sampleRate    = device_ != nullptr ? device_->actualSampleRate() : 0.0;
+            anchor_.playing       = transport_.isPlaying();
+            anchorVersion_.fetch_add(1, std::memory_order_release);
+        }
 
         for (std::size_t index = 0; index < segmentCount; ++index) {
             const BlockSegment& segment = plan[index];

@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.6
-Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12: CAPTURE + RECORDER DONE, EXIT CRITERION MET
+Version: 1.7
+Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12: RECORDING INTO THE TIMELINE WORKS
 Last updated: 2026-08-15
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  313 test cases, 65,493 assertions, green in both Debug and Release.
+  322 test cases, 66,791 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -223,10 +223,40 @@ Phase 12 — IN PROGRESS. Done and tested so far:
   0 dropped frames, 0 overruns, 0 realtime allocations. The AirPods HFP mic
   (24 kHz nominal) is correctly refused.
 
-  NOT started within Phase 12: the disk-streaming READER, recording into the
-  timeline (take -> AudioAsset -> audio clip), input monitoring, the
-  pre-record buffer / Audio Logger, and the audio editor. The phase is NOT
-  complete.
+  Part 3 (2026-08-15) — recording lands in the timeline:
+
+  engine::TimelineAnchor       every rendered block publishes (host time,
+                               timeline frame) via a seqlock (D-024)
+  engine/audio/AudioClipNode   audio clips are AUDIBLE: preloaded planar
+                               playback at exact frames; gain, mute, linear
+                               fades; pan/reverse/pitch/stretch are 9b
+  project/RecordingSession     arm -> capture -> finish -> Placement; maps the
+                               compensated take start through the anchor onto
+                               the timeline (stopped transport: the playhead)
+  project::clipStartTicks/
+          clipLengthTicks      the D-013 accessor: placement resolved by clip
+                               type; the playlist draws audio clips through it
+  app InsertRecordedTakeCommand take -> AudioAsset -> audio clip on the first
+                               audio track (created if none); one undo, redo
+                               restores identical ids; undo never deletes the
+                               file on disk
+  ProjectGraphCompiler         audio tracks compile; assets decoded once and
+                               shared; unreadable/wrong-rate assets are SILENT
+                               WITH A WARNING (CompiledProjectGraph::warnings)
+  ui: R toggles recording      input opens on FIRST ARM (never unasked); HFP
+                               mic failure falls back to output-only with the
+                               reason in the status line; ● REC while rolling
+
+  Hardware-verified end to end: recorded from the MacBook mic while the
+  transport rolled the arpeggio — 0 drops, 0 overruns, 0 rt allocations,
+  placement computed against the rolling transport.
+
+  NOT started within Phase 12: the disk-streaming READER, input monitoring,
+  loop/punch recording (per-segment anchoring, see D-024 tradeoffs), the
+  pre-record buffer / Audio Logger, and the audio editor. Audio-clip
+  move/resize in the playlist is 9b (the commands skip audio clips explicitly
+  rather than corrupting frame-anchored placement with tick math). The phase
+  is NOT complete.
 
 Phase 11a — COMPLETE. Done and tested:
 
@@ -1048,24 +1078,26 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: finish Phase 12 — recording into the timeline, then the editor.
+Next step: finish Phase 12 — the streaming reader and the audio editor.
 
-  What exists after part 2: WAV read/probe/write, streaming WAV writing,
-  device input capture with correct latency accounting (proven by the
-  loopback tests), and a realtime-safe recorder producing takes on disk.
+  What exists after part 3: the full recording loop. R records; the take
+  lands as an audio clip at its latency-compensated position; the clip is
+  audible in song mode and visible in the playlist; undo removes the landing
+  whole. All of it hardware-verified against a rolling transport.
 
   What remains, in dependency order:
 
-    - take -> project: a stopped Take must become an AudioAsset + audio clip
-      on a track at its latency-compensated position (the Take already
-      reports startHostTimeNanos; the transport knows host time -> timeline).
-      This is "recording into the playlist" and unlocks 9b's audio clips.
     - the disk-streaming READER (playback side of streaming): audio clips
-      longer than memory, and the pre-record buffer / Audio Logger
+      longer than memory, and the prerequisite for the pre-record buffer /
+      Audio Logger. Today clips are preloaded whole at compile time.
     - input monitoring (input -> a strip, with the usual latency caveats)
-    - the audio editor UI (waveform view, trim, fade, normalize) — after
-      audio exists in the timeline to look at
-    - 11b (automation recording) rides the same capture-timestamp machinery
+    - loop/punch recording: per-segment anchoring (D-024 records why the
+      current linear map cannot survive a seek or wrap mid-take)
+    - the audio editor UI (waveform view, trim, fade, normalize) — audio now
+      exists in the timeline to look at
+    - 9b playlist polish: move/resize audio clips (frame-anchored moves with
+      tempo-aware deltas), waveform rendering in the clip body
+    - 11b (automation recording) rides the same anchor machinery unchanged
 
 Things to be careful about:
 

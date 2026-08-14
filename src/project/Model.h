@@ -216,6 +216,15 @@ struct Clip {
     [[nodiscard]] friend bool operator==(const Clip&, const Clip&) = default;
 };
 
+/// A clip's placement in ticks, resolved by type (docs/DECISIONS.md D-013).
+///
+/// Pattern and automation clips are stored in ticks; audio clips in frames,
+/// anchored to the recording they came from. Every consumer that lays clips on
+/// a musical grid — the playlist above all — goes through these rather than
+/// choosing a field itself, so the two time bases cannot be mixed up.
+[[nodiscard]] Tick clipStartTicks(const Clip& clip, const engine::TempoMap& tempoMap) noexcept;
+[[nodiscard]] Tick clipLengthTicks(const Clip& clip, const engine::TempoMap& tempoMap) noexcept;
+
 // ── Tracks, channels, mixer ───────────────────────────────────────────────────
 
 enum class TrackType : std::uint8_t { instrument, audio, automation, folder };
@@ -352,6 +361,7 @@ public:
     Track&     insertTrack(std::size_t index, Track track);
     Clip&      insertClip(std::size_t index, Clip clip);
     MixerNode& insertMixerNode(std::size_t index, MixerNode node);
+    AudioAsset& insertAudioAsset(std::size_t index, AudioAsset asset);
     RoutingConnection& insertRouting(std::size_t index, RoutingConnection connection);
 
     /// Removes an entity by id. False when there is nothing to remove.
@@ -364,6 +374,7 @@ public:
     bool removeTrack(EntityId id) noexcept;
     bool removeClip(EntityId id) noexcept;
     bool removeMixerNode(EntityId id) noexcept;
+    bool removeAudioAsset(EntityId id) noexcept;
     bool removeRouting(EntityId id) noexcept;
 
     static constexpr std::size_t notFound = static_cast<std::size_t>(-1);
@@ -373,6 +384,7 @@ public:
     [[nodiscard]] std::size_t indexOfTrack(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfClip(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfMixerNode(EntityId id) const noexcept;
+    [[nodiscard]] std::size_t indexOfAudioAsset(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfRouting(EntityId id) const noexcept;
 
     [[nodiscard]] std::vector<Track>&             tracks()      noexcept { return tracks_; }

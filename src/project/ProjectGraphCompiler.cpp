@@ -1,5 +1,6 @@
 #include "project/ProjectGraphCompiler.h"
 
+#include "engine/audio/AudioClipNode.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/SimpleSynth.h"
@@ -7,6 +8,7 @@
 #include "project/PatternCompiler.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <unordered_map>
 
 namespace incdaw::project {
@@ -199,6 +201,95 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         channelIds.push_back(channel.id);
         instrumentNodes.push_back(handle);
         channelStripNodes.push_back(channelHandle);
+    }
+
+    // ── Audio clips ─────────────────────────────────────────────────────────
+    // One AudioClipNode per audio track, the way one InstrumentNode carries a
+    // channel. Assets are decoded here, once each, and shared between clips;
+    // the shared_ptrs die with the graph, off the audio thread, like
+    // everything else the reaper handles.
+    if (options.source == PlaybackSource::arrangement) {
+        std::unordered_map<EntityId, std::shared_ptr<engine::AudioFileData>> loadedAssets;
+
+        const auto loadAsset =
+            [&](EntityId id) -> std::shared_ptr<engine::AudioFileData> {
+            if (const auto found = loadedAssets.find(id); found != loadedAssets.end())
+                return found->second;
+
+            const AudioAsset* asset = nullptr;
+            for (const AudioAsset& candidate : project.audioAssets())
+                if (candidate.id == id)
+                    asset = &candidate;
+
+            std::shared_ptr<engine::AudioFileData> loaded;
+
+            if (asset != nullptr) {
+                const std::string& path = !asset->absolutePath.empty() ? asset->absolutePath
+                                                                       : asset->relativePath;
+
+                auto data = std::make_shared<engine::AudioFileData>();
+
+                if (const auto read = engine::WavFile::read(path, *data); !read) {
+                    compiled.warnings.push_back("audio asset unreadable: " + path
+                                                + " (" + read.error + ")");
+                } else if (data->sampleRate != options.sampleRate) {
+                    // Playing it anyway would be the wrong pitch and the wrong
+                    // length. Silence with a reason beats subtly wrong audio;
+                    // import-time sample-rate conversion is recorded as
+                    // outstanding work.
+                    compiled.warnings.push_back(
+                        "audio asset at " + std::to_string(data->sampleRate)
+                        + " Hz in a " + std::to_string(options.sampleRate)
+                        + " Hz session, left silent: " + path);
+                } else {
+                    loaded = std::move(data);
+                }
+            }
+
+            loadedAssets.emplace(id, loaded);
+            return loaded;
+        };
+
+        const bool anyTrackSoloed = std::any_of(project.tracks().begin(), project.tracks().end(),
+                                                [](const Track& track) { return track.soloed; });
+
+        for (const Track& track : project.tracks()) {
+            if (track.type != TrackType::audio)
+                continue;
+            if (track.muted || (anyTrackSoloed && !track.soloed))
+                continue;
+
+            auto node = std::make_unique<engine::AudioClipNode>();
+
+            for (const Clip& clip : project.clips()) {
+                if (clip.type != ClipType::audio || clip.track != track.id || clip.muted)
+                    continue;
+
+                auto audio = loadAsset(clip.source);
+                if (audio == nullptr)
+                    continue;
+
+                engine::AudioClipNode::PlacedClip placed;
+                placed.audio         = std::move(audio);
+                placed.start         = clip.start;
+                placed.length        = clip.length;
+                placed.sourceOffset  = clip.sourceOffset;
+                placed.gain          = static_cast<engine::Sample>(clip.gain);
+                placed.fadeInFrames  = clip.fadeInFrames;
+                placed.fadeOutFrames = clip.fadeOutFrames;
+
+                node->addClip(std::move(placed));
+            }
+
+            if (node->clipCount() == 0)
+                continue;   // an empty node would render nothing at some cost
+
+            const auto source      = builder.addNode(std::move(node));
+            const auto destination = stripIndices.find(track.outputMixerNode);
+
+            builder.connect(source, destination != stripIndices.end() ? destination->second
+                                                                      : master);
+        }
     }
 
     // ── Automation ──────────────────────────────────────────────────────────

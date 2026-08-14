@@ -232,10 +232,18 @@ asserted deterministically** in `tests/unit/AudioRecorderTests.cpp`: a
 simulated loopback lands sample-accurately with compensation applied and
 exactly `latency` frames late with it removed; `incdaw-audiocheck --record`
 verifies the same path on real hardware (0 drops, 0 overruns, 0 realtime
-allocations, two independently-clocked devices). Outstanding within this
-phase: the disk-streaming reader, recording into the timeline as an audio
-clip, input monitoring, the pre-record buffer / Audio Logger, and the audio
-editor.
+allocations, two independently-clocked devices).
+
+Part 3: recording lands in the timeline. The engine publishes a per-block
+host-time/timeline correlation (`TimelineAnchor`, D-024);
+`RecordingSession` maps the take through it; `InsertRecordedTakeCommand`
+lands asset + clip undoably; `AudioClipNode` makes audio clips audible in
+the arrangement; the app records on `R`, opening the input only when asked.
+Verified on hardware against a rolling transport.
+
+Outstanding within this phase: the disk-streaming reader, input monitoring,
+loop/punch recording (per-segment anchoring), the pre-record buffer / Audio
+Logger, and the audio editor. Audio-clip move/resize in the playlist is 9b.
 
 ---
 

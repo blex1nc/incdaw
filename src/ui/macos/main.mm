@@ -17,17 +17,20 @@
 
 #include "app/CommandRegistry.h"
 #include "app/Version.h"
+#include "app/commands/RecordingCommands.h"
 #include "engine/AudioEngine.h"
 #include "platform/SystemInfo.h"
 #include "project/Model.h"
 #include "project/PatternCompiler.h"
 #include "project/ProjectGraphCompiler.h"
+#include "project/RecordingSession.h"
 #include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
 #include "ui/macos/MixerView.h"
 #include "ui/macos/PlaylistView.h"
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -90,6 +93,10 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     BOOL     _songMode;
 
     NSString* _lastGraphError;
+
+    /// One take at a time, from arm to placement (project/RecordingSession.h).
+    project::RecordingSession _recording;
+    NSString*                 _lastRecordError;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -588,6 +595,109 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     [self refreshStatus];
 }
 
+/// Opens the input device on demand. The engine starts output-only — the
+/// microphone is never opened unasked — so the first record arm reopens the
+/// device pair with input, which is also when macOS shows its permission
+/// prompt: at the moment the user pressed record, when it makes sense.
+- (BOOL)ensureInputOpen
+{
+    if (_audio->inputChannels() > 0)
+        return YES;
+
+    const BOOL wasPlaying = _audio->transport().isPlaying();
+    if (wasPlaying)
+        _audio->transport().stop();
+
+    _audio->stop();
+
+    platform::AudioDeviceConfig config;
+    config.sampleRate            = 48000.0;
+    config.bufferSize            = 512;
+    config.outputChannels        = 2;
+    config.inputDeviceIdentifier = platform::AudioDeviceConfig::defaultInput;
+
+    std::string error;
+    if (!_audio->start(config, error)) {
+        // The input could not open (a Bluetooth HFP microphone at 24 kHz lands
+        // here). Reopen without input so playback keeps working, and say why.
+        NSLog(@"INCDAW: input unavailable: %s", error.c_str());
+        _lastRecordError = [NSString stringWithFormat:@"input: %s", error.c_str()];
+
+        config.inputDeviceIdentifier.clear();
+        std::string fallback;
+        if (!_audio->start(config, fallback)) {
+            NSLog(@"INCDAW: audio restart failed: %s", fallback.c_str());
+            _audioReady = NO;
+            return NO;
+        }
+
+        [self rebuildGraph];
+        return NO;
+    }
+
+    [self rebuildGraph];
+
+    if (wasPlaying) {
+        [self retargetLoop];
+        _audio->transport().play();
+    }
+
+    return YES;
+}
+
+- (void)toggleRecord:(id)sender
+{
+    (void)sender;
+
+    if (!_audioReady)
+        return;
+
+    if (_recording.isRecording()) {
+        const auto placement = _recording.finish(*_audio);
+
+        if (!placement.succeeded) {
+            NSLog(@"INCDAW: recording failed: %s", placement.error.c_str());
+            _lastRecordError = @(placement.error.c_str());
+        } else if (placement.frameCount > 0) {
+            if (placement.droppedFrames > 0) {
+                NSLog(@"INCDAW: take has %llu dropped frames",
+                      static_cast<unsigned long long>(placement.droppedFrames));
+                _lastRecordError = [NSString
+                    stringWithFormat:@"take damaged: %llu dropped frames",
+                                     static_cast<unsigned long long>(placement.droppedFrames)];
+            }
+
+            (void)_registry->execute(
+                std::make_unique<app::InsertRecordedTakeCommand>(placement));
+
+            // The clip is data in song mode's graph; in pattern mode it is
+            // visible in the playlist and will play when the mode switches.
+            [self rebuildGraph];
+            [self.playlist setNeedsDisplay:YES];
+        }
+    } else {
+        _lastRecordError = nil;
+
+        if (![self ensureInputOpen]) {
+            [self refreshStatus];
+            return;
+        }
+
+        NSString* music = [NSSearchPathForDirectoriesInDomains(NSMusicDirectory,
+                                                               NSUserDomainMask, YES) firstObject];
+        const std::filesystem::path directory =
+            std::filesystem::path{music.UTF8String} / "INCDAW" / "Recordings";
+
+        std::string error;
+        if (!_recording.arm(*_audio, directory, error)) {
+            NSLog(@"INCDAW: cannot record: %s", error.c_str());
+            _lastRecordError = @(error.c_str());
+        }
+    }
+
+    [self refreshStatus];
+}
+
 - (void)housekeeping
 {
     if (!_audioReady)
@@ -633,6 +743,15 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
         audio = [NSString stringWithFormat:@"%@ · %.0f%% cpu",
                  playing ? @"▶ playing" : @"■ stopped",
                  _audio->profiler().peakLoad() * 100.0];
+
+        if (_recording.isRecording()) {
+            const double seconds = _audio->sampleRate() > 0.0
+                ? static_cast<double>(_recording.capturedFrames()) / _audio->sampleRate()
+                : 0.0;
+            audio = [NSString stringWithFormat:@"● REC %.1fs · %@", seconds, audio];
+        } else if (_lastRecordError != nil) {
+            audio = [NSString stringWithFormat:@"⚠ %@ · %@", _lastRecordError, audio];
+        }
     }
 
     const project::Channel* channel =
@@ -640,7 +759,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     self.statusField.stringValue = [NSString stringWithFormat:
         @"INCDAW %s  ·  %@  ·  %s / %s  ·  %lu notes  ·  %lu clips  ·  %@  ·  %@  ·  "
-        @"space: play   ⌘Z: undo",
+        @"space: play   r: rec   ⌘Z: undo",
         app::Version::string(),
         _songMode ? @"song" : @"pattern",
         pattern != nullptr ? pattern->name.c_str() : "—",
@@ -705,6 +824,15 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                                         keyEquivalent:@""];
     playItem.target = self;
 
+    // Plain R, no modifier: record is a transport control, and transport
+    // controls live on bare keys in every DAW. The menu route means it works
+    // whichever pane has focus.
+    NSMenuItem* recordItem = [viewMenu addItemWithTitle:@"Record"
+                                                 action:@selector(toggleRecord:)
+                                          keyEquivalent:@"r"];
+    recordItem.keyEquivalentModifierMask = 0;
+    recordItem.target = self;
+
     viewItem.submenu = viewMenu;
 
     NSMenuItem* editItem = [[NSMenuItem alloc] init];
@@ -727,12 +855,17 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 {
     (void)notification;
 
-    // Stop the device before the graph it is reading goes away.
+    // Stop the device before the graph it is reading goes away. A recording
+    // in flight is finished first — quitting must not truncate a take's file.
     [_housekeeping invalidate];
     _housekeeping = nil;
 
-    if (_audio != nullptr)
+    if (_audio != nullptr) {
+        if (_recording.isRecording())
+            (void)_recording.finish(*_audio);
+
         _audio->stop();
+    }
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender

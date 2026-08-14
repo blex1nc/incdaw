@@ -50,6 +50,7 @@ add_library(incdaw_engine STATIC
     engine/audio/WavFile.cpp
     engine/audio/WavStreamWriter.cpp
     engine/audio/AudioRecorder.cpp
+    engine/audio/AudioClipNode.cpp
     engine/AudioEngine.cpp)
 target_include_directories(incdaw_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_engine
@@ -77,7 +78,8 @@ add_library(incdaw_project STATIC
     project/MidiCapture.cpp
     project/ParameterRegistry.cpp
     project/PatternCompiler.cpp
-    project/ProjectGraphCompiler.cpp)
+    project/ProjectGraphCompiler.cpp
+    project/RecordingSession.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_project
     PUBLIC  incdaw_engine
@@ -97,7 +99,8 @@ add_library(incdaw_app STATIC
     app/commands/TrackCommands.cpp
     app/commands/ClipCommands.cpp
     app/commands/MixerCommands.cpp
-    app/commands/AutomationCommands.cpp)
+    app/commands/AutomationCommands.cpp
+    app/commands/RecordingCommands.cpp)
 target_include_directories(incdaw_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_app
     PUBLIC  incdaw_project

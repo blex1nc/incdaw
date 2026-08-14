@@ -9,17 +9,19 @@
 //
 //   incdaw-audiocheck [--seconds N] [--buffer N] [--rate N] [--freq HZ]
 //                     [--amplitude A] [--silent] [--list] [--device UID] [--midi]
-//                     [--play] [--record] [--input UID] [--take PATH]
+//                     [--play] [--record] [--input UID] [--take DIR]
 //
 // --record opens the input device ("default" unless --input names one) and
-// records through the same AudioRecorder the application uses, reporting the
-// take, its latency-compensated start, and any dropped frames. This verifies
-// the capture path on real hardware; the sample-accuracy exit criterion is
-// asserted deterministically in tests/unit/AudioRecorderTests.cpp.
+// records through the same RecordingSession the application uses — capture,
+// the timeline anchor, and latency-compensated placement, on real hardware.
+// Combine with --play to exercise placement against a rolling transport. The
+// sample-accuracy exit criterion itself is asserted deterministically in
+// tests/unit/AudioRecorderTests.cpp.
 
 #include "engine/AudioEngine.h"
 #include "engine/audio/AudioRecorder.h"
 #include "engine/core/RealtimeGuard.h"
+#include "project/RecordingSession.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/SineOscillatorNode.h"
 #include "engine/graph/RenderGraph.h"
@@ -52,7 +54,7 @@ struct Options {
     bool        play = false;///< play a phrase through the instrument instead of a tone
     bool        record = false;   ///< capture input to a WAV while running
     std::string input = "default";///< input device uid for --record
-    std::string take  = "/tmp/incdaw-take.wav";
+    std::string take  = "/tmp";   ///< directory takes are written into
 };
 
 Options parseArguments(int argc, char** argv)
@@ -223,24 +225,18 @@ int main(int argc, char** argv)
 
     const double rate = audioEngine.sampleRate();
 
-    // The recorder is armed after the device is running, wired through the
-    // same capture-sink pointer the application will use.
-    engine::AudioRecorder recorder;
+    // Recording goes through the same RecordingSession the application uses,
+    // so this exercises the whole chain on real hardware: capture, the
+    // timeline anchor, and latency-compensated placement.
+    project::RecordingSession recording;
 
     if (options.record) {
-        engine::AudioRecorder::Options recorderOptions;
-        recorderOptions.sampleRate    = rate;
-        recorderOptions.channelCount  = audioEngine.inputChannels();
-        recorderOptions.maxBlockSize  = audioEngine.maxServiceableBlockSize();
-        recorderOptions.latencyFrames = audioEngine.totalInputLatencyFrames();
-
-        if (const auto started = recorder.start(options.take, recorderOptions); !started) {
-            std::cerr << "error: could not start recording: " << started.error << "\n";
+        std::string recordError;
+        if (!recording.arm(audioEngine, options.take, recordError)) {
+            std::cerr << "error: could not start recording: " << recordError << "\n";
             audioEngine.stop();
             return 1;
         }
-
-        audioEngine.setCaptureSink(&recorder);
     }
 
     std::cout << "Device      : " << audioEngine.deviceName() << "\n"
@@ -283,12 +279,10 @@ int main(int argc, char** argv)
     if (midiDevice != nullptr)
         midiDevice->close();
 
-    engine::AudioRecorder::Take take;
+    project::RecordingSession::Placement take;
 
-    if (options.record) {
-        audioEngine.setCaptureSink(nullptr);
-        take = recorder.stop();
-    }
+    if (options.record)
+        take = recording.finish(audioEngine);
 
     audioEngine.stop();
 
@@ -332,6 +326,10 @@ int main(int argc, char** argv)
         std::cout << "  recorded frames  : " << take.frameCount
                   << "  (expected ~" << static_cast<std::uint64_t>(expectedFrames) << ")\n"
                   << "  dropped frames   : " << take.droppedFrames << "\n"
+                  << "  placed at frame  : " << take.startFrame
+                  << (take.placedAgainstPlayback ? "  (against rolling transport)"
+                                                 : "  (at the stopped playhead)")
+                  << "\n"
                   << "  take             : " << (take.succeeded ? take.path.string() : take.error) << "\n";
     }
 

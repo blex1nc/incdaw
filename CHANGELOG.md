@@ -8,6 +8,53 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 12 (part 3) — Recording lands in the timeline — 2026-08-15
+
+**Added**
+
+- `engine::TimelineAnchor` — every rendered block publishes its (host time,
+  timeline frame) correlation through a seqlock (D-024); the audio thread
+  never blocks, readers retry the rare torn read.
+- `engine/audio/AudioClipNode` — audio clips are audible: one node per audio
+  track plays preloaded planar clips at their exact timeline frames with gain,
+  mute and linear fades. Pan/normalize/reverse/pitch/stretch deliberately not
+  yet (9b polish).
+- `project/RecordingSession` — arm-to-placement coordinator: starts the
+  recorder from the engine's own figures, and on finish maps the take's
+  latency-compensated start through the anchor onto the timeline (or the
+  stopped playhead). Returns a Placement; it never mutates the Project.
+- `project::clipStartTicks` / `clipLengthTicks` — the D-013 accessor: clip
+  placement resolved by type, so the playlist can lay frame-anchored audio
+  clips on its musical grid without mixing time bases.
+- `app/commands/RecordingCommands` — `InsertRecordedTakeCommand`: take file →
+  AudioAsset → audio clip on the first audio track (created if none), one
+  undo for the whole landing; redo restores identical ids. The file on disk
+  is deliberately not deleted by undo.
+- `ProjectGraphCompiler` — audio tracks compile: assets decoded once and
+  shared, wrong-rate or unreadable assets stay silent with a warning
+  (`CompiledProjectGraph::warnings`), clips feed the track's mixer node.
+- INCDAW app: plain `R` toggles recording; the input device opens on first
+  arm (the microphone is never opened unasked), a Bluetooth HFP mic failure
+  falls back to output-only with the reason in the status line; `● REC` with
+  elapsed time while recording; the finished take appears in the playlist.
+- Playlist: audio clips are visible, selectable and deletable. Moving and
+  resizing them is deferred to 9b (frame-anchored moves need per-clip tempo
+  math) and the commands skip them explicitly rather than corrupting them.
+- `incdaw-audiocheck --record` now runs the whole chain (RecordingSession +
+  anchor) and reports where the take was placed.
+- `tests/unit/RecordingPlacementTests.cpp` — anchor arithmetic, sample-exact
+  clip playback, fades/gain/offset/mute, compiler placement through the
+  master, wrong-rate refusal, command undo/redo id stability, serialization
+  round trip of a recorded take.
+
+Verified on hardware: recording from the MacBook microphone while the
+transport rolled the arpeggio — 3 s take, 0 drops, 0 overruns, 0 realtime
+allocations, placement computed against the rolling transport.
+
+Still to come in Phase 12: the disk-streaming reader, input monitoring,
+loop/punch recording (per-segment anchoring), the pre-record buffer / Audio
+Logger, and the audio editor.
+
 ### Phase 12 (part 2) — Input capture and recording — 2026-08-15
 
 **Added**

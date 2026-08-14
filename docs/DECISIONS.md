@@ -722,3 +722,37 @@ callback.
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+---
+
+## D-024 — A take is placed by clock correlation, not by counting
+
+**Context:** A recorded take must land on the timeline exactly where the
+musician heard themselves play. Phase 12 part 3 connects the recorder's
+host-time take start to a timeline frame.
+
+**Options:**
+- Count blocks while recording and derive position from block arithmetic
+- Latch the transport position when recording starts and trust it
+- Publish a per-block (host time, timeline frame) anchor and map through it
+
+**Chosen:** The engine publishes a `TimelineAnchor` from every rendered block
+through a seqlock — the audio thread never blocks, readers retry the rare torn
+read. `RecordingSession::finish` maps the take's latency-compensated start
+through the freshest anchor: both sides ride the output device's clock, so the
+linear extrapolation is exact.
+
+**Reason:** Counting blocks breaks the moment a block is split by a loop or a
+seek, and latching at arm time is wrong by however long arming preceded the
+first captured sample. The anchor states the correlation the engine already
+knows, once per block, and everything else is arithmetic. It is also the
+mechanism 11b's automation recording will use unchanged.
+
+**Tradeoffs:** The map is linear, so a seek or loop wrap DURING a take places
+everything after it incorrectly; loop/punch recording needs per-segment
+anchoring and is outstanding Phase 12 work. A take armed with the transport
+stopped lands at the playhead instead — there is no moving timeline to
+correlate against, and pretending otherwise would invent a position.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

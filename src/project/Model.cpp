@@ -132,6 +132,41 @@ bool Project::removeClip(EntityId id) noexcept
     return true;
 }
 
+Tick clipStartTicks(const Clip& clip, const engine::TempoMap& tempoMap) noexcept
+{
+    return clip.type == ClipType::audio ? tempoMap.tickForFrame(clip.start) : clip.startTick;
+}
+
+Tick clipLengthTicks(const Clip& clip, const engine::TempoMap& tempoMap) noexcept
+{
+    if (clip.type != ClipType::audio)
+        return clip.lengthTicks;
+
+    // End minus start rather than converting the length alone: with a tempo
+    // change inside the clip the two differ, and the end is what must line up
+    // on screen with what plays.
+    return tempoMap.tickForFrame(clip.start + clip.length) - tempoMap.tickForFrame(clip.start);
+}
+
+AudioAsset& Project::insertAudioAsset(std::size_t index, AudioAsset asset)
+{
+    ids_.observe(asset.id);
+
+    const std::size_t position = std::min(index, audioAssets_.size());
+    return *audioAssets_.insert(audioAssets_.begin() + static_cast<std::ptrdiff_t>(position),
+                                std::move(asset));
+}
+
+bool Project::removeAudioAsset(EntityId id) noexcept
+{
+    const std::size_t index = indexOfAudioAsset(id);
+    if (index == notFound)
+        return false;
+
+    audioAssets_.erase(audioAssets_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
 bool Project::removeMixerNode(EntityId id) noexcept
 {
     // The master is what everything reaches; a project without one cannot be
@@ -188,6 +223,15 @@ std::size_t Project::indexOfClip(EntityId id) const noexcept
 {
     for (std::size_t index = 0; index < clips_.size(); ++index)
         if (clips_[index].id == id)
+            return index;
+
+    return notFound;
+}
+
+std::size_t Project::indexOfAudioAsset(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < audioAssets_.size(); ++index)
+        if (audioAssets_[index].id == id)
             return index;
 
     return notFound;

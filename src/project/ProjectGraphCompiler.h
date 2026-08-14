@@ -105,6 +105,11 @@ struct CompiledProjectGraph {
 
     std::string error;
 
+    /// Non-fatal compile notes: an asset file that could not be read, an
+    /// asset at the wrong sample rate. The graph still compiled; the affected
+    /// clips are silent, and the UI should say why rather than play wrong.
+    std::vector<std::string> warnings;
+
     [[nodiscard]] explicit operator bool() const noexcept { return graph != nullptr; }
 
     /// Instrument node for a channel, or nullptr if it is not in the graph.

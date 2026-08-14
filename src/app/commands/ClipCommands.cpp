@@ -113,7 +113,7 @@ bool MoveClipsCommand::execute(Project& project)
 
     for (const EntityId id : clips_) {
         const Clip* clip = project.findClip(id);
-        if (clip == nullptr)
+        if (clip == nullptr || clip->type == project::ClipType::audio)
             continue;
 
         tickDelta = std::max(tickDelta, -clip->startTick);
@@ -127,7 +127,11 @@ bool MoveClipsCommand::execute(Project& project)
 
     for (const EntityId id : clips_) {
         Clip* clip = project.findClip(id);
-        if (clip == nullptr)
+
+        // Audio clips are frame-anchored; a tick-based move would need the
+        // tempo map and a per-clip frame delta for undo. That arrives with
+        // 9b — until then they stay where the recording put them.
+        if (clip == nullptr || clip->type == project::ClipType::audio)
             continue;
 
         clip->startTick += tickDelta;
@@ -148,7 +152,7 @@ void MoveClipsCommand::undo(Project& project)
 {
     for (const EntityId id : clips_) {
         Clip* clip = project.findClip(id);
-        if (clip == nullptr)
+        if (clip == nullptr || clip->type == project::ClipType::audio)
             continue;
 
         clip->startTick -= appliedTickDelta_;
@@ -189,7 +193,7 @@ bool ResizeClipsCommand::execute(Project& project)
 
     for (const EntityId id : clips_) {
         Clip* clip = project.findClip(id);
-        if (clip == nullptr) {
+        if (clip == nullptr || clip->type == project::ClipType::audio) {
             previousLengths_.push_back(0);
             continue;
         }
@@ -207,8 +211,13 @@ bool ResizeClipsCommand::execute(Project& project)
 void ResizeClipsCommand::undo(Project& project)
 {
     for (std::size_t index = 0; index < clips_.size() && index < previousLengths_.size(); ++index) {
-        if (Clip* clip = project.findClip(clips_[index]))
-            clip->lengthTicks = previousLengths_[index];
+        Clip* clip = project.findClip(clips_[index]);
+
+        // Mirrors the skip in execute: what was not resized is not restored.
+        if (clip == nullptr || clip->type == project::ClipType::audio)
+            continue;
+
+        clip->lengthTicks = previousLengths_[index];
     }
 }
 

@@ -49,9 +49,14 @@ PlaylistModel::Rect PlaylistModel::clipRect(const Project& project, const Clip& 
     if (row == Project::notFound)
         return {};
 
-    const Tick length = clip.lengthTicks > 0 ? clip.lengthTicks : 0;
+    // Placement resolved by clip type (D-013): audio clips live in frames and
+    // are converted through the tempo map; everything else is already ticks.
+    const Tick startTick   = project::clipStartTicks(clip, project.tempoMap());
+    const Tick lengthTicks = project::clipLengthTicks(clip, project.tempoMap());
 
-    const double x = tickToX(clip.startTick);
+    const Tick length = lengthTicks > 0 ? lengthTicks : 0;
+
+    const double x = tickToX(startTick);
     const double width = static_cast<double>(length) * pointsPerTick();
     const double y = trackY(project.tracks(), row);
 
@@ -68,8 +73,8 @@ void PlaylistModel::collectVisibleClips(const Project& project, std::vector<Visi
 
     for (std::size_t index = 0; index < clips.size(); ++index) {
         const Clip& clip = clips[index];
-        if (clip.type != project::ClipType::pattern)
-            continue;
+        if (clip.type == project::ClipType::automation)
+            continue;   // automation clips arrive with Phase 11b
 
         const Rect rect = clipRect(project, clip);
         if (rect.width <= 0.0)
@@ -104,7 +109,7 @@ std::size_t PlaylistModel::clipAtPoint(const Project& project, double x, double 
         const std::size_t position = index - 1;
         const Clip& clip = clips[position];
 
-        if (clip.type != project::ClipType::pattern)
+        if (clip.type == project::ClipType::automation)
             continue;
 
         if (clipRect(project, clip).contains(x, y))
@@ -118,6 +123,11 @@ bool PlaylistModel::isOverResizeHandle(const Project& project, std::size_t index
                                        double x, double y) const
 {
     if (index >= project.clips().size())
+        return false;
+
+    // Audio clips are frame-anchored and not yet resizable from the grid;
+    // offering the handle would start a drag that cannot apply (9b work).
+    if (project.clips()[index].type == project::ClipType::audio)
         return false;
 
     const Rect rect = clipRect(project, project.clips()[index]);
@@ -141,7 +151,7 @@ void PlaylistModel::clipsInRectangle(const Project& project, double x, double y,
     const double bottom = std::max(y, y + height);
 
     for (const Clip& clip : project.clips()) {
-        if (clip.type != project::ClipType::pattern)
+        if (clip.type == project::ClipType::automation)
             continue;
 
         const Rect rect = clipRect(project, clip);

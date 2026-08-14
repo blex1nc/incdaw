@@ -17,6 +17,29 @@ namespace incdaw::engine {
 
 class AudioCaptureSink;
 
+/// One rendered block's correlation between the host clock and the timeline.
+///
+/// This is how a recorded take finds its place: the recorder knows the host
+/// time its audio was captured; this says which timeline frame was being heard
+/// at a given host time. Both advance on the same output clock, so the
+/// mapping extrapolates linearly between blocks.
+struct TimelineAnchor {
+    std::uint64_t hostTimeNanos = 0;   ///< when the block's first frame is heard
+    FramePosition timelineFrame = 0;   ///< the timeline position of that frame
+    double        sampleRate    = 0.0;
+    bool          playing       = false;
+
+    /// The timeline frame heard at `whenNanos`. Meaningless unless `playing`.
+    [[nodiscard]] FramePosition frameAt(std::uint64_t whenNanos) const noexcept
+    {
+        const double deltaSeconds =
+            (static_cast<double>(whenNanos) - static_cast<double>(hostTimeNanos)) * 1.0e-9;
+        const double frames = deltaSeconds * sampleRate;
+        return timelineFrame
+             + static_cast<FramePosition>(frames >= 0.0 ? frames + 0.5 : frames - 0.5);
+    }
+};
+
 /// Connects an audio device to a render graph.
 ///
 /// Owns the realtime boundary: everything below it is realtime-safe, everything
@@ -69,6 +92,30 @@ public:
     [[nodiscard]] AudioCaptureSink* captureSink() const noexcept
     {
         return captureSink_.load(std::memory_order_acquire);
+    }
+
+    /// The most recent block's host-time <-> timeline correlation.
+    ///
+    /// Published from the audio thread through a seqlock — the audio thread
+    /// never blocks, the reader retries on the rare torn read. Returns false
+    /// before the first block. `anchor.playing` is false while stopped, in
+    /// which case the frame mapping must not be used (the timeline was not
+    /// advancing, so no linear relation exists).
+    [[nodiscard]] bool latestAnchor(TimelineAnchor& anchor) const noexcept
+    {
+        for (;;) {
+            const std::uint64_t before = anchorVersion_.load(std::memory_order_acquire);
+            if (before == 0)
+                return false;
+            if (before & 1u)
+                continue;   // writer mid-update
+
+            anchor = anchor_;
+
+            const std::uint64_t after = anchorVersion_.load(std::memory_order_acquire);
+            if (after == before)
+                return true;
+        }
     }
 
     /// The single time authority. Nodes read position from the block plan this
@@ -139,6 +186,11 @@ private:
     CallbackProfiler           profiler_;
     std::atomic<std::uint64_t> blockCounter_{0};
     std::atomic<std::uint64_t> nonFiniteBlocks_{0};
+
+    /// Seqlock around `anchor_`: odd while the audio thread writes, bumped to
+    /// even when the payload is consistent. Zero means "never published".
+    std::atomic<std::uint64_t> anchorVersion_{0};
+    TimelineAnchor             anchor_;
 };
 
 } // namespace incdaw::engine
