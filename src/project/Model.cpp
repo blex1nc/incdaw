@@ -1,6 +1,7 @@
 #include "project/Model.h"
 
 #include <filesystem>
+#include <utility>
 
 namespace incdaw::project {
 
@@ -103,11 +104,70 @@ RoutingConnection& Project::connect(EntityId source, EntityId destination)
     return routing_.back();
 }
 
+// ── Pattern ───────────────────────────────────────────────────────────────────
+
+const PatternChannelContent* Pattern::content(EntityId channel) const noexcept
+{
+    for (const PatternChannelContent& entry : channels)
+        if (entry.channel == channel)
+            return &entry;
+
+    return nullptr;
+}
+
+PatternChannelContent* Pattern::content(EntityId channel) noexcept
+{
+    return const_cast<PatternChannelContent*>(std::as_const(*this).content(channel));
+}
+
+PatternChannelContent& Pattern::contentFor(EntityId channel)
+{
+    if (PatternChannelContent* existing = content(channel))
+        return *existing;
+
+    PatternChannelContent entry;
+    entry.channel = channel;
+    channels.push_back(std::move(entry));
+    return channels.back();
+}
+
+const std::vector<MidiEvent>* Pattern::events(EntityId channel) const noexcept
+{
+    const PatternChannelContent* entry = content(channel);
+    return entry != nullptr ? &entry->events : nullptr;
+}
+
+std::vector<MidiEvent>* Pattern::events(EntityId channel) noexcept
+{
+    PatternChannelContent* entry = content(channel);
+    return entry != nullptr ? &entry->events : nullptr;
+}
+
+std::size_t Pattern::totalEventCount() const noexcept
+{
+    std::size_t count = 0;
+    for (const PatternChannelContent& entry : channels)
+        count += entry.events.size();
+
+    return count;
+}
+
+// ── Lookup ────────────────────────────────────────────────────────────────────
+
 const Track* Project::findTrack(EntityId id) const noexcept
 {
     for (const Track& track : tracks_)
         if (track.id == id)
             return &track;
+
+    return nullptr;
+}
+
+const Channel* Project::findChannel(EntityId id) const noexcept
+{
+    for (const Channel& channel : channels_)
+        if (channel.id == id)
+            return &channel;
 
     return nullptr;
 }
@@ -119,6 +179,11 @@ const Pattern* Project::findPattern(EntityId id) const noexcept
             return &pattern;
 
     return nullptr;
+}
+
+Pattern* Project::findPattern(EntityId id) noexcept
+{
+    return const_cast<Pattern*>(std::as_const(*this).findPattern(id));
 }
 
 const MixerNode* Project::findMixerNode(EntityId id) const noexcept

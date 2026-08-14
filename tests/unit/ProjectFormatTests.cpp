@@ -77,14 +77,20 @@ Project makePopulatedProject()
 
     auto& pattern = project.addPattern("Verse");
     pattern.length = engine::ticksPerQuarterNote * 8;
-    pattern.events.push_back(MidiEvent{MidiEventType::note, 0, 480, 0, 60, 100, 64,
+    pattern.swing  = 0.32;
+
+    auto& content = pattern.contentFor(channel.id);
+    content.loopLength = engine::ticksPerQuarterNote * 3;   // polymetric against the pattern
+    content.events.push_back(MidiEvent{MidiEventType::note, 0, 480, 0, 60, 100, 64,
                                        0.85, -0.2, 0.05, "root"});
-    pattern.events.push_back(MidiEvent{MidiEventType::note, 480, 240, 0, 64, 90, 64,
+    content.events.push_back(MidiEvent{MidiEventType::note, 480, 240, 0, 64, 90, 64,
                                        1.0, 0.0, 0.0, "third"});
-    pattern.events.push_back(MidiEvent{MidiEventType::controlChange, 960, 0, 0, 74, 42, 0,
+    content.events.push_back(MidiEvent{MidiEventType::controlChange, 960, 0, 0, 74, 42, 0,
                                        1.0, 0.0, 0.0, ""});
 
     auto& clip = project.addClip(ClipType::pattern, track.id, pattern.id);
+    clip.startTick   = engine::ticksPerQuarterNote * 16;
+    clip.lengthTicks = engine::ticksPerQuarterNote * 32;
     clip.start  = 96000;
     clip.length = 192000;
     clip.gain   = 0.707;
@@ -264,7 +270,7 @@ TEST_CASE("the format version is stamped from the very first save")
     REQUIRE(ProjectFile::save(project, packagePath));
 
     CHECK(ProjectFile::isProjectPackage(packagePath));
-    CHECK(ProjectFile::versionOf(packagePath) == "1.0");
+    CHECK(ProjectFile::versionOf(packagePath) == projectFormatVersionString());
     CHECK(fs::exists(packagePath / "manifest.json"));
     CHECK(fs::exists(packagePath / "project.json"));
     CHECK(fs::is_directory(packagePath / "patterns"));
@@ -525,7 +531,11 @@ TEST_CASE("the v1.0 fixture still loads")
     const auto result = ProjectFile::load(project, fixture);
 
     REQUIRE(result.succeeded);
-    CHECK_FALSE(result.migrated);   // 1.0 is the current version
+
+    // 1.0 is no longer current, so loading the fixture exercises the migration
+    // chain — which is the point of keeping it.
+    CHECK(result.migrated);
+    CHECK(result.migratedFrom == "1.0");
 
     CHECK(project.metadata().title == "Format v1.0 fixture");
 
@@ -544,9 +554,16 @@ TEST_CASE("the v1.0 fixture still loads")
 
     const Pattern* pattern = project.findPattern(EntityId{6});
     REQUIRE(pattern != nullptr);
-    REQUIRE(pattern->events.size() == 2);
-    CHECK(pattern->events[0].label == "root");
-    CHECK(pattern->events[0].probability == doctest::Approx(0.85));
+
+    // The fixture is format 1.0, which stored one flat event list per pattern.
+    // Loading it must attach those notes to a real channel, or they would be
+    // present in the model and silent on playback.
+    REQUIRE(project.channels().size() == 1);
+    const std::vector<MidiEvent>* events = pattern->events(project.channels()[0].id);
+    REQUIRE(events != nullptr);
+    REQUIRE(events->size() == 2);
+    CHECK((*events)[0].label == "root");
+    CHECK((*events)[0].probability == doctest::Approx(0.85));
 
     CHECK(project.clips()[0].gain == doctest::Approx(0.707));
     CHECK(project.clips()[0].normalize);

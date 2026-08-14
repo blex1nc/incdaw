@@ -541,53 +541,53 @@ TEST_CASE("recording accuracy does not depend on the block size")
 
 TEST_CASE("quantize snaps note starts to the grid")
 {
-    project::Pattern pattern;
+    std::vector<project::MidiEvent> notes;
     const Tick grid = ticksPerQuarterNote / 4;   // sixteenths
 
     for (const Tick tick : {0, 231, 245, 470, 490})
-        pattern.events.push_back(patternNote(tick));
+        notes.push_back(patternNote(tick));
 
-    project::quantizeNoteStarts(pattern, grid, 1.0);
+    project::quantizeNoteStarts(notes, grid, 1.0);
 
-    for (const project::MidiEvent& event : pattern.events)
+    for (const project::MidiEvent& event : notes)
         CHECK(event.tick % grid == 0);
 }
 
 TEST_CASE("partial quantize strength moves notes without pinning them")
 {
     // A quantiser without strength is why quantised parts sound dead.
-    project::Pattern pattern;
+    std::vector<project::MidiEvent> notes;
     const Tick grid = ticksPerQuarterNote;
 
-    pattern.events.push_back(patternNote(100));
-    project::quantizeNoteStarts(pattern, grid, 0.5);
+    notes.push_back(patternNote(100));
+    project::quantizeNoteStarts(notes, grid, 0.5);
 
-    CHECK(pattern.events[0].tick == 50);   // halfway back to 0
+    CHECK(notes[0].tick == 50);   // halfway back to 0
 }
 
 TEST_CASE("quantize preserves note durations")
 {
     // Snapping a note's length to the grid changes its articulation, which is
     // not what the user asked for.
-    project::Pattern pattern;
-    pattern.events.push_back(patternNote(231, 137));
+    std::vector<project::MidiEvent> notes;
+    notes.push_back(patternNote(231, 137));
 
-    project::quantizeNoteStarts(pattern, ticksPerQuarterNote / 4, 1.0);
+    project::quantizeNoteStarts(notes, ticksPerQuarterNote / 4, 1.0);
 
-    CHECK(pattern.events[0].duration == 137);
+    CHECK(notes[0].duration == 137);
 }
 
 TEST_CASE("quantize leaves non-note events alone")
 {
-    project::Pattern pattern;
+    std::vector<project::MidiEvent> notes;
     project::MidiEvent cc;
     cc.type = project::MidiEventType::controlChange;
     cc.tick = 231;
-    pattern.events.push_back(cc);
+    notes.push_back(cc);
 
-    project::quantizeNoteStarts(pattern, ticksPerQuarterNote, 1.0);
+    project::quantizeNoteStarts(notes, ticksPerQuarterNote, 1.0);
 
-    CHECK(pattern.events[0].tick == 231);
+    CHECK(notes[0].tick == 231);
 }
 
 TEST_CASE("humanize is deterministic for a given seed")
@@ -595,49 +595,49 @@ TEST_CASE("humanize is deterministic for a given seed")
     // Reproducibility is what makes it undoable, and what keeps the golden-file
     // audio tests meaningful.
     const auto build = [] {
-        project::Pattern pattern;
+        std::vector<project::MidiEvent> notes;
         for (int index = 0; index < 32; ++index)
-            pattern.events.push_back(patternNote(static_cast<Tick>(index) * ticksPerQuarterNote));
-        return pattern;
+            notes.push_back(patternNote(static_cast<Tick>(index) * ticksPerQuarterNote));
+        return notes;
     };
 
-    project::Pattern first  = build();
-    project::Pattern second = build();
-    project::Pattern other  = build();
+    std::vector<project::MidiEvent> first  = build();
+    std::vector<project::MidiEvent> second = build();
+    std::vector<project::MidiEvent> other  = build();
 
     project::humanizeNoteStarts(first, 20, 12345);
     project::humanizeNoteStarts(second, 20, 12345);
     project::humanizeNoteStarts(other, 20, 999);
 
-    CHECK(first.events == second.events);
-    CHECK_FALSE(first.events == other.events);
+    CHECK(first == second);
+    CHECK_FALSE(first == other);
 }
 
 TEST_CASE("humanize stays within its range and never goes negative")
 {
-    project::Pattern pattern;
-    pattern.events.push_back(patternNote(0));
+    std::vector<project::MidiEvent> notes;
+    notes.push_back(patternNote(0));
     for (int index = 1; index < 64; ++index)
-        pattern.events.push_back(patternNote(static_cast<Tick>(index) * ticksPerQuarterNote));
+        notes.push_back(patternNote(static_cast<Tick>(index) * ticksPerQuarterNote));
 
-    project::humanizeNoteStarts(pattern, 30, 7);
+    project::humanizeNoteStarts(notes, 30, 7);
 
-    for (const project::MidiEvent& event : pattern.events)
+    for (const project::MidiEvent& event : notes)
         CHECK(event.tick >= 0);
 }
 
-TEST_CASE("recorded events become pattern content sorted by position")
+TEST_CASE("recorded events become notes content sorted by position")
 {
     std::vector<RecordedEvent> events;
     events.push_back(RecordedEvent{RecordedEvent::Kind::note, 960, 480, 0, 64, 90, 64});
     events.push_back(RecordedEvent{RecordedEvent::Kind::note, 0, 480, 0, 60, 100, 64});
 
-    project::Pattern pattern;
-    project::appendRecordedEvents(pattern, events);
+    std::vector<project::MidiEvent> notes;
+    project::appendRecordedEvents(notes, events);
 
-    REQUIRE(pattern.events.size() == 2);
-    CHECK(pattern.events[0].tick == 0);
-    CHECK(pattern.events[1].tick == 960);
-    CHECK(pattern.events[0].key == 60);
-    CHECK(pattern.events[0].duration == 480);
+    REQUIRE(notes.size() == 2);
+    CHECK(notes[0].tick == 0);
+    CHECK(notes[1].tick == 960);
+    CHECK(notes[0].key == 60);
+    CHECK(notes[0].duration == 480);
 }

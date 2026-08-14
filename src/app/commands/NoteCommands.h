@@ -12,7 +12,11 @@ using project::EntityId;
 using project::MidiEvent;
 using project::Tick;
 
-/// Note edits address their targets by index into the pattern's event vector.
+/// Note edits address one channel's event list inside one pattern, by index.
+///
+/// The (pattern, channel) pair rather than the pattern alone: a pattern holds
+/// content for every channel programmed in it, and an edit always belongs to
+/// exactly one of them.
 ///
 /// Indices are safe here specifically because the undo stack is LIFO: when a
 /// command is undone, the project is in exactly the state that command left it
@@ -24,7 +28,8 @@ using NoteIndices = std::vector<std::size_t>;
 /// Adds one note.
 class AddNoteCommand final : public Command {
 public:
-    AddNoteCommand(EntityId pattern, MidiEvent note) : pattern_(pattern), note_(std::move(note)) {}
+    AddNoteCommand(EntityId pattern, EntityId channel, MidiEvent note)
+        : pattern_(pattern), channel_(channel), note_(std::move(note)) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "pianoroll.addNote"; }
     [[nodiscard]] std::string name() const override { return "Add Note"; }
@@ -36,6 +41,7 @@ public:
 
 private:
     EntityId    pattern_;
+    EntityId    channel_;
     MidiEvent   note_;
     std::size_t index_ = 0;
 };
@@ -43,8 +49,8 @@ private:
 /// Removes notes.
 class DeleteNotesCommand final : public Command {
 public:
-    DeleteNotesCommand(EntityId pattern, NoteIndices indices)
-        : pattern_(pattern), indices_(std::move(indices)) {}
+    DeleteNotesCommand(EntityId pattern, EntityId channel, NoteIndices indices)
+        : pattern_(pattern), channel_(channel), indices_(std::move(indices)) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "pianoroll.deleteNotes"; }
     [[nodiscard]] std::string name() const override;
@@ -54,6 +60,7 @@ public:
 
 private:
     EntityId               pattern_;
+    EntityId               channel_;
     NoteIndices            indices_;
     std::vector<MidiEvent> removed_;   ///< captured in the same order as indices_
 };
@@ -61,8 +68,10 @@ private:
 /// Moves notes in time and pitch. Mergeable, so a drag is one undo.
 class MoveNotesCommand final : public Command {
 public:
-    MoveNotesCommand(EntityId pattern, NoteIndices indices, Tick tickDelta, int keyDelta)
-        : pattern_(pattern), indices_(std::move(indices)), tickDelta_(tickDelta), keyDelta_(keyDelta) {}
+    MoveNotesCommand(EntityId pattern, EntityId channel, NoteIndices indices,
+                     Tick tickDelta, int keyDelta)
+        : pattern_(pattern), channel_(channel), indices_(std::move(indices)),
+          tickDelta_(tickDelta), keyDelta_(keyDelta) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "pianoroll.moveNotes"; }
     [[nodiscard]] std::string name() const override { return "Move Notes"; }
@@ -75,6 +84,7 @@ public:
 
 private:
     EntityId    pattern_;
+    EntityId    channel_;
     NoteIndices indices_;
     Tick        tickDelta_ = 0;
     int         keyDelta_  = 0;
@@ -89,8 +99,9 @@ private:
 /// Changes note lengths. Mergeable.
 class ResizeNotesCommand final : public Command {
 public:
-    ResizeNotesCommand(EntityId pattern, NoteIndices indices, Tick durationDelta)
-        : pattern_(pattern), indices_(std::move(indices)), durationDelta_(durationDelta) {}
+    ResizeNotesCommand(EntityId pattern, EntityId channel, NoteIndices indices, Tick durationDelta)
+        : pattern_(pattern), channel_(channel), indices_(std::move(indices)),
+          durationDelta_(durationDelta) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "pianoroll.resizeNotes"; }
     [[nodiscard]] std::string name() const override { return "Resize Notes"; }
@@ -103,6 +114,7 @@ public:
 
 private:
     EntityId          pattern_;
+    EntityId          channel_;
     NoteIndices       indices_;
     Tick              durationDelta_ = 0;
     std::vector<Tick> previousDurations_;
@@ -111,8 +123,8 @@ private:
 /// Sets velocity on a selection.
 class SetVelocityCommand final : public Command {
 public:
-    SetVelocityCommand(EntityId pattern, NoteIndices indices, int velocity)
-        : pattern_(pattern), indices_(std::move(indices)), velocity_(velocity) {}
+    SetVelocityCommand(EntityId pattern, EntityId channel, NoteIndices indices, int velocity)
+        : pattern_(pattern), channel_(channel), indices_(std::move(indices)), velocity_(velocity) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "pianoroll.setVelocity"; }
     [[nodiscard]] std::string name() const override { return "Set Velocity"; }
@@ -125,6 +137,7 @@ public:
 
 private:
     EntityId         pattern_;
+    EntityId         channel_;
     NoteIndices      indices_;
     int              velocity_ = 100;
     std::vector<int> previousVelocities_;
@@ -137,8 +150,8 @@ private:
 /// index scheme above does not cover.
 class QuantizeNotesCommand final : public Command {
 public:
-    QuantizeNotesCommand(EntityId pattern, Tick grid, double strength)
-        : pattern_(pattern), grid_(grid), strength_(strength) {}
+    QuantizeNotesCommand(EntityId pattern, EntityId channel, Tick grid, double strength)
+        : pattern_(pattern), channel_(channel), grid_(grid), strength_(strength) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "pianoroll.quantize"; }
     [[nodiscard]] std::string name() const override { return "Quantize"; }
@@ -148,6 +161,7 @@ public:
 
 private:
     EntityId               pattern_;
+    EntityId               channel_;
     Tick                   grid_     = 0;
     double                 strength_ = 1.0;
     std::vector<MidiEvent> previousEvents_;

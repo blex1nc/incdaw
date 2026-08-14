@@ -120,6 +120,16 @@ length, polymetric lengths.
 **Exit criterion:** one pattern placed multiple times in the arrangement plays
 identically at each placement; editing it updates all placements.
 
+**8a — model and compilation: COMPLETE (2026-08-14).** Per-channel pattern
+content, swing, polymetric channel lengths, arrangement compilation, and
+`project::compileProjectGraph` — the Project → render graph seam. Exit criterion
+covered by "one pattern placed several times plays identically at each
+placement" in `tests/unit/PatternTests.cpp`.
+
+**8b — UI: NOT STARTED.** Channel Rack, pattern list, step sequencer grid.
+Automation inside patterns is Phase 11; `Pattern::automationLanes` serializes
+but nothing evaluates it.
+
 ---
 
 ## Phase 9 — Playlist / arrangement

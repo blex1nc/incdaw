@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 0.9
-Status: PHASES 0-7 COMPLETE / PHASE 8 NEXT
+Version: 1.0
+Status: PHASES 0-7 COMPLETE, PHASE 8a COMPLETE / PHASE 8b NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -125,9 +125,9 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 
 Current phase:
 
-PHASES 0-5 COMPLETE (2026-08-14)
-PHASE 7 (instruments) — COMPLETE
-PHASE 8 (patterns) — NOT STARTED
+PHASES 0-7 COMPLETE (2026-08-14)
+PHASE 8a (pattern model + compilation) — COMPLETE
+PHASE 8b (Channel Rack / pattern list / step sequencer UI) — NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -139,8 +139,11 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  223 test cases, 30,674 assertions, green in both Debug and Release.
+  238 test cases, 30,749 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
+
+  third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
+  (command under "Dependencies in tree" below) before the first configure.
 
 Implemented:
 
@@ -176,6 +179,35 @@ Phase 6 — COMPLETE. Done and tested:
   Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
   scroll to pan, Cmd+scroll to zoom.
 
+Phase 8a — COMPLETE. Done and tested:
+
+  project/Model.h                  Pattern holds PatternChannelContent per
+                                   channel, each with its own loop length
+                                   (polymetry). Pattern gained swing/swingGrid.
+                                   Clip gained tick placement alongside frames.
+  project/PatternCompiler          per-channel compile; polymetric repeats;
+                                   swing; probability; compileArrangement over
+                                   the project's pattern clips
+  project/ProjectGraphCompiler     Project -> CompiledGraph. One InstrumentNode
+                                   + GainNode per audible channel, into a master
+                                   gain. Injectable InstrumentFactory so Phase 13
+                                   is a new factory, not a change here.
+  app/commands/NoteCommands        every note edit addresses (pattern, channel)
+  app/PianoRollModel               takes an event list, not a Pattern
+  project/ProjectFile              format 1.0 -> 1.1 + migration; the 1.0
+                                   fixture still loads and its notes are bound
+                                   to a real channel
+
+  Decisions recorded: D-012 (per-channel content), D-013 (tick vs frame clip
+  placement), D-014 (swing applies only exactly on the grid).
+
+  Measured (Release): recompiling 16 channels x 500 notes x 32 placements —
+  256,000 note instances — costs 2.7 ms. Debug: 43.9 ms.
+
+  Exit criterion test: "one pattern placed several times plays identically at
+  each placement" in tests/unit/PatternTests.cpp, which also asserts that
+  editing the pattern changes every placement.
+
 Phase 7 — COMPLETE. Done and tested:
 
   engine/instrument/Instrument     API; the base class does the block-splitting
@@ -195,6 +227,11 @@ Phase 7 — COMPLETE. Done and tested:
   6 s arpeggio, 0 overruns, 0 realtime allocations.
 
 WHAT THE APP STILL DOES NOT DO:
+
+  - no Channel Rack, no pattern list, no step sequencer. main.mm creates one
+    channel and one pattern; the Piano Roll edits that single pair. The model
+    supports many of both — the UI does not expose them. THIS IS PHASE 8b.
+  - patterns can carry automation lanes in the model; nothing evaluates them.
 
   - no mixer: the signal path is instrument -> master gain -> device. The
     MixerNode/RoutingConnection types serialize but nothing evaluates them.
@@ -838,27 +875,47 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 8 (patterns), then 9 (playlist) and 10 (mixer).
+Next step: Phase 8b (Channel Rack / pattern list / step sequencer UI), then
+9 (playlist) and 10 (mixer).
 
-  Those three are what make it feel like a DAW rather than a pattern editor.
-  In dependency order:
+  8b is UI only — the model and the compiler underneath it are done and tested.
+  What it needs:
 
-  8  multiple patterns; a pattern list in the UI; one InstrumentNode per
-     channel rather than one hardcoded node in main.mm
-  9  the playlist: place pattern clips on a timeline, several tracks
-  10 the mixer: make MixerNode and RoutingConnection actually compile into
-     the render graph, with PDC. The types already exist and serialize.
+    - a Channel Rack: add/remove/rename channels, mute, solo, volume, colour,
+      and selecting which channel the Piano Roll edits
+      (set INCDAWPianoRollView.channelIdValue)
+    - a pattern list: add/rename/select patterns
+      (set INCDAWPianoRollView.patternIdValue)
+    - a step sequencer grid: steps ARE notes on a grid, deliberately — there is
+      no separate step data type, so the two editors cannot diverge
+    - commands for all of the above, in app/commands/, so the Channel Rack goes
+      through the same undo stack as everything else. NoteCommands is the
+      pattern to follow.
 
-  Practical note for whoever continues: main.mm currently builds the graph by
-  hand from patterns()[0]. That is the seam. Phase 8 should replace it with a
-  proper project -> graph compiler in project/ (it cannot live in engine/,
-  which cannot see a Project), and everything after that becomes additive.
+  main.mm's rebuildGraph is already a single call to compileProjectGraph, so
+  new channels and patterns become audible with no further engine work.
+
+  9  the playlist: place pattern clips on a timeline, several tracks. The
+     arrangement compile (project::compileArrangement) and tick-based clip
+     placement already exist and are tested; Phase 9 is the UI plus audio clips.
+  10 the mixer: make MixerNode and RoutingConnection actually compile into the
+     render graph, with PDC, and move channel pan there — the graph compiler
+     deliberately does not apply pan today (D-013 note in ARCHITECTURE §7).
 
   docs/DECISIONS.md D-011 records why Metal shaders compile at runtime (no
   `metal` compiler without full Xcode). Deployment target is 14.0 for NSView
   displayLink.
 
 Things to be careful about:
+
+  - tests/fixtures/v1.1/ does not exist. Format 1.1 is covered only by the
+    save/load round trip, which proves the code agrees with itself and nothing
+    more. docs/PROJECT_FORMAT.md §2 requires a hand-written fixture before 1.1
+    ships.
+  - Two clip time bases now coexist (D-013). Pattern and automation clips use
+    startTick/lengthTicks; audio clips use start/length. Phase 9 should add one
+    accessor that resolves placement by clip type rather than letting each
+    caller choose.
 
   - The mixer, automation and clip types serialize but have no audio path.
     Phases 10 and 11 must build that; nothing today evaluates them.

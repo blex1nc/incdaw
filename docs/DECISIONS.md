@@ -326,3 +326,96 @@ pipelines, this decision should be revisited — it would then require Xcode.
 
 **Date:** 2026-08-14
 **Status:** ACCEPTED
+
+---
+
+## D-012 — A pattern stores its notes per channel
+
+**Context:** Until Phase 8 a `Pattern` held one flat `std::vector<MidiEvent>`.
+Phase 8 needs a Channel Rack and a step sequencer, both of which are views of
+several channels programmed side by side inside the same pattern.
+
+**Options:**
+- Keep the flat list and put a channel id on every `MidiEvent`
+- Give the pattern a list of per-channel content blocks
+- Give each channel its own patterns, and make a "pattern" a set of them
+
+**Chosen:** `Pattern::channels` — a vector of `PatternChannelContent`, each
+holding a channel id, an optional loop length, and that channel's events.
+
+**Reason:** It is the shape the workflow actually has. A flat list forces every
+reader — compiler, editor, renderer, step sequencer — to filter by channel on
+every pass, and leaves nowhere to put a per-channel property. The per-channel
+loop length is what makes polymetric patterns expressible at all, and there is
+no sensible place for it on an individual event. The third option was rejected
+because it destroys the property that makes patterns useful: one pattern placed
+in several places, edited once.
+
+**Tradeoffs:** The project format changed (v1.0 → v1.1) and every note command
+now addresses a (pattern, channel) pair rather than a pattern. Migration from
+1.0 attaches the flat list to the project's first channel, creating one if the
+project has none.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-013 — Pattern and automation clips are placed in ticks, audio clips in frames
+
+**Context:** `Clip` stored `start`, `length` and `sourceOffset` in frames. A
+pattern placed at bar 5 must stay at bar 5 when the tempo changes; a recorded
+audio clip must stay where it was recorded.
+
+**Options:**
+- Frames everywhere, converting on tempo change
+- Ticks everywhere, converting audio on the fly
+- Both, with the clip type deciding which is authoritative
+
+**Chosen:** Both. `startTick` / `lengthTicks` / `sourceOffsetTicks` are
+authoritative for pattern and automation clips; `start` / `length` /
+`sourceOffset` remain authoritative for audio clips.
+
+**Reason:** The two clip kinds genuinely have different time bases, and
+pretending otherwise pushes the problem into every consumer. Frames-everywhere
+means the first tempo change silently desynchronises the whole arrangement —
+recoverable only by rewriting every clip, which is a migration disguised as an
+edit. Ticks-everywhere means an audio clip drifts against its own recording.
+
+**Tradeoffs:** Two fields to keep coherent per clip, and code that touches
+placement has to know which kind it is holding. Phase 9 will need a single
+accessor that resolves placement by clip type rather than letting callers pick.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-014 — Swing displaces only notes exactly on the grid
+
+**Context:** Swing shifts off-beat subdivisions later. Which notes count as
+"on an off-beat" has to be decided: a note may sit a few ticks off a grid line
+because it was played, nudged, or partially quantised.
+
+**Options:**
+- Displace every note, scaled by its position within the subdivision
+- Displace notes within a tolerance window of an odd grid line
+- Displace only notes exactly on an odd grid line
+
+**Chosen:** Exactly on the line. A tolerance of `grid / 8` was implemented
+first, and a test written against it — the test is what exposed the problem.
+
+**Reason:** A tolerance width cannot be explained to the user, and it silently
+decides that a note played 30 ms early was "meant" to be on the beat, which
+destroys timing the performer intended. Steps and snapped Piano Roll notes land
+exactly on the grid, so the common case is covered exactly; anything off the
+grid was placed expressively and is left alone.
+
+**Tradeoffs:** A part quantised at strength < 1 will not swing, because its
+notes are deliberately not on the grid. That is the correct outcome — the user
+asked for the timing to be preserved — but it means "quantise loosely, then
+swing" is not a workflow INCDAW supports. If it is ever wanted, it belongs as an
+explicit "swing as quantise target" operation, not as a tolerance here.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED

@@ -4,7 +4,7 @@
 
 namespace incdaw::app {
 
-void PianoRollModel::collectVisibleNotes(const Pattern& pattern, std::vector<VisibleNote>& out) const
+void PianoRollModel::collectVisibleNotes(const NoteList& notes, std::vector<VisibleNote>& out) const
 {
     // Cleared, not reassigned: the capacity earned on previous frames is what
     // keeps a steady-state frame allocation-free.
@@ -19,8 +19,8 @@ void PianoRollModel::collectVisibleNotes(const Pattern& pattern, std::vector<Vis
     const Tick lastTick   = viewport_.firstTick + viewport_.visibleTicks;
     const int  highestKey = viewport_.lowestKey + viewport_.visibleKeys - 1;
 
-    for (std::size_t index = 0; index < pattern.events.size(); ++index) {
-        const MidiEvent& event = pattern.events[index];
+    for (std::size_t index = 0; index < notes.size(); ++index) {
+        const MidiEvent& event = notes[index];
 
         if (event.type != project::MidiEventType::note)
             continue;
@@ -49,7 +49,7 @@ void PianoRollModel::collectVisibleNotes(const Pattern& pattern, std::vector<Vis
     }
 }
 
-std::size_t PianoRollModel::noteAtPoint(const Pattern& pattern, double x, double y) const
+std::size_t PianoRollModel::noteAtPoint(const NoteList& notes, double x, double y) const
 {
     const double scale  = pointsPerTick();
     const double height = keyHeight();
@@ -62,9 +62,9 @@ std::size_t PianoRollModel::noteAtPoint(const Pattern& pattern, double x, double
 
     // Back to front: the note drawn last sits on top where they overlap, and
     // that is the one the user is pointing at.
-    for (std::size_t position = pattern.events.size(); position > 0; --position) {
+    for (std::size_t position = notes.size(); position > 0; --position) {
         const std::size_t index = position - 1;
-        const MidiEvent&  event = pattern.events[index];
+        const MidiEvent&  event = notes[index];
 
         if (event.type != project::MidiEventType::note || event.key != key)
             continue;
@@ -77,13 +77,13 @@ std::size_t PianoRollModel::noteAtPoint(const Pattern& pattern, double x, double
     return noNote;
 }
 
-bool PianoRollModel::isOverResizeHandle(const Pattern& pattern, std::size_t index,
+bool PianoRollModel::isOverResizeHandle(const NoteList& notes, std::size_t index,
                                         double x, double y) const
 {
-    if (index >= pattern.events.size())
+    if (index >= notes.size())
         return false;
 
-    const MidiEvent& event = pattern.events[index];
+    const MidiEvent& event = notes[index];
     if (event.type != project::MidiEventType::note)
         return false;
 
@@ -100,7 +100,7 @@ bool PianoRollModel::isOverResizeHandle(const Pattern& pattern, std::size_t inde
     return x >= noteRight - handle && x <= noteRight;
 }
 
-void PianoRollModel::notesInRectangle(const Pattern& pattern, double x, double y,
+void PianoRollModel::notesInRectangle(const NoteList& notes, double x, double y,
                                       double width, double height,
                                       std::vector<std::size_t>& out) const
 {
@@ -124,8 +124,8 @@ void PianoRollModel::notesInRectangle(const Pattern& pattern, double x, double y
     if (scale <= 0.0 || rowSize <= 0.0)
         return;
 
-    for (std::size_t index = 0; index < pattern.events.size(); ++index) {
-        const MidiEvent& event = pattern.events[index];
+    for (std::size_t index = 0; index < notes.size(); ++index) {
+        const MidiEvent& event = notes[index];
         if (event.type != project::MidiEventType::note)
             continue;
 

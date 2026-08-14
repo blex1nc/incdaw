@@ -1,28 +1,28 @@
 // INCDAW — macOS application.
 //
-// Phase 7: the Piano Roll is live and audible. Editing a note changes what
-// plays, because every edit rebuilds the render graph and hands it to the audio
-// engine through an atomic swap.
+// Phase 8: the render graph is no longer assembled here. The window owns a
+// Project and asks project::compileProjectGraph for a graph; every edit
+// recompiles and hands the result to the audio engine through an atomic swap.
 //
-// Not yet present: the mixer (Phase 10) and automation (Phase 11). The signal
-// path is instrument -> master gain -> device, and nothing pretends otherwise.
+// Not yet present: the Channel Rack and pattern list (Phase 8b), the mixer
+// (Phase 10) and automation (Phase 11). The signal path is
+// instrument -> channel gain -> master gain -> device, and nothing pretends
+// otherwise — channel pan is deliberately not applied, because a pan law
+// belongs to the mixer.
 
 #import <Cocoa/Cocoa.h>
 
 #include "app/CommandRegistry.h"
 #include "app/Version.h"
 #include "engine/AudioEngine.h"
-#include "engine/dsp/GainNode.h"
-#include "engine/instrument/InstrumentNode.h"
-#include "engine/instrument/SimpleSynth.h"
-#include "engine/graph/RenderGraph.h"
 #include "platform/SystemInfo.h"
 #include "project/Model.h"
-#include "project/PatternCompiler.h"
+#include "project/ProjectGraphCompiler.h"
 #include "ui/macos/PianoRollView.h"
 
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace incdaw;
 using incdaw::engine::Tick;
@@ -33,7 +33,7 @@ namespace {
 /// A short phrase so the editor opens with something to look at and edit,
 /// rather than an empty grid. It is ordinary pattern content — selectable,
 /// movable, deletable, undoable — not a fixture the UI treats specially.
-void addStarterPhrase(project::Pattern& pattern)
+void addStarterPhrase(std::vector<project::MidiEvent>& events)
 {
     const int  scale[] = {0, 4, 7, 12, 7, 4};
     const Tick step    = ticksPerQuarterNote / 2;
@@ -45,7 +45,7 @@ void addStarterPhrase(project::Pattern& pattern)
         note.key      = 60 + scale[index % 6];
         note.duration = step - 20;
         note.value    = 70 + (index % 4) * 15;
-        pattern.events.push_back(note);
+        events.push_back(note);
     }
 }
 
@@ -73,8 +73,9 @@ void addStarterPhrase(project::Pattern& pattern)
     _project  = std::make_unique<project::Project>();
     _registry = std::make_unique<app::CommandRegistry>(*_project);
 
+    auto& channel = _project->addChannel("Channel 1");
     auto& pattern = _project->addPattern("Pattern 1");
-    addStarterPhrase(pattern);
+    addStarterPhrase(pattern.contentFor(channel.id).events);
 
     const NSRect frame = NSMakeRect(0, 0, 1180, 720);
 
@@ -99,6 +100,7 @@ void addStarterPhrase(project::Pattern& pattern)
              registry:_registry.get()];
 
     self.pianoRoll.patternIdValue = pattern.id.value();
+    self.pianoRoll.channelIdValue = channel.id.value();
     self.pianoRoll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [content addSubview:self.pianoRoll];
 
@@ -178,26 +180,20 @@ void addStarterPhrase(project::Pattern& pattern)
     if (!_audioReady || _project->patterns().empty())
         return;
 
-    auto instrument = std::make_unique<engine::InstrumentNode>(
-        std::make_unique<engine::SimpleSynth>(), _audio->transport().tempoMap());
+    project::GraphCompileOptions options;
+    options.sampleRate   = _audio->sampleRate();
+    options.maxBlockSize = _audio->bufferSize();
+    options.channelCount = _audio->outputChannels();
+    options.source       = project::PlaybackSource::pattern;
+    options.pattern      = project::EntityId{self.pianoRoll.patternIdValue};
 
-    project::compilePatternInto(instrument->sequence(), _project->patterns()[0]);
-
-    engine::GraphBuilder builder;
-    const auto channel = builder.addNode(std::move(instrument));
-    const auto master  = builder.addNode(std::make_unique<engine::dsp::GainNode>(0.8f));
-
-    builder.connect(channel, master);
-    builder.setMaster(master);
-
-    auto graph = builder.compile(_audio->sampleRate(), _audio->bufferSize(),
-                                 _audio->outputChannels());
-    if (graph == nullptr) {
-        NSLog(@"INCDAW: graph rebuild failed: %s", builder.lastError().c_str());
+    auto compiled = project::compileProjectGraph(*_project, _audio->transport().tempoMap(), options);
+    if (!compiled) {
+        NSLog(@"INCDAW: graph rebuild failed: %s", compiled.error.c_str());
         return;
     }
 
-    _audio->setGraph(std::move(graph));
+    _audio->setGraph(std::move(compiled.graph));
 }
 
 - (void)toggleTransport
@@ -243,7 +239,7 @@ void addStarterPhrase(project::Pattern& pattern)
 - (void)refreshStatus
 {
     const auto& patterns = _project->patterns();
-    const std::size_t noteCount = patterns.empty() ? 0 : patterns[0].events.size();
+    const std::size_t noteCount = patterns.empty() ? 0 : patterns[0].totalEventCount();
 
     NSString* undo = _registry->canUndo()
                          ? [NSString stringWithFormat:@"undo: %s", _registry->undoName().c_str()]

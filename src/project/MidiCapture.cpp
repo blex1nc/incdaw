@@ -30,9 +30,10 @@ std::uint64_t nextRandom(std::uint64_t& state) noexcept
 
 } // namespace
 
-void appendRecordedEvents(Pattern& pattern, const std::vector<engine::RecordedEvent>& events)
+void appendRecordedEvents(std::vector<MidiEvent>& destination,
+                          const std::vector<engine::RecordedEvent>& events)
 {
-    pattern.events.reserve(pattern.events.size() + events.size());
+    destination.reserve(destination.size() + events.size());
 
     for (const engine::RecordedEvent& recorded : events) {
         MidiEvent event;
@@ -44,21 +45,21 @@ void appendRecordedEvents(Pattern& pattern, const std::vector<engine::RecordedEv
         event.value        = recorded.value;
         event.releaseValue = recorded.releaseValue;
 
-        pattern.events.push_back(std::move(event));
+        destination.push_back(std::move(event));
     }
 
-    std::stable_sort(pattern.events.begin(), pattern.events.end(),
+    std::stable_sort(destination.begin(), destination.end(),
                      [](const MidiEvent& a, const MidiEvent& b) { return a.tick < b.tick; });
 }
 
-void quantizeNoteStarts(Pattern& pattern, Tick grid, double strength)
+void quantizeNoteStarts(std::vector<MidiEvent>& events, Tick grid, double strength)
 {
     if (grid <= 0)
         return;
 
     strength = std::clamp(strength, 0.0, 1.0);
 
-    for (MidiEvent& event : pattern.events) {
+    for (MidiEvent& event : events) {
         if (event.type != MidiEventType::note)
             continue;
 
@@ -74,11 +75,11 @@ void quantizeNoteStarts(Pattern& pattern, Tick grid, double strength)
         event.tick = moved;
     }
 
-    std::stable_sort(pattern.events.begin(), pattern.events.end(),
+    std::stable_sort(events.begin(), events.end(),
                      [](const MidiEvent& a, const MidiEvent& b) { return a.tick < b.tick; });
 }
 
-void humanizeNoteStarts(Pattern& pattern, Tick maxTicks, std::uint64_t seed)
+void humanizeNoteStarts(std::vector<MidiEvent>& events, Tick maxTicks, std::uint64_t seed)
 {
     if (maxTicks <= 0)
         return;
@@ -86,7 +87,7 @@ void humanizeNoteStarts(Pattern& pattern, Tick maxTicks, std::uint64_t seed)
     std::uint64_t state = seed;
     const auto    span  = static_cast<std::uint64_t>(maxTicks) * 2 + 1;
 
-    for (MidiEvent& event : pattern.events) {
+    for (MidiEvent& event : events) {
         if (event.type != MidiEventType::note)
             continue;
 
@@ -97,7 +98,7 @@ void humanizeNoteStarts(Pattern& pattern, Tick maxTicks, std::uint64_t seed)
         event.tick = std::max<Tick>(0, event.tick + displacement);
     }
 
-    std::stable_sort(pattern.events.begin(), pattern.events.end(),
+    std::stable_sort(events.begin(), events.end(),
                      [](const MidiEvent& a, const MidiEvent& b) { return a.tick < b.tick; });
 }
 

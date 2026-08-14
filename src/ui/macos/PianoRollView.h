@@ -20,6 +20,10 @@ namespace incdaw::app     { class CommandRegistry; }
 /// Pattern being edited, by entity id value.
 @property (nonatomic, assign) unsigned long long patternIdValue;
 
+/// Channel being edited within that pattern. A pattern holds notes for every
+/// channel programmed in it; the editor always looks at exactly one.
+@property (nonatomic, assign) unsigned long long channelIdValue;
+
 /// Playhead position in ticks; negative hides it.
 @property (nonatomic, assign) long long playheadTick;
 

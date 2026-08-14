@@ -14,7 +14,11 @@ namespace incdaw::project {
 /// CLAUDE.md §2 is absolute: never create an unversioned project format. This
 /// is stamped into the very first file INCDAW ever saves.
 inline constexpr int projectFormatMajor = 1;
-inline constexpr int projectFormatMinor = 0;
+
+/// 1.1 (Phase 8): a pattern's notes are stored per channel rather than as one
+/// flat list, and pattern clips are placed in ticks rather than frames. Both
+/// are read back from 1.0 files — see `ProjectFile::migrate`.
+inline constexpr int projectFormatMinor = 1;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

@@ -447,6 +447,8 @@ TEST_CASE("collecting from the sequence is realtime-safe")
 TEST_CASE("patterns compile to sequences, skipping non-notes")
 {
     project::Pattern pattern;
+    const project::EntityId channel{1};
+    auto& events = pattern.contentFor(channel).events;
 
     project::MidiEvent note;
     note.type = project::MidiEventType::note;
@@ -454,13 +456,13 @@ TEST_CASE("patterns compile to sequences, skipping non-notes")
     note.duration = 480;
     note.key = 60;
     note.value = 100;
-    pattern.events.push_back(note);
+    events.push_back(note);
 
     project::MidiEvent cc;
     cc.type = project::MidiEventType::controlChange;
-    pattern.events.push_back(cc);
+    events.push_back(cc);
 
-    const auto compiled = project::compilePattern(pattern);
+    const auto compiled = project::compilePattern(pattern, channel);
 
     REQUIRE(compiled.size() == 1);
     CHECK(compiled[0].key == 60);
@@ -472,6 +474,8 @@ TEST_CASE("note probability is deterministic for a seed")
     // Playback and offline render must agree, so probability cannot be rolled
     // on the audio thread.
     project::Pattern pattern;
+    const project::EntityId channel{1};
+    auto& events = pattern.contentFor(channel).events;
 
     for (int index = 0; index < 200; ++index) {
         project::MidiEvent note;
@@ -481,17 +485,28 @@ TEST_CASE("note probability is deterministic for a seed")
         note.key         = 60;
         note.value       = 100;
         note.probability = 0.5;
-        pattern.events.push_back(note);
+        events.push_back(note);
     }
 
-    const auto first  = project::compilePattern(pattern, 4242);
-    const auto second = project::compilePattern(pattern, 4242);
-    const auto other  = project::compilePattern(pattern, 99);
+    const auto first  = project::compilePattern(pattern, channel, 4242);
+    const auto second = project::compilePattern(pattern, channel, 4242);
+    const auto other  = project::compilePattern(pattern, channel, 99);
 
-    CHECK(first.size() == second.size());
-    CHECK(first.size() < pattern.events.size());   // some were skipped
+    // Compared by content, not by count: two seeds can easily drop the same
+    // *number* of notes while dropping different ones, and a size comparison
+    // would call that a pass.
+    const auto starts = [](const std::vector<engine::SequencedNote>& compiled) {
+        std::vector<Tick> ticks;
+        ticks.reserve(compiled.size());
+        for (const engine::SequencedNote& note : compiled)
+            ticks.push_back(note.startTick);
+        return ticks;
+    };
+
+    CHECK(starts(first) == starts(second));        // same seed, same result
+    CHECK(starts(first) != starts(other));         // a different seed differs
+    CHECK(first.size() < events.size());           // some were skipped
     CHECK(first.size() > 0);
-    CHECK(other.size() != first.size());           // a different seed differs
 }
 
 // ── Phase 7 exit criterion ────────────────────────────────────────────────────

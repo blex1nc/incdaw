@@ -8,6 +8,38 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 8a — Pattern system: model and compilation — 2026-08-14
+
+**Added**
+
+- `project::PatternChannelContent` — a pattern now holds its notes per channel,
+  with an optional per-channel loop length for polymetric patterns (D-012).
+- `Pattern::swing` / `swingGrid` — shuffle resolved at compile time, applied to
+  notes exactly on an odd grid line (D-014).
+- `Clip::startTick` / `lengthTicks` / `sourceOffsetTicks` — musical placement,
+  authoritative for pattern and automation clips (D-013).
+- `project::compileArrangement` — every note a channel plays across the
+  arrangement's pattern clips. A clip shorter than its pattern trims it, a
+  longer one repeats it, and notes are cut at the clip boundary.
+- `project::compileProjectGraph` — the Project → render graph seam, with an
+  injectable `InstrumentFactory`, per-channel gain, and project-wide solo.
+- `tests/unit/PatternTests.cpp` — 15 cases including the Phase 8 exit criterion
+  and a recompile-cost measurement.
+
+**Changed**
+
+- Project format 1.0 → 1.1. Pattern files store `channels[]`; clips store tick
+  placement. 1.0 files are migrated on load and the 1.0 fixture still passes.
+- Note commands address a (pattern, channel) pair; `PianoRollModel` and
+  `MidiCapture` take an event list rather than a `Pattern`.
+- `ui/macos/main.mm` no longer assembles the render graph by hand.
+
+**Known gaps**
+
+- No Channel Rack, pattern list, or step sequencer UI yet (Phase 8b): the app
+  still opens one pattern on one channel.
+- No `tests/fixtures/v1.1/` fixture yet — required before 1.1 ships.
+
 ### Phase 0 — Research and architecture — 2026-08-14
 
 **Added**

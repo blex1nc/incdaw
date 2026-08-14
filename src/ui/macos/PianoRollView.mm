@@ -178,6 +178,24 @@ enum class DragMode { none, move, resize, boxSelect };
                                           self.bounds.size.height * scale);
 }
 
+/// Notes the editor is currently looking at.
+///
+/// A pattern that has never been programmed on this channel has no content
+/// block yet, and that is not an error — it is an empty editor. The add-note
+/// command creates the block when the first note arrives.
+- (const std::vector<project::MidiEvent>&)currentNotes
+{
+    static const std::vector<project::MidiEvent> empty;
+
+    const project::Pattern* pattern = [self currentPattern];
+    if (pattern == nullptr)
+        return empty;
+
+    const std::vector<project::MidiEvent>* notes =
+        pattern->events(project::EntityId{_channelIdValue});
+    return notes != nullptr ? *notes : empty;
+}
+
 - (project::Pattern*)currentPattern
 {
     if (_project == nullptr)
@@ -254,8 +272,8 @@ enum class DragMode { none, move, resize, boxSelect };
     }
 
     // Notes.
-    if (const project::Pattern* pattern = [self currentPattern]) {
-        _model->collectVisibleNotes(*pattern, _visible);
+    {
+        _model->collectVisibleNotes([self currentNotes], _visible);
 
         for (const auto& visible : _visible) {
             // Velocity drives brightness: the loudest information in a pattern
@@ -346,7 +364,7 @@ enum class DragMode { none, move, resize, boxSelect };
         return;
     }
 
-    const std::size_t hit = _model->noteAtPoint(*pattern, grid.x, grid.y);
+    const std::size_t hit = _model->noteAtPoint([self currentNotes], grid.x, grid.y);
 
     if (hit != app::PianoRollModel::noNote) {
         if ((event.modifierFlags & NSEventModifierFlagShift) != 0) {
@@ -355,7 +373,7 @@ enum class DragMode { none, move, resize, boxSelect };
             _model->setSelection({hit});
         }
 
-        _dragMode = _model->isOverResizeHandle(*pattern, hit, grid.x, grid.y)
+        _dragMode = _model->isOverResizeHandle([self currentNotes], hit, grid.x, grid.y)
                         ? DragMode::resize
                         : DragMode::move;
 
@@ -381,7 +399,8 @@ enum class DragMode { none, move, resize, boxSelect };
     if (note.tick < 0)
         note.tick = 0;
 
-    auto command = std::make_unique<app::AddNoteCommand>(project::EntityId{_patternIdValue}, note);
+    auto command = std::make_unique<app::AddNoteCommand>(
+        project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue}, note);
     auto* raw = command.get();
 
     if (_registry->execute(std::move(command))) {
@@ -406,7 +425,7 @@ enum class DragMode { none, move, resize, boxSelect };
         return;
 
     if (_dragMode == DragMode::boxSelect) {
-        _model->notesInRectangle(*pattern,
+        _model->notesInRectangle([self currentNotes],
                                  _dragOrigin.x - keyboardWidth, _dragOrigin.y,
                                  viewPoint.x - _dragOrigin.x, viewPoint.y - _dragOrigin.y,
                                  _hits);
@@ -439,7 +458,8 @@ enum class DragMode { none, move, resize, boxSelect };
         // Merging turns the whole drag into one undo entry rather than one per
         // mouse move.
         if (_registry->executeMerging(std::make_unique<app::MoveNotesCommand>(
-                project::EntityId{_patternIdValue}, _model->selection(), deltaTicks, deltaKeys))) {
+                project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+                   _model->selection(), deltaTicks, deltaKeys))) {
             _dragAppliedTicks = snapped;
             _dragAppliedKeys  = totalKeys;
             _gestureActive    = YES;
@@ -455,7 +475,8 @@ enum class DragMode { none, move, resize, boxSelect };
             return;
 
         if (_registry->executeMerging(std::make_unique<app::ResizeNotesCommand>(
-                project::EntityId{_patternIdValue}, _model->selection(), delta))) {
+                project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+                   _model->selection(), delta))) {
             _dragAppliedTicks = snapped;
             _gestureActive    = YES;
             [self reportAction:@"Resize Notes"];
@@ -480,13 +501,14 @@ enum class DragMode { none, move, resize, boxSelect };
         return;
 
     const NSPoint grid = [self gridPointFromEvent:event];
-    const std::size_t hit = _model->noteAtPoint(*pattern, grid.x, grid.y);
+    const std::size_t hit = _model->noteAtPoint([self currentNotes], grid.x, grid.y);
 
     if (hit == app::PianoRollModel::noNote)
         return;
 
     if (_registry->execute(std::make_unique<app::DeleteNotesCommand>(
-            project::EntityId{_patternIdValue}, std::vector<std::size_t>{hit}))) {
+            project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+            std::vector<std::size_t>{hit}))) {
         _model->clearSelection();
         [self reportAction:@"Delete Note"];
     }
@@ -540,8 +562,7 @@ enum class DragMode { none, move, resize, boxSelect };
                 [self reportAction:[NSString stringWithFormat:@"Undo %@", name]];
         }
 
-        if (const project::Pattern* pattern = [self currentPattern])
-            _model->pruneSelection(pattern->events.size());
+        _model->pruneSelection([self currentNotes].size());
 
         [self setNeedsDisplay:YES];
         return;
@@ -551,7 +572,8 @@ enum class DragMode { none, move, resize, boxSelect };
         || character == NSDeleteFunctionKey) {
         if (!_model->selection().empty()
             && _registry->execute(std::make_unique<app::DeleteNotesCommand>(
-                   project::EntityId{_patternIdValue}, _model->selection()))) {
+                   project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+                   _model->selection()))) {
             _model->clearSelection();
             [self reportAction:@"Delete Notes"];
         }
@@ -568,7 +590,7 @@ enum class DragMode { none, move, resize, boxSelect };
 
     if (character == 'q' || character == 'Q') {
         if (_registry->execute(std::make_unique<app::QuantizeNotesCommand>(
-                project::EntityId{_patternIdValue},
+                project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
                 _model->snap() > 0 ? _model->snap() : ticksPerQuarterNote / 4, 1.0)))
             [self reportAction:@"Quantize"];
 
@@ -577,9 +599,10 @@ enum class DragMode { none, move, resize, boxSelect };
     }
 
     if (character == 'a' && command) {
-        if (const project::Pattern* pattern = [self currentPattern]) {
+        {
+            const std::vector<project::MidiEvent>& notes = [self currentNotes];
             std::vector<std::size_t> all;
-            for (std::size_t index = 0; index < pattern->events.size(); ++index)
+            for (std::size_t index = 0; index < notes.size(); ++index)
                 all.push_back(index);
 
             _model->setSelection(std::move(all));

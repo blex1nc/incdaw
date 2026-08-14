@@ -74,6 +74,30 @@ that any future version can read it, whatever else changes:
 Minor version = additive, backward-compatible. Major version = breaking,
 requires a migration step.
 
+### Version history
+
+| Version | Phase | Change |
+|---|---|---|
+| 1.0 | 4 | First format. |
+| 1.1 | 8 | Pattern notes stored per channel (`channels[]` in a `.pat` file) instead of one flat `events[]`; patterns gained `swing` / `swingGrid`; clips gained `startTick` / `lengthTicks` / `sourceOffsetTicks`. |
+
+**Reading a 1.0 file.** Two of the three changes need context the migration hook
+does not have — the pattern files are separate documents, and converting clip
+frames to ticks needs the tempo map — so those upgrades happen at their read
+sites, which know the version being read. `ProjectFile::migrate` remains the
+single place that decides whether a path from a given version exists at all.
+
+A 1.0 pattern's flat event list is read into a content block that names no
+channel, and is attached to the project's first channel once the id generator
+has been restored — creating a channel if the project has none. Notes that
+loaded but belonged to no channel would be present in the model and silent on
+playback, which is worse than not loading them.
+
+> **Outstanding:** `tests/fixtures/v1.1/` does not exist yet. The 1.1 shape is
+> covered by the save/load round-trip test, which is weaker: it only proves the
+> code agrees with itself. A hand-written 1.1 fixture is required before 1.1
+> ships.
+
 ---
 
 ## 3. Text vs binary

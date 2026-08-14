@@ -217,6 +217,25 @@ as realtime playback.** This is not an optimisation — it is the only way to
 guarantee that what you export is what you heard, and it is verified by an
 automated byte-equivalence test (docs/TESTING.md).
 
+### Where the compile lives
+
+`project::compileProjectGraph` (Phase 8) is that arrow. It must live in
+`project/`, because `engine/` sits below it and cannot see a `Project` — the
+layering test enforces this. It produces, per audible channel, an
+`InstrumentNode` fed by compiled notes and a `GainNode` carrying the channel
+volume, summed into a master gain.
+
+Everything musical is resolved during compilation, never on the audio thread:
+polymetric repeats, swing, and note probability. Probability in particular is
+rolled here from a seed derived from the project, so that a compile is
+reproducible and an offline render produces the same notes as the playback the
+user heard. The instrument itself is supplied by an injected
+`InstrumentFactory`, so plugin hosting (Phase 13) becomes a different factory
+rather than a change to the compiler.
+
+Channel **pan** is deliberately not applied at this stage. A pan law belongs to
+the mixer (Phase 10), and an approximation here would have to be unpicked.
+
 ---
 
 ## 8. Plugin isolation

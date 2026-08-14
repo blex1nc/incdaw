@@ -5,6 +5,7 @@
 #include "plugins/PluginIdentifier.h"
 #include "project/Identity.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -93,13 +94,55 @@ struct AutomationLane {
 /// editing it changes every placement. That is the defining property of the
 /// pattern workflow, and it only holds because clips reference a pattern by id
 /// rather than owning a copy.
-struct Pattern {
-    EntityId               id;
-    std::string            name;
-    std::uint32_t          colour = 0xFF808080u;
-    Tick                   length = engine::ticksPerQuarterNote * 4;
+/// One channel's share of a pattern.
+///
+/// A pattern holds content per channel rather than one flat event list, because
+/// that is precisely what a Channel Rack and a step sequencer are: several
+/// instruments programmed side by side inside the same pattern. A flat list
+/// would force every reader to filter by channel, and would leave nowhere to
+/// put a per-channel length.
+struct PatternChannelContent {
+    EntityId               channel;
+
+    /// Repeat length inside the pattern. 0 follows the pattern's own length; a
+    /// shorter value makes this channel loop against the others, which is how
+    /// a polymetric pattern is expressed.
+    Tick                   loopLength = 0;
+
     std::vector<MidiEvent> events;
-    std::vector<EntityId>  automationLanes;
+
+    [[nodiscard]] friend bool operator==(const PatternChannelContent&,
+                                         const PatternChannelContent&) = default;
+};
+
+struct Pattern {
+    EntityId      id;
+    std::string   name;
+    std::uint32_t colour = 0xFF808080u;
+    Tick          length = engine::ticksPerQuarterNote * 4;
+
+    /// Shuffle applied to off-beat subdivisions, 0..1, resolved when the
+    /// pattern is compiled. Kept as a property rather than baked into the note
+    /// starts so that it stays reversible and the written notes keep meaning
+    /// what the user placed.
+    double        swing     = 0.0;
+    Tick          swingGrid = engine::ticksPerQuarterNote / 4;
+
+    std::vector<PatternChannelContent> channels;
+    std::vector<EntityId>              automationLanes;
+
+    [[nodiscard]] const PatternChannelContent* content(EntityId channel) const noexcept;
+    [[nodiscard]] PatternChannelContent*       content(EntityId channel) noexcept;
+
+    /// Content for `channel`, created empty if the pattern has none for it yet.
+    [[nodiscard]] PatternChannelContent& contentFor(EntityId channel);
+
+    [[nodiscard]] const std::vector<MidiEvent>* events(EntityId channel) const noexcept;
+    [[nodiscard]] std::vector<MidiEvent>*       events(EntityId channel) noexcept;
+
+    /// Notes across every channel. Used by things that measure a pattern rather
+    /// than edit it.
+    [[nodiscard]] std::size_t totalEventCount() const noexcept;
 
     [[nodiscard]] friend bool operator==(const Pattern&, const Pattern&) = default;
 };
@@ -139,6 +182,17 @@ struct Clip {
     EntityId      track;
     EntityId      source;          ///< pattern id, audio asset id, or automation lane id
 
+    /// Musical placement, authoritative for pattern and automation clips.
+    ///
+    /// A pattern placed at bar 5 belongs at bar 5 whatever the tempo does. Had
+    /// the placement been stored in frames, the first tempo change would have
+    /// silently desynchronised the whole arrangement.
+    Tick          startTick         = 0;
+    Tick          lengthTicks       = 0;
+    Tick          sourceOffsetTicks = 0;
+
+    /// Sample placement, authoritative for audio clips — they are anchored to
+    /// the recording they came from rather than to the beat.
     FramePosition start  = 0;      ///< timeline position
     FrameCount    length = 0;
     FrameCount    sourceOffset = 0;///< frames into the source where playback begins
@@ -299,7 +353,9 @@ public:
     [[nodiscard]] EntityId masterMixerNode() const noexcept { return master_; }
 
     [[nodiscard]] const Track*     findTrack(EntityId id) const noexcept;
+    [[nodiscard]] const Channel*   findChannel(EntityId id) const noexcept;
     [[nodiscard]] const Pattern*   findPattern(EntityId id) const noexcept;
+    [[nodiscard]] Pattern*         findPattern(EntityId id) noexcept;
     [[nodiscard]] const MixerNode* findMixerNode(EntityId id) const noexcept;
 
     /// Assets whose file cannot be found. A project with missing media still

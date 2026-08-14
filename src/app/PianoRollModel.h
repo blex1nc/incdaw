@@ -9,6 +9,9 @@ namespace incdaw::app {
 
 using project::MidiEvent;
 using project::Pattern;
+
+/// One channel's notes within a pattern — what the editor is looking at.
+using NoteList = std::vector<MidiEvent>;
 using project::Tick;
 
 /// The Piano Roll's geometry and hit-testing, with no drawing in it.
@@ -24,7 +27,7 @@ class PianoRollModel {
 public:
     /// A note that intersects the viewport, with its screen rectangle.
     struct VisibleNote {
-        std::size_t index = 0;      ///< index into the pattern's event vector
+        std::size_t index = 0;      ///< index into the channel's event vector
         double      x = 0.0;
         double      y = 0.0;
         double      width = 0.0;
@@ -97,7 +100,7 @@ public:
     /// state costs no allocation at all. Building a fresh vector per frame is
     /// the difference between smooth scrolling and a stutter every time the
     /// allocator decides to grow.
-    void collectVisibleNotes(const Pattern& pattern, std::vector<VisibleNote>& out) const;
+    void collectVisibleNotes(const NoteList& notes, std::vector<VisibleNote>& out) const;
 
     // ── Hit testing ─────────────────────────────────────────────────────────
 
@@ -107,15 +110,15 @@ public:
     ///
     /// Searches back to front so that the note drawn last — the one visually on
     /// top where they overlap — is the one picked up.
-    [[nodiscard]] std::size_t noteAtPoint(const Pattern& pattern, double x, double y) const;
+    [[nodiscard]] std::size_t noteAtPoint(const NoteList& notes, double x, double y) const;
 
     /// True when the point is within the grab zone at a note's right edge,
     /// where dragging resizes rather than moves.
-    [[nodiscard]] bool isOverResizeHandle(const Pattern& pattern, std::size_t index,
+    [[nodiscard]] bool isOverResizeHandle(const NoteList& notes, std::size_t index,
                                           double x, double y) const;
 
     /// Notes intersecting a rectangle, for box and lasso selection.
-    void notesInRectangle(const Pattern& pattern, double x, double y, double width, double height,
+    void notesInRectangle(const NoteList& notes, double x, double y, double width, double height,
                           std::vector<std::size_t>& out) const;
 
     // ── Grid ────────────────────────────────────────────────────────────────

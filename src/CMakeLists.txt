@@ -70,7 +70,8 @@ add_library(incdaw_project STATIC
     project/Model.cpp
     project/ProjectFile.cpp
     project/MidiCapture.cpp
-    project/PatternCompiler.cpp)
+    project/PatternCompiler.cpp
+    project/ProjectGraphCompiler.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_project
     PUBLIC  incdaw_engine

@@ -296,6 +296,9 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("type", static_cast<std::int64_t>(clip.type));
         json.set("track", toJson(clip.track));
         json.set("source", toJson(clip.source));
+        json.set("startTick", static_cast<std::int64_t>(clip.startTick));
+        json.set("lengthTicks", static_cast<std::int64_t>(clip.lengthTicks));
+        json.set("sourceOffsetTicks", static_cast<std::int64_t>(clip.sourceOffsetTicks));
         json.set("start", static_cast<std::int64_t>(clip.start));
         json.set("length", static_cast<std::int64_t>(clip.length));
         json.set("sourceOffset", static_cast<std::int64_t>(clip.sourceOffset));
@@ -372,11 +375,23 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("name", pattern.name);
         json.set("colour", static_cast<std::int64_t>(pattern.colour));
         json.set("length", static_cast<std::int64_t>(pattern.length));
+        json.set("swing", pattern.swing);
+        json.set("swingGrid", static_cast<std::int64_t>(pattern.swingGrid));
 
-        Json events = Json::array();
-        for (const MidiEvent& event : pattern.events)
-            events.append(toJson(event));
-        json.set("events", std::move(events));
+        Json patternChannels = Json::array();
+        for (const PatternChannelContent& content : pattern.channels) {
+            Json entry = Json::object();
+            entry.set("channel", toJson(content.channel));
+            entry.set("loopLength", static_cast<std::int64_t>(content.loopLength));
+
+            Json contentEvents = Json::array();
+            for (const MidiEvent& event : content.events)
+                contentEvents.append(toJson(event));
+            entry.set("events", std::move(contentEvents));
+
+            patternChannels.append(std::move(entry));
+        }
+        json.set("channels", std::move(patternChannels));
 
         Json lanes = Json::array();
         for (const EntityId lane : pattern.automationLanes)
@@ -401,6 +416,54 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
 }
 
 // ── Load ──────────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// Attaches pattern content that names no channel to a real one.
+///
+/// Only 1.0 files produce it, and only because that format had no notion of a
+/// channel owning notes. Every such pattern is given the project's first
+/// channel, creating one if the project has none — the alternative is a project
+/// that loads with its notes present but unplayable.
+void bindUnassignedContent(Project& project)
+{
+    bool needsChannel = false;
+    for (const Pattern& pattern : project.patterns())
+        for (const PatternChannelContent& content : pattern.channels)
+            needsChannel = needsChannel || !content.channel.isValid();
+
+    if (!needsChannel)
+        return;
+
+    const EntityId target = project.channels().empty() ? project.addChannel("Channel 1").id
+                                                       : project.channels().front().id;
+
+    for (Pattern& pattern : project.patterns()) {
+        for (PatternChannelContent& content : pattern.channels) {
+            if (!content.channel.isValid())
+                content.channel = target;
+        }
+
+        // Two blocks for the same channel cannot happen in a 1.0 file, but
+        // merging rather than trusting that keeps the invariant — one content
+        // block per channel — true by construction.
+        for (std::size_t index = pattern.channels.size(); index > 1; --index) {
+            PatternChannelContent& later = pattern.channels[index - 1];
+            for (std::size_t earlier = 0; earlier + 1 < index; ++earlier) {
+                if (pattern.channels[earlier].channel != later.channel)
+                    continue;
+
+                auto& destination = pattern.channels[earlier].events;
+                destination.insert(destination.end(), later.events.begin(), later.events.end());
+                pattern.channels.erase(pattern.channels.begin()
+                                       + static_cast<std::ptrdiff_t>(index - 1));
+                break;
+            }
+        }
+    }
+}
+
+} // namespace
 
 ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
 {
@@ -544,6 +607,11 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         project.channels().push_back(std::move(channel));
     }
 
+    // Format 1.0 placed clips in frames. Converting here rather than in
+    // `migrate` is deliberate: the conversion needs the tempo map, which exists
+    // only once the document has been read this far.
+    const bool legacyClipTiming = major == 1 && minor < 1;
+
     for (const Json& json : document["clips"].elements()) {
         Clip clip;
         clip.id             = idFrom(json["id"]);
@@ -553,6 +621,17 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         clip.start          = json["start"].asInt(0);
         clip.length         = json["length"].asInt(0);
         clip.sourceOffset   = json["sourceOffset"].asInt(0);
+
+        if (legacyClipTiming) {
+            const engine::TempoMap& tempo = project.tempoMap();
+            clip.startTick         = tempo.tickForFrame(clip.start);
+            clip.lengthTicks       = tempo.tickForFrame(clip.length);
+            clip.sourceOffsetTicks = tempo.tickForFrame(clip.sourceOffset);
+        } else {
+            clip.startTick         = json["startTick"].asInt(0);
+            clip.lengthTicks       = json["lengthTicks"].asInt(0);
+            clip.sourceOffsetTicks = json["sourceOffsetTicks"].asInt(0);
+        }
         clip.gain           = json["gain"].asDouble(1.0);
         clip.pan            = json["pan"].asDouble(0.0);
         clip.normalize      = json["normalize"].asBool(false);
@@ -624,9 +703,31 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         pattern.name   = patternJson["name"].asString();
         pattern.colour = static_cast<std::uint32_t>(patternJson["colour"].asInt(0xFF808080));
         pattern.length = patternJson["length"].asInt(engine::ticksPerQuarterNote * 4);
+        pattern.swing     = patternJson["swing"].asDouble(0.0);
+        pattern.swingGrid = patternJson["swingGrid"].asInt(engine::ticksPerQuarterNote / 4);
 
-        for (const Json& event : patternJson["events"].elements())
-            pattern.events.push_back(midiEventFrom(event));
+        for (const Json& channelJson : patternJson["channels"].elements()) {
+            PatternChannelContent content;
+            content.channel    = idFrom(channelJson["channel"]);
+            content.loopLength = channelJson["loopLength"].asInt(0);
+
+            for (const Json& event : channelJson["events"].elements())
+                content.events.push_back(midiEventFrom(event));
+
+            pattern.channels.push_back(std::move(content));
+        }
+
+        // Format 1.0 wrote one flat event list per pattern. It is read into an
+        // unassigned content block, which `bindUnassignedContent` then attaches
+        // to a real channel once the id generator has been restored.
+        if (pattern.channels.empty()) {
+            PatternChannelContent legacy;
+            for (const Json& event : patternJson["events"].elements())
+                legacy.events.push_back(midiEventFrom(event));
+
+            if (!legacy.events.empty())
+                pattern.channels.push_back(std::move(legacy));
+        }
 
         for (const Json& lane : patternJson["automationLanes"].elements())
             pattern.automationLanes.push_back(idFrom(lane));
@@ -646,6 +747,10 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
     for (const auto& asset : project.audioAssets()) project.ids().observe(asset.id);
     for (const auto& link : project.routing())      project.ids().observe(link.id);
 
+    // After the generator, so that a channel minted here cannot collide with an
+    // id already in the file.
+    bindUnassignedContent(project);
+
     result.succeeded = true;
     return result;
 }
@@ -662,6 +767,17 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // fixture exist from the start, because a migration framework added later
     // is a migration framework that was needed earlier.
     if (major == projectFormatMajor && minor == projectFormatMinor) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.0 -> 1.1. The two shape changes (per-channel pattern content, tick-based
+    // clip placement) both need context this hook does not have: the pattern
+    // files are separate documents, and the frame-to-tick conversion needs the
+    // tempo map. Both are therefore performed at their read sites, which know
+    // the version they are reading. This hook remains the single place that
+    // decides whether a path exists at all.
+    if (major == 1 && minor == 0) {
         result.succeeded = true;
         return result;
     }

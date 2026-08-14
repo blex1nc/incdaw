@@ -22,18 +22,31 @@ project::MidiEvent note(Tick tick, int key = 60, Tick duration = 480, int veloci
     return event;
 }
 
-/// A project with one pattern holding `count` notes, one per beat.
-project::Project makeProjectWithNotes(int count, EntityId& patternId)
+/// A project with one channel and one pattern holding `count` notes, one per
+/// beat. Note edits address a (pattern, channel) pair, so a test needs both.
+project::Project makeProjectWithNotes(int count, EntityId& patternId, EntityId& channelId)
 {
     project::Project project;
+    channelId = project.addChannel("Test Channel").id;
+
     auto& pattern = project.addPattern("Test");
     patternId = pattern.id;
 
+    auto& events = pattern.contentFor(channelId).events;
     for (int index = 0; index < count; ++index)
-        pattern.events.push_back(note(static_cast<Tick>(index) * ticksPerQuarterNote,
-                                      60 + index % 12));
+        events.push_back(note(static_cast<Tick>(index) * ticksPerQuarterNote, 60 + index % 12));
 
     return project;
+}
+
+/// The notes under edit. Empty when the channel has no content yet, which is
+/// what an untouched channel looks like.
+const std::vector<project::MidiEvent>& notesOf(const project::Project& project, EntityId channel)
+{
+    static const std::vector<project::MidiEvent> empty;
+
+    const std::vector<project::MidiEvent>* events = project.patterns()[0].events(channel);
+    return events != nullptr ? *events : empty;
 }
 
 /// A trivial command, for exercising the registry itself.
@@ -206,62 +219,66 @@ TEST_CASE("command search finds actions by name, id and category")
 TEST_CASE("adding a note is undoable")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(0, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(0, patternId, channelId);
     CommandRegistry  registry{project};
 
-    CHECK(registry.execute(std::make_unique<AddNoteCommand>(patternId, note(0, 64))));
-    REQUIRE(project.patterns()[0].events.size() == 1);
-    CHECK(project.patterns()[0].events[0].key == 64);
+    CHECK(registry.execute(std::make_unique<AddNoteCommand>(patternId, channelId, note(0, 64))));
+    REQUIRE(notesOf(project, channelId).size() == 1);
+    CHECK(notesOf(project, channelId)[0].key == 64);
 
     CHECK(registry.undo());
-    CHECK(project.patterns()[0].events.empty());
+    CHECK(notesOf(project, channelId).empty());
 
     CHECK(registry.redo());
-    CHECK(project.patterns()[0].events.size() == 1);
+    CHECK(notesOf(project, channelId).size() == 1);
 }
 
 TEST_CASE("deleting notes restores them in their original positions")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(6, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(6, patternId, channelId);
     CommandRegistry  registry{project};
 
-    const auto before = project.patterns()[0].events;
+    const auto before = notesOf(project, channelId);
 
-    CHECK(registry.execute(std::make_unique<DeleteNotesCommand>(patternId, NoteIndices{1, 3, 4})));
-    CHECK(project.patterns()[0].events.size() == 3);
+    CHECK(registry.execute(std::make_unique<DeleteNotesCommand>(patternId, channelId, NoteIndices{1, 3, 4})));
+    CHECK(notesOf(project, channelId).size() == 3);
 
     CHECK(registry.undo());
-    CHECK(project.patterns()[0].events == before);
+    CHECK(notesOf(project, channelId) == before);
 }
 
 TEST_CASE("deleting nothing is not an undo entry")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(2, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(2, patternId, channelId);
     CommandRegistry  registry{project};
 
     // Stale indices: the selection outlived the notes it referred to.
-    CHECK_FALSE(registry.execute(std::make_unique<DeleteNotesCommand>(patternId, NoteIndices{99, 100})));
-    CHECK(project.patterns()[0].events.size() == 2);
+    CHECK_FALSE(registry.execute(std::make_unique<DeleteNotesCommand>(patternId, channelId, NoteIndices{99, 100})));
+    CHECK(notesOf(project, channelId).size() == 2);
     CHECK(registry.undoDepth() == 0);
 }
 
 TEST_CASE("moving notes is exactly reversible")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(4, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(4, patternId, channelId);
     CommandRegistry  registry{project};
 
-    const auto before = project.patterns()[0].events;
+    const auto before = notesOf(project, channelId);
 
-    CHECK(registry.execute(std::make_unique<MoveNotesCommand>(patternId, NoteIndices{0, 1, 2, 3}, 240, 5)));
+    CHECK(registry.execute(std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{0, 1, 2, 3}, 240, 5)));
 
-    CHECK(project.patterns()[0].events[0].tick == 240);
-    CHECK(project.patterns()[0].events[0].key == before[0].key + 5);
+    CHECK(notesOf(project, channelId)[0].tick == 240);
+    CHECK(notesOf(project, channelId)[0].key == before[0].key + 5);
 
     CHECK(registry.undo());
-    CHECK(project.patterns()[0].events == before);
+    CHECK(notesOf(project, channelId) == before);
 }
 
 TEST_CASE("a selection dragged to the edge keeps its shape")
@@ -269,22 +286,27 @@ TEST_CASE("a selection dragged to the edge keeps its shape")
     // Clamping each note independently would flatten a chord against the edge
     // of the keyboard; the selection must move as a unit.
     EntityId patternId;
+    EntityId channelId;
     project::Project project;
+    channelId = project.addChannel("Channel").id;
+
     auto& pattern = project.addPattern("Chord");
     patternId = pattern.id;
 
-    pattern.events.push_back(note(0, 0));    // already at the lowest key
-    pattern.events.push_back(note(0, 7));
-    pattern.events.push_back(note(0, 12));
+    auto& events = pattern.contentFor(channelId).events;
+
+    events.push_back(note(0, 0));    // already at the lowest key
+    events.push_back(note(0, 7));
+    events.push_back(note(0, 12));
 
     CommandRegistry registry{project};
 
-    CHECK_FALSE(registry.execute(std::make_unique<MoveNotesCommand>(patternId, NoteIndices{0, 1, 2}, 0, -5)));
+    CHECK_FALSE(registry.execute(std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{0, 1, 2}, 0, -5)));
 
     // Nothing could move, so nothing moved — the interval structure is intact.
-    CHECK(pattern.events[0].key == 0);
-    CHECK(pattern.events[1].key == 7);
-    CHECK(pattern.events[2].key == 12);
+    CHECK(events[0].key == 0);
+    CHECK(events[1].key == 7);
+    CHECK(events[2].key == 12);
 }
 
 TEST_CASE("a selection dragged left stops at the pattern start as a unit")
@@ -293,35 +315,41 @@ TEST_CASE("a selection dragged left stops at the pattern start as a unit")
     // zero. The whole selection stops when its earliest note reaches the start,
     // so the spacing between notes is preserved.
     EntityId patternId;
+    EntityId channelId;
     project::Project project;
+    channelId = project.addChannel("Channel").id;
+
     auto& pattern = project.addPattern("Phrase");
     patternId = pattern.id;
 
-    pattern.events.push_back(note(480));
-    pattern.events.push_back(note(1440));
+    auto& events = pattern.contentFor(channelId).events;
+
+    events.push_back(note(480));
+    events.push_back(note(1440));
 
     CommandRegistry registry{project};
 
-    CHECK(registry.execute(std::make_unique<MoveNotesCommand>(patternId, NoteIndices{0, 1}, -100000, 0)));
+    CHECK(registry.execute(std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{0, 1}, -100000, 0)));
 
-    CHECK(pattern.events[0].tick == 0);
-    CHECK(pattern.events[1].tick == 960);   // spacing of 960 intact
+    CHECK(events[0].tick == 0);
+    CHECK(events[1].tick == 960);   // spacing of 960 intact
 
     CHECK(registry.undo());
-    CHECK(pattern.events[0].tick == 480);
-    CHECK(pattern.events[1].tick == 1440);
+    CHECK(events[0].tick == 480);
+    CHECK(events[1].tick == 1440);
 }
 
 TEST_CASE("a selection already at the start does not move, and is not an undo entry")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(2, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(2, patternId, channelId);
     CommandRegistry  registry{project};
 
-    CHECK_FALSE(registry.execute(std::make_unique<MoveNotesCommand>(patternId, NoteIndices{0, 1}, -100000, 0)));
+    CHECK_FALSE(registry.execute(std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{0, 1}, -100000, 0)));
 
-    CHECK(project.patterns()[0].events[0].tick == 0);
-    CHECK(project.patterns()[0].events[1].tick == ticksPerQuarterNote);
+    CHECK(notesOf(project, channelId)[0].tick == 0);
+    CHECK(notesOf(project, channelId)[1].tick == ticksPerQuarterNote);
     CHECK(registry.undoDepth() == 0);
 }
 
@@ -329,30 +357,32 @@ TEST_CASE("a drag gesture collapses into one undo step")
 {
     // Without merging, reversing a single drag would take dozens of undos.
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(2, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(2, patternId, channelId);
     CommandRegistry  registry{project};
 
-    const auto before = project.patterns()[0].events;
+    const auto before = notesOf(project, channelId);
 
     for (int step = 0; step < 20; ++step)
         CHECK(registry.executeMerging(
-            std::make_unique<MoveNotesCommand>(patternId, NoteIndices{0, 1}, 10, 0)));
+            std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{0, 1}, 10, 0)));
 
     CHECK(registry.undoDepth() == 1);
-    CHECK(project.patterns()[0].events[0].tick == before[0].tick + 200);
+    CHECK(notesOf(project, channelId)[0].tick == before[0].tick + 200);
 
     CHECK(registry.undo());
-    CHECK(project.patterns()[0].events == before);
+    CHECK(notesOf(project, channelId) == before);
 }
 
 TEST_CASE("drags on different selections do not merge")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(4, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(4, patternId, channelId);
     CommandRegistry  registry{project};
 
-    CHECK(registry.executeMerging(std::make_unique<MoveNotesCommand>(patternId, NoteIndices{0}, 10, 0)));
-    CHECK(registry.executeMerging(std::make_unique<MoveNotesCommand>(patternId, NoteIndices{1}, 10, 0)));
+    CHECK(registry.executeMerging(std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{0}, 10, 0)));
+    CHECK(registry.executeMerging(std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{1}, 10, 0)));
 
     CHECK(registry.undoDepth() == 2);
 }
@@ -360,74 +390,82 @@ TEST_CASE("drags on different selections do not merge")
 TEST_CASE("resizing is reversible and cannot make a note vanish")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(3, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(3, patternId, channelId);
     CommandRegistry  registry{project};
 
-    const auto before = project.patterns()[0].events;
+    const auto before = notesOf(project, channelId);
 
-    CHECK(registry.execute(std::make_unique<ResizeNotesCommand>(patternId, NoteIndices{0, 1, 2}, -100000)));
+    CHECK(registry.execute(std::make_unique<ResizeNotesCommand>(patternId, channelId, NoteIndices{0, 1, 2}, -100000)));
 
-    for (const auto& event : project.patterns()[0].events)
+    for (const auto& event : notesOf(project, channelId))
         CHECK(event.duration >= 1);
 
     CHECK(registry.undo());
-    CHECK(project.patterns()[0].events == before);
+    CHECK(notesOf(project, channelId) == before);
 }
 
 TEST_CASE("a resize gesture merges but still undoes to the original lengths")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(1, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(1, patternId, channelId);
     CommandRegistry  registry{project};
 
-    const auto before = project.patterns()[0].events;
+    const auto before = notesOf(project, channelId);
 
     for (int step = 0; step < 10; ++step)
         CHECK(registry.executeMerging(
-            std::make_unique<ResizeNotesCommand>(patternId, NoteIndices{0}, 20)));
+            std::make_unique<ResizeNotesCommand>(patternId, channelId, NoteIndices{0}, 20)));
 
     CHECK(registry.undoDepth() == 1);
     CHECK(registry.undo());
-    CHECK(project.patterns()[0].events == before);
+    CHECK(notesOf(project, channelId) == before);
 }
 
 TEST_CASE("velocity never reaches zero, which would silence the note")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(2, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(2, patternId, channelId);
     CommandRegistry  registry{project};
 
-    CHECK(registry.execute(std::make_unique<SetVelocityCommand>(patternId, NoteIndices{0, 1}, 0)));
+    CHECK(registry.execute(std::make_unique<SetVelocityCommand>(patternId, channelId, NoteIndices{0, 1}, 0)));
 
-    for (const auto& event : project.patterns()[0].events)
+    for (const auto& event : notesOf(project, channelId))
         CHECK(event.value >= 1);
 }
 
 TEST_CASE("quantize is undoable and does nothing twice")
 {
     EntityId patternId;
+    EntityId channelId;
     project::Project project;
+    channelId = project.addChannel("Channel").id;
+
     auto& pattern = project.addPattern("Loose");
     patternId = pattern.id;
 
+    auto& events = pattern.contentFor(channelId).events;
+
     for (const Tick tick : {13, 231, 462, 701})
-        pattern.events.push_back(note(tick));
+        events.push_back(note(tick));
 
     CommandRegistry registry{project};
-    const auto before = pattern.events;
+    const auto before = events;
 
     const Tick grid = ticksPerQuarterNote / 4;
 
-    CHECK(registry.execute(std::make_unique<QuantizeNotesCommand>(patternId, grid, 1.0)));
-    for (const auto& event : project.patterns()[0].events)
+    CHECK(registry.execute(std::make_unique<QuantizeNotesCommand>(patternId, channelId, grid, 1.0)));
+    for (const auto& event : notesOf(project, channelId))
         CHECK(event.tick % grid == 0);
 
     // Already on the grid: no change, so no undo entry.
-    CHECK_FALSE(registry.execute(std::make_unique<QuantizeNotesCommand>(patternId, grid, 1.0)));
+    CHECK_FALSE(registry.execute(std::make_unique<QuantizeNotesCommand>(patternId, channelId, grid, 1.0)));
     CHECK(registry.undoDepth() == 1);
 
     CHECK(registry.undo());
-    CHECK(project.patterns()[0].events == before);
+    CHECK(notesOf(project, channelId) == before);
 }
 
 TEST_CASE("interleaved edits undo back to the exact starting state")
@@ -435,35 +473,37 @@ TEST_CASE("interleaved edits undo back to the exact starting state")
     // The property that matters most: any sequence of commands, fully undone,
     // must restore the project bit for bit.
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(8, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(8, patternId, channelId);
     CommandRegistry  registry{project};
 
-    const auto before = project.patterns()[0].events;
+    const auto before = notesOf(project, channelId);
 
-    CHECK(registry.execute(std::make_unique<AddNoteCommand>(patternId, note(5000, 72))));
-    CHECK(registry.execute(std::make_unique<MoveNotesCommand>(patternId, NoteIndices{0, 2, 4}, 120, 2)));
-    CHECK(registry.execute(std::make_unique<ResizeNotesCommand>(patternId, NoteIndices{1, 3}, 200)));
-    CHECK(registry.execute(std::make_unique<SetVelocityCommand>(patternId, NoteIndices{5, 6}, 40)));
-    CHECK(registry.execute(std::make_unique<DeleteNotesCommand>(patternId, NoteIndices{7})));
-    CHECK(registry.execute(std::make_unique<QuantizeNotesCommand>(patternId, ticksPerQuarterNote / 3, 0.8)));
+    CHECK(registry.execute(std::make_unique<AddNoteCommand>(patternId, channelId, note(5000, 72))));
+    CHECK(registry.execute(std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{0, 2, 4}, 120, 2)));
+    CHECK(registry.execute(std::make_unique<ResizeNotesCommand>(patternId, channelId, NoteIndices{1, 3}, 200)));
+    CHECK(registry.execute(std::make_unique<SetVelocityCommand>(patternId, channelId, NoteIndices{5, 6}, 40)));
+    CHECK(registry.execute(std::make_unique<DeleteNotesCommand>(patternId, channelId, NoteIndices{7})));
+    CHECK(registry.execute(std::make_unique<QuantizeNotesCommand>(patternId, channelId, ticksPerQuarterNote / 3, 0.8)));
 
     while (registry.canUndo())
         CHECK(registry.undo());
 
-    CHECK(project.patterns()[0].events == before);
+    CHECK(notesOf(project, channelId) == before);
 }
 
 TEST_CASE("redoing an interleaved sequence reproduces the same result")
 {
     EntityId patternId;
-    project::Project project = makeProjectWithNotes(8, patternId);
+    EntityId channelId;
+    project::Project project = makeProjectWithNotes(8, patternId, channelId);
     CommandRegistry  registry{project};
 
-    CHECK(registry.execute(std::make_unique<AddNoteCommand>(patternId, note(5000, 72))));
-    CHECK(registry.execute(std::make_unique<MoveNotesCommand>(patternId, NoteIndices{0, 2}, 120, 2)));
-    CHECK(registry.execute(std::make_unique<SetVelocityCommand>(patternId, NoteIndices{1}, 40)));
+    CHECK(registry.execute(std::make_unique<AddNoteCommand>(patternId, channelId, note(5000, 72))));
+    CHECK(registry.execute(std::make_unique<MoveNotesCommand>(patternId, channelId, NoteIndices{0, 2}, 120, 2)));
+    CHECK(registry.execute(std::make_unique<SetVelocityCommand>(patternId, channelId, NoteIndices{1}, 40)));
 
-    const auto after = project.patterns()[0].events;
+    const auto after = notesOf(project, channelId);
 
     while (registry.canUndo())
         CHECK(registry.undo());
@@ -471,7 +511,7 @@ TEST_CASE("redoing an interleaved sequence reproduces the same result")
     while (registry.canRedo())
         CHECK(registry.redo());
 
-    CHECK(project.patterns()[0].events == after);
+    CHECK(notesOf(project, channelId) == after);
 }
 
 TEST_CASE("commands targeting a pattern that no longer exists fail safely")
@@ -481,10 +521,13 @@ TEST_CASE("commands targeting a pattern that no longer exists fail safely")
 
     const EntityId missing{9999};
 
-    CHECK_FALSE(registry.execute(std::make_unique<AddNoteCommand>(missing, note(0))));
-    CHECK_FALSE(registry.execute(std::make_unique<DeleteNotesCommand>(missing, NoteIndices{0})));
-    CHECK_FALSE(registry.execute(std::make_unique<MoveNotesCommand>(missing, NoteIndices{0}, 10, 0)));
-    CHECK_FALSE(registry.execute(std::make_unique<QuantizeNotesCommand>(missing, 240, 1.0)));
+    CHECK_FALSE(registry.execute(std::make_unique<AddNoteCommand>(missing, missing, note(0))));
+    CHECK_FALSE(registry.execute(std::make_unique<DeleteNotesCommand>(missing, missing,
+                                                                     NoteIndices{0})));
+    CHECK_FALSE(registry.execute(std::make_unique<MoveNotesCommand>(missing, missing,
+                                                                   NoteIndices{0}, 10, 0)));
+    CHECK_FALSE(registry.execute(std::make_unique<QuantizeNotesCommand>(missing, missing, 240,
+                                                                       1.0)));
 
     CHECK(registry.undoDepth() == 0);
 }

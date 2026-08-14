@@ -7,13 +7,19 @@
 namespace incdaw::app {
 namespace {
 
-project::Pattern* findPattern(Project& project, EntityId id) noexcept
+/// The event list an edit applies to, or nullptr if the pattern or the
+/// channel's content is gone.
+std::vector<MidiEvent>* findEvents(Project& project, EntityId pattern, EntityId channel) noexcept
 {
-    for (project::Pattern& pattern : project.patterns())
-        if (pattern.id == id)
-            return &pattern;
+    project::Pattern* found = project.findPattern(pattern);
+    return found != nullptr ? found->events(channel) : nullptr;
+}
 
-    return nullptr;
+/// Same, but creates the channel's content if the pattern has none yet — which
+/// is the normal case for the first note programmed on a channel.
+std::vector<MidiEvent>& eventsForWriting(Project& project, EntityId pattern, EntityId channel)
+{
+    return project.findPattern(pattern)->contentFor(channel).events;
 }
 
 /// Drops out-of-range indices and de-duplicates.
@@ -45,22 +51,23 @@ constexpr Tick minimumDuration = 1;
 
 bool AddNoteCommand::execute(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    if (project.findPattern(pattern_) == nullptr)
         return false;
 
-    index_ = pattern->events.size();
-    pattern->events.push_back(note_);
+    std::vector<MidiEvent>& events = eventsForWriting(project, pattern_, channel_);
+
+    index_ = events.size();
+    events.push_back(note_);
     return true;
 }
 
 void AddNoteCommand::undo(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr || index_ >= pattern->events.size())
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr || index_ >= events->size())
         return;
 
-    pattern->events.erase(pattern->events.begin() + static_cast<std::ptrdiff_t>(index_));
+    events->erase(events->begin() + static_cast<std::ptrdiff_t>(index_));
 }
 
 // ── DeleteNotesCommand ────────────────────────────────────────────────────────
@@ -72,11 +79,11 @@ std::string DeleteNotesCommand::name() const
 
 bool DeleteNotesCommand::execute(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr)
         return false;
 
-    indices_ = sanitise(std::move(indices_), pattern->events.size());
+    indices_ = sanitise(std::move(indices_), events->size());
     if (indices_.empty())
         return false;
 
@@ -84,29 +91,29 @@ bool DeleteNotesCommand::execute(Project& project)
     removed_.reserve(indices_.size());
 
     for (const std::size_t index : indices_)
-        removed_.push_back(pattern->events[index]);
+        removed_.push_back((*events)[index]);
 
     // Erase back to front so that each removal leaves the earlier indices valid.
     for (auto index = indices_.rbegin(); index != indices_.rend(); ++index)
-        pattern->events.erase(pattern->events.begin() + static_cast<std::ptrdiff_t>(*index));
+        events->erase(events->begin() + static_cast<std::ptrdiff_t>(*index));
 
     return true;
 }
 
 void DeleteNotesCommand::undo(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr)
         return;
 
     // Front to back, so each insertion restores its note to the position it
     // originally occupied.
     for (std::size_t position = 0; position < indices_.size(); ++position) {
         const std::size_t index = indices_[position];
-        if (index > pattern->events.size())
+        if (index > events->size())
             continue;
 
-        pattern->events.insert(pattern->events.begin() + static_cast<std::ptrdiff_t>(index),
+        events->insert(events->begin() + static_cast<std::ptrdiff_t>(index),
                                removed_[position]);
     }
 }
@@ -115,11 +122,11 @@ void DeleteNotesCommand::undo(Project& project)
 
 bool MoveNotesCommand::execute(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr)
         return false;
 
-    indices_ = sanitise(std::move(indices_), pattern->events.size());
+    indices_ = sanitise(std::move(indices_), events->size());
     if (indices_.empty() || (tickDelta_ == 0 && keyDelta_ == 0))
         return false;
 
@@ -129,7 +136,7 @@ bool MoveNotesCommand::execute(Project& project)
     int  allowedKeyDelta  = keyDelta_;
 
     for (const std::size_t index : indices_) {
-        const MidiEvent& note = pattern->events[index];
+        const MidiEvent& note = (*events)[index];
         if (note.type != project::MidiEventType::note)
             continue;
 
@@ -141,7 +148,7 @@ bool MoveNotesCommand::execute(Project& project)
         return false;
 
     for (const std::size_t index : indices_) {
-        MidiEvent& note = pattern->events[index];
+        MidiEvent& note = (*events)[index];
         note.tick += allowedTickDelta;
         if (note.type == project::MidiEventType::note)
             note.key += allowedKeyDelta;
@@ -154,15 +161,15 @@ bool MoveNotesCommand::execute(Project& project)
 
 void MoveNotesCommand::undo(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr)
         return;
 
     for (const std::size_t index : indices_) {
-        if (index >= pattern->events.size())
+        if (index >= events->size())
             continue;
 
-        MidiEvent& note = pattern->events[index];
+        MidiEvent& note = (*events)[index];
         note.tick -= appliedTickDelta_;
         if (note.type == project::MidiEventType::note)
             note.key -= appliedKeyDelta_;
@@ -172,7 +179,8 @@ void MoveNotesCommand::undo(Project& project)
 bool MoveNotesCommand::canMergeWith(const Command& next) const noexcept
 {
     const auto* other = dynamic_cast<const MoveNotesCommand*>(&next);
-    return other != nullptr && other->pattern_ == pattern_ && other->indices_ == indices_;
+    return other != nullptr && other->pattern_ == pattern_ && other->channel_ == channel_
+        && other->indices_ == indices_;
 }
 
 void MoveNotesCommand::mergeWith(const Command& next)
@@ -187,11 +195,11 @@ void MoveNotesCommand::mergeWith(const Command& next)
 
 bool ResizeNotesCommand::execute(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr)
         return false;
 
-    indices_ = sanitise(std::move(indices_), pattern->events.size());
+    indices_ = sanitise(std::move(indices_), events->size());
     if (indices_.empty() || durationDelta_ == 0)
         return false;
 
@@ -201,7 +209,7 @@ bool ResizeNotesCommand::execute(Project& project)
     bool changed = false;
 
     for (const std::size_t index : indices_) {
-        MidiEvent& note = pattern->events[index];
+        MidiEvent& note = (*events)[index];
         previousDurations_.push_back(note.duration);
 
         if (note.type != project::MidiEventType::note)
@@ -219,21 +227,22 @@ bool ResizeNotesCommand::execute(Project& project)
 
 void ResizeNotesCommand::undo(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr)
         return;
 
     for (std::size_t position = 0; position < indices_.size(); ++position) {
         const std::size_t index = indices_[position];
-        if (index < pattern->events.size())
-            pattern->events[index].duration = previousDurations_[position];
+        if (index < events->size())
+            (*events)[index].duration = previousDurations_[position];
     }
 }
 
 bool ResizeNotesCommand::canMergeWith(const Command& next) const noexcept
 {
     const auto* other = dynamic_cast<const ResizeNotesCommand*>(&next);
-    return other != nullptr && other->pattern_ == pattern_ && other->indices_ == indices_;
+    return other != nullptr && other->pattern_ == pattern_ && other->channel_ == channel_
+        && other->indices_ == indices_;
 }
 
 void ResizeNotesCommand::mergeWith(const Command& next)
@@ -249,11 +258,11 @@ void ResizeNotesCommand::mergeWith(const Command& next)
 
 bool SetVelocityCommand::execute(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr)
         return false;
 
-    indices_ = sanitise(std::move(indices_), pattern->events.size());
+    indices_ = sanitise(std::move(indices_), events->size());
     if (indices_.empty())
         return false;
 
@@ -267,7 +276,7 @@ bool SetVelocityCommand::execute(Project& project)
     bool changed = false;
 
     for (const std::size_t index : indices_) {
-        MidiEvent& note = pattern->events[index];
+        MidiEvent& note = (*events)[index];
         previousVelocities_.push_back(note.value);
 
         if (note.type == project::MidiEventType::note && note.value != clamped) {
@@ -281,21 +290,22 @@ bool SetVelocityCommand::execute(Project& project)
 
 void SetVelocityCommand::undo(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr)
         return;
 
     for (std::size_t position = 0; position < indices_.size(); ++position) {
         const std::size_t index = indices_[position];
-        if (index < pattern->events.size())
-            pattern->events[index].value = previousVelocities_[position];
+        if (index < events->size())
+            (*events)[index].value = previousVelocities_[position];
     }
 }
 
 bool SetVelocityCommand::canMergeWith(const Command& next) const noexcept
 {
     const auto* other = dynamic_cast<const SetVelocityCommand*>(&next);
-    return other != nullptr && other->pattern_ == pattern_ && other->indices_ == indices_;
+    return other != nullptr && other->pattern_ == pattern_ && other->channel_ == channel_
+        && other->indices_ == indices_;
 }
 
 void SetVelocityCommand::mergeWith(const Command& next)
@@ -308,22 +318,22 @@ void SetVelocityCommand::mergeWith(const Command& next)
 
 bool QuantizeNotesCommand::execute(Project& project)
 {
-    project::Pattern* pattern = findPattern(project, pattern_);
-    if (pattern == nullptr || grid_ <= 0)
+    std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_);
+    if (events == nullptr || grid_ <= 0)
         return false;
 
-    previousEvents_ = pattern->events;
-    project::quantizeNoteStarts(*pattern, grid_, strength_);
+    previousEvents_ = *events;
+    project::quantizeNoteStarts(*events, grid_, strength_);
 
     // Quantizing an already-quantized pattern changes nothing and must not
     // leave an undo entry.
-    return pattern->events != previousEvents_;
+    return *events != previousEvents_;
 }
 
 void QuantizeNotesCommand::undo(Project& project)
 {
-    if (project::Pattern* pattern = findPattern(project, pattern_))
-        pattern->events = previousEvents_;
+    if (std::vector<MidiEvent>* events = findEvents(project, pattern_, channel_))
+        *events = previousEvents_;
 }
 
 } // namespace incdaw::app
