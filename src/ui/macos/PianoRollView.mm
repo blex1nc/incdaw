@@ -178,6 +178,52 @@ enum class DragMode { none, move, resize, boxSelect };
                                           self.bounds.size.height * scale);
 }
 
+- (void)setChannelIdValue:(unsigned long long)value
+{
+    _channelIdValue = value;
+
+    if (_model == nullptr || _project == nullptr)
+        return;
+
+    _model->setChannelFilter(project::EntityId{value}, _project->defaultChannel());
+
+    // Selecting a channel whose notes are off-screen — a kick, with the view
+    // sitting where a melody was — would look like an empty pattern. Follow the
+    // content instead of making the user go and find it.
+    [self scrollToEditableContent];
+    _model->clearSelection();
+}
+
+- (void)scrollToEditableContent
+{
+    const project::Pattern* pattern = [self currentPattern];
+    if (pattern == nullptr)
+        return;
+
+    int lowest  = 128;
+    int highest = -1;
+
+    for (const project::MidiEvent& event : pattern->events) {
+        if (event.type != project::MidiEventType::note || !_model->ownsNote(event))
+            continue;
+
+        lowest  = std::min(lowest, event.key);
+        highest = std::max(highest, event.key);
+    }
+
+    if (highest < 0)
+        return;   // nothing on this channel; leave the view where the user put it
+
+    auto viewport = _model->viewport();
+
+    if (lowest >= viewport.lowestKey && highest < viewport.lowestKey + viewport.visibleKeys)
+        return;   // already on screen
+
+    const int centre = (lowest + highest) / 2;
+    viewport.lowestKey = std::clamp(centre - viewport.visibleKeys / 2, 0, 127 - viewport.visibleKeys);
+    _model->setViewport(viewport);
+}
+
 - (project::Pattern*)currentPattern
 {
     if (_project == nullptr)
@@ -266,10 +312,15 @@ enum class DragMode { none, move, resize, boxSelect };
             const double green = visible.selected ? 0.80 : 0.72 * intensity;
             const double blue  = visible.selected ? 0.35 : 0.95 * intensity;
 
+            // Another channel's note: context, not a target. Dimmed rather than
+            // hidden, because what the rest of the pattern is doing is exactly
+            // what you need to see while editing one part of it.
+            const double alpha = visible.ghost ? 0.28 : 1.0;
+
             _rectangles.push_back(makeRect(keyboardWidth + visible.x, visible.y + 1.0,
                                            std::max(2.0, visible.width - 1.0),
                                            std::max(2.0, visible.height - 2.0),
-                                           red, green, blue));
+                                           red, green, blue, alpha));
         }
     }
 
@@ -377,6 +428,7 @@ enum class DragMode { none, move, resize, boxSelect };
     note.key      = _model->yToKey(grid.y);
     note.duration = _model->snap() > 0 ? _model->snap() : ticksPerQuarterNote / 4;
     note.value    = 100;
+    note.channelId = project::EntityId{_channelIdValue};
 
     if (note.tick < 0)
         note.tick = 0;

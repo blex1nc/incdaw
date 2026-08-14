@@ -32,6 +32,12 @@ public:
         int         key = 60;
         int         velocity = 100;
         bool        selected = false;
+
+        /// Belongs to another channel. Drawn dimmed and never hit — FL Studio
+        /// calls these ghost notes, and they are what makes editing one channel
+        /// of a multi-channel pattern possible without losing the context of
+        /// what the others are playing.
+        bool        ghost = false;
     };
 
     struct Viewport {
@@ -120,6 +126,23 @@ public:
 
     // ── Grid ────────────────────────────────────────────────────────────────
 
+    /// Restricts editing to one channel's notes. An invalid channel means no
+    /// filter: every note in the pattern is editable, which is what a
+    /// single-channel project wants.
+    ///
+    /// `defaultChannel` is the channel an untagged note belongs to — the
+    /// project's first (docs/DECISIONS.md D-012).
+    void setChannelFilter(project::EntityId channel, project::EntityId defaultChannel) noexcept
+    {
+        channel_        = channel;
+        defaultChannel_ = defaultChannel;
+    }
+
+    [[nodiscard]] project::EntityId channelFilter() const noexcept { return channel_; }
+
+    /// True when this note is the filtered channel's — that is, editable.
+    [[nodiscard]] bool ownsNote(const MidiEvent& event) const noexcept;
+
     void setSnap(Tick snap) noexcept { snap_ = snap > 0 ? snap : 0; }
     [[nodiscard]] Tick snap() const noexcept { return snap_; }
 
@@ -144,6 +167,8 @@ public:
 
 private:
     Viewport                 viewport_;
+    project::EntityId        channel_;
+    project::EntityId        defaultChannel_;
     Tick                     snap_ = 0;
     std::vector<std::size_t> selection_;
 };

@@ -4,6 +4,15 @@
 
 namespace incdaw::app {
 
+bool PianoRollModel::ownsNote(const MidiEvent& event) const noexcept
+{
+    if (!channel_.isValid())
+        return true;
+
+    const project::EntityId owner = event.channelId.isValid() ? event.channelId : defaultChannel_;
+    return owner == channel_;
+}
+
 void PianoRollModel::collectVisibleNotes(const Pattern& pattern, std::vector<VisibleNote>& out) const
 {
     // Cleared, not reassigned: the capacity earned on previous frames is what
@@ -43,7 +52,8 @@ void PianoRollModel::collectVisibleNotes(const Pattern& pattern, std::vector<Vis
         visible.height   = height;
         visible.key      = event.key;
         visible.velocity = event.value;
-        visible.selected = isSelected(index);
+        visible.ghost    = !ownsNote(event);
+        visible.selected = isSelected(index) && !visible.ghost;
 
         out.push_back(visible);
     }
@@ -68,6 +78,9 @@ std::size_t PianoRollModel::noteAtPoint(const Pattern& pattern, double x, double
 
         if (event.type != project::MidiEventType::note || event.key != key)
             continue;
+
+        if (!ownsNote(event))
+            continue;   // a ghost is context, not a target
 
         const Tick noteEnd = event.tick + std::max<Tick>(1, event.duration);
         if (tick >= event.tick && tick < noteEnd)
@@ -128,6 +141,9 @@ void PianoRollModel::notesInRectangle(const Pattern& pattern, double x, double y
         const MidiEvent& event = pattern.events[index];
         if (event.type != project::MidiEventType::note)
             continue;
+
+        if (!ownsNote(event))
+            continue;   // box selection cannot pick up another channel's notes
 
         const double noteLeft   = tickToX(event.tick);
         const double noteRight  = tickToX(event.tick + std::max<Tick>(1, event.duration));

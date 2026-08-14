@@ -36,12 +36,24 @@ public version yet.
   pattern and per-channel length, swing, add / delete / rename channel, channel
   volume, pan, mute, solo, step toggle, and pattern clip placement. All
   undoable; fader and length drags merge into one undo entry.
-- 22 tests covering the Phase 8 exit criterion, channel ownership, polymetry,
-  swing, step editing, command identity across undo/redo, and the compiled
-  graph.
+- 23 tests covering the Phase 8 exit criterion, channel ownership, polymetry,
+  swing, step editing, command identity across undo/redo, the compiled graph,
+  and the Piano Roll's channel filter.
+- `ui/macos/ChannelRackView` — the channel rack: channels with mute, solo and
+  a step grid, drawn with Core Graphics. Clicking a step is a command; a
+  channel that loops shorter than the pattern greys out the steps it never
+  reaches, and a channel with notes off the step grid says how many.
+- Song / pattern mode (⌘M). Pattern mode loops the pattern being edited; song
+  mode plays the clips on the timeline.
+- Ghost notes: the Piano Roll edits the selected channel and draws the rest
+  dimmed. They cannot be clicked or box-selected, and selecting a channel
+  whose notes are off-screen scrolls to them.
 
 **Changed**
 
+- The app no longer builds its own render graph. `main.mm` opens a project with
+  three channels and a starter pattern, and everything it plays comes from
+  `compileProjectGraph`.
 - Project format 1.1: notes gained `channelId`; patterns gained `stepDivision`,
   `swing` and `channelSettings`. Backward-compatible — a 1.0 package loads
   through an empty migration and means exactly what it meant before.

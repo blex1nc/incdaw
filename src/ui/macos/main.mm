@@ -1,24 +1,25 @@
 // INCDAW — macOS application.
 //
-// Phase 7: the Piano Roll is live and audible. Editing a note changes what
-// plays, because every edit rebuilds the render graph and hands it to the audio
-// engine through an atomic swap.
+// Phase 8: the window is a channel rack and a Piano Roll over one project. The
+// graph is no longer assembled here — project::compileProjectGraph builds it
+// from the model, so every channel, pattern and clip the project contains is
+// what plays (docs/DECISIONS.md D-013).
 //
 // Not yet present: the mixer (Phase 10) and automation (Phase 11). The signal
-// path is instrument -> master gain -> device, and nothing pretends otherwise.
+// path is instrument -> channel strip -> master gain -> device, and nothing
+// pretends otherwise.
 
 #import <Cocoa/Cocoa.h>
 
 #include "app/CommandRegistry.h"
+#include "app/commands/PatternCommands.h"
 #include "app/Version.h"
 #include "engine/AudioEngine.h"
-#include "engine/dsp/GainNode.h"
-#include "engine/instrument/InstrumentNode.h"
-#include "engine/instrument/SimpleSynth.h"
 #include "engine/graph/RenderGraph.h"
 #include "platform/SystemInfo.h"
+#include "project/GraphCompiler.h"
 #include "project/Model.h"
-#include "project/PatternCompiler.h"
+#include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PianoRollView.h"
 
 #include <memory>
@@ -33,19 +34,48 @@ namespace {
 /// A short phrase so the editor opens with something to look at and edit,
 /// rather than an empty grid. It is ordinary pattern content — selectable,
 /// movable, deletable, undoable — not a fixture the UI treats specially.
-void addStarterPhrase(project::Pattern& pattern)
+void addStarterPhrase(project::Pattern& pattern, project::EntityId channel)
 {
     const int  scale[] = {0, 4, 7, 12, 7, 4};
     const Tick step    = ticksPerQuarterNote / 2;
 
     for (int index = 0; index < 12; ++index) {
         project::MidiEvent note;
+        note.type      = project::MidiEventType::note;
+        note.tick      = static_cast<Tick>(index) * step;
+        note.key       = 60 + scale[index % 6];
+        note.duration  = step - 20;
+        note.value     = 70 + (index % 4) * 15;
+        note.channelId = channel;
+        pattern.events.push_back(note);
+    }
+}
+
+/// A four-on-the-floor kick and an off-beat hat, so the step grid opens with
+/// something on it. Same status as the phrase above: ordinary pattern content.
+void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::EntityId hat)
+{
+    const Tick step = pattern.stepDivision;
+
+    for (int index = 0; index < 16; ++index) {
+        project::MidiEvent note;
         note.type     = project::MidiEventType::note;
         note.tick     = static_cast<Tick>(index) * step;
-        note.key      = 60 + scale[index % 6];
-        note.duration = step - 20;
-        note.value    = 70 + (index % 4) * 15;
-        pattern.events.push_back(note);
+        note.duration = step;
+        note.value    = 100;
+
+        if (index % 4 == 0) {
+            note.key       = 36;
+            note.channelId = kick;
+            pattern.events.push_back(note);
+        }
+
+        if (index % 4 == 2) {
+            note.key       = 37;
+            note.value     = 78;
+            note.channelId = hat;
+            pattern.events.push_back(note);
+        }
     }
 }
 
@@ -54,6 +84,7 @@ void addStarterPhrase(project::Pattern& pattern)
 @interface INCDAWAppDelegate : NSObject <NSApplicationDelegate>
 @property (strong) NSWindow*              window;
 @property (strong) INCDAWPianoRollView*   pianoRoll;
+@property (strong) INCDAWChannelRackView* channelRack;
 @property (strong) NSTextField*           statusField;
 @end
 
@@ -61,6 +92,14 @@ void addStarterPhrase(project::Pattern& pattern)
     std::unique_ptr<project::Project>     _project;
     std::unique_ptr<app::CommandRegistry> _registry;
     std::unique_ptr<engine::AudioEngine>  _audio;
+
+    project::PlaybackMode _mode;
+
+    /// Ticks the current graph plays before it repeats: the pattern's length in
+    /// pattern mode, the arrangement's in song mode. Comes back from the
+    /// compiler rather than being recomputed here, so the loop and the notes
+    /// can never disagree.
+    engine::Tick _playbackLengthTicks;
 
     NSTimer* _housekeeping;
     BOOL     _audioReady;
@@ -72,9 +111,19 @@ void addStarterPhrase(project::Pattern& pattern)
 
     _project  = std::make_unique<project::Project>();
     _registry = std::make_unique<app::CommandRegistry>(*_project);
+    _mode     = project::PlaybackMode::pattern;
+
+    const project::EntityId kick = _project->addChannel("Kick").id;
+    const project::EntityId hat  = _project->addChannel("Hat").id;
+    const project::EntityId lead = _project->addChannel("Lead").id;
+
+    _project->addTrack(project::TrackType::instrument, "Track 1");
 
     auto& pattern = _project->addPattern("Pattern 1");
-    addStarterPhrase(pattern);
+    addStarterBeat(pattern, kick, hat);
+    addStarterPhrase(pattern, lead);
+
+    const project::EntityId patternId = pattern.id;
 
     const NSRect frame = NSMakeRect(0, 0, 1180, 720);
 
@@ -93,14 +142,29 @@ void addStarterPhrase(project::Pattern& pattern)
 
     constexpr CGFloat statusHeight = 26.0;
 
+    const CGFloat rackHeight =
+        [INCDAWChannelRackView heightForChannelCount:_project->channels().size()];
+
     self.pianoRoll = [[INCDAWPianoRollView alloc]
-        initWithFrame:NSMakeRect(0, statusHeight, frame.size.width, frame.size.height - statusHeight)
+        initWithFrame:NSMakeRect(0, statusHeight + rackHeight, frame.size.width,
+                                 frame.size.height - statusHeight - rackHeight)
               project:_project.get()
              registry:_registry.get()];
 
-    self.pianoRoll.patternIdValue = pattern.id.value();
+    self.pianoRoll.patternIdValue = patternId.value();
+    self.pianoRoll.channelIdValue = lead.value();
     self.pianoRoll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [content addSubview:self.pianoRoll];
+
+    self.channelRack = [[INCDAWChannelRackView alloc]
+        initWithFrame:NSMakeRect(0, statusHeight, frame.size.width, rackHeight)
+              project:_project.get()
+             registry:_registry.get()];
+
+    self.channelRack.patternIdValue         = patternId.value();
+    self.channelRack.selectedChannelIdValue = lead.value();
+    self.channelRack.autoresizingMask       = NSViewWidthSizable | NSViewMaxYMargin;
+    [content addSubview:self.channelRack];
 
     self.statusField = [NSTextField labelWithString:@""];
     self.statusField.frame = NSMakeRect(10, 4, frame.size.width - 20, statusHeight - 8);
@@ -112,6 +176,21 @@ void addStarterPhrase(project::Pattern& pattern)
     __weak INCDAWAppDelegate* weakSelf = self;
     self.pianoRoll.onChange = ^{
         [weakSelf rebuildGraph];
+        [weakSelf refreshStatus];
+        [weakSelf.channelRack setNeedsDisplay:YES];
+    };
+
+    self.channelRack.onChange = ^{
+        [weakSelf rebuildGraph];
+        [weakSelf refreshStatus];
+        [weakSelf.pianoRoll requestRedraw];
+    };
+
+    // Selecting a channel decides which notes the Piano Roll edits; the rest
+    // become ghost notes there rather than disappearing.
+    self.channelRack.onChannelSelected = ^{
+        weakSelf.pianoRoll.channelIdValue = weakSelf.channelRack.selectedChannelIdValue;
+        [weakSelf.pianoRoll requestRedraw];
         [weakSelf refreshStatus];
     };
 
@@ -175,29 +254,67 @@ void addStarterPhrase(project::Pattern& pattern)
 /// microseconds.
 - (void)rebuildGraph
 {
-    if (!_audioReady || _project->patterns().empty())
+    if (!_audioReady)
         return;
 
-    auto instrument = std::make_unique<engine::InstrumentNode>(
-        std::make_unique<engine::SimpleSynth>(), _audio->transport().tempoMap());
+    project::GraphCompileOptions options;
+    options.mode          = _mode;
+    options.activePattern = project::EntityId{self.pianoRoll.patternIdValue};
+    options.sampleRate    = _audio->sampleRate();
+    options.maxBlockSize  = _audio->bufferSize();
+    options.channelCount  = _audio->outputChannels();
 
-    project::compilePatternInto(instrument->sequence(), _project->patterns()[0]);
+    auto compiled = project::compileProjectGraph(*_project, _audio->transport().tempoMap(), options);
 
-    engine::GraphBuilder builder;
-    const auto channel = builder.addNode(std::move(instrument));
-    const auto master  = builder.addNode(std::make_unique<engine::dsp::GainNode>(0.8f));
-
-    builder.connect(channel, master);
-    builder.setMaster(master);
-
-    auto graph = builder.compile(_audio->sampleRate(), _audio->bufferSize(),
-                                 _audio->outputChannels());
-    if (graph == nullptr) {
-        NSLog(@"INCDAW: graph rebuild failed: %s", builder.lastError().c_str());
+    if (compiled.graph == nullptr) {
+        NSLog(@"INCDAW: graph rebuild failed: %s", compiled.error.c_str());
         return;
     }
 
-    _audio->setGraph(std::move(graph));
+    _playbackLengthTicks = compiled.lengthTicks;
+    _audio->setGraph(std::move(compiled.graph));
+
+    // A running transport must keep looping the right span when the mode or the
+    // arrangement changes underneath it.
+    if (_audio->transport().isPlaying())
+        [self applyLoopRange];
+}
+
+/// Loops whatever the current graph plays, from the start.
+- (void)applyLoopRange
+{
+    auto& transport = _audio->transport();
+
+    const engine::Tick length = _playbackLengthTicks > 0 ? _playbackLengthTicks
+                                                         : ticksPerQuarterNote * 4;
+
+    transport.setLoopRange(0, transport.tempoMap().frameForTick(length));
+    transport.setLoopEnabled(YES);
+}
+
+- (void)toggleSongMode
+{
+    _mode = _mode == project::PlaybackMode::song ? project::PlaybackMode::pattern
+                                                 : project::PlaybackMode::song;
+
+    // Song mode with an empty arrangement would play silence and look broken,
+    // so the first switch places the pattern once rather than leaving a puzzle.
+    if (_mode == project::PlaybackMode::song && _project->clips().empty()
+        && !_project->tracks().empty() && !_project->patterns().empty()) {
+        const project::EntityId track   = _project->tracks().front().id;
+        const project::EntityId pattern = _project->patterns().front().id;
+
+        (void)_registry->execute(std::make_unique<app::AddPatternClipCommand>(track, pattern, 0));
+    }
+
+    [self rebuildGraph];
+
+    if (_audioReady && _audio->transport().isPlaying()) {
+        [self applyLoopRange];
+        _audio->transport().seek(0);
+    }
+
+    [self refreshStatus];
 }
 
 - (void)toggleTransport
@@ -210,13 +327,9 @@ void addStarterPhrase(project::Pattern& pattern)
     if (transport.isPlaying()) {
         transport.stop();
     } else {
-        // Loop the pattern, so playback repeats rather than running off into
-        // silence after two bars.
-        const project::Pattern& pattern = _project->patterns()[0];
-        const auto loopEnd = transport.tempoMap().frameForTick(pattern.length > 0 ? pattern.length
-                                                                                  : ticksPerQuarterNote * 8);
-        transport.setLoopRange(0, loopEnd);
-        transport.setLoopEnabled(YES);
+        // Loop whatever the graph plays, so playback repeats rather than running
+        // off into silence.
+        [self applyLoopRange];
         transport.seek(0);
         transport.play();
     }
@@ -237,13 +350,22 @@ void addStarterPhrase(project::Pattern& pattern)
                                       : -1;
 
     [self.pianoRoll requestRedraw];
+
+    self.channelRack.playheadTick = self.pianoRoll.playheadTick;
+    [self.channelRack setNeedsDisplay:YES];
+
     [self refreshStatus];
 }
 
 - (void)refreshStatus
 {
-    const auto& patterns = _project->patterns();
-    const std::size_t noteCount = patterns.empty() ? 0 : patterns[0].events.size();
+    const project::Pattern* pattern =
+        _project->findPattern(project::EntityId{self.pianoRoll.patternIdValue});
+
+    const std::size_t noteCount = pattern != nullptr ? pattern->events.size() : 0;
+
+    const project::Channel* channel =
+        _project->findChannel(project::EntityId{self.pianoRoll.channelIdValue});
 
     NSString* undo = _registry->canUndo()
                          ? [NSString stringWithFormat:@"undo: %s", _registry->undoName().c_str()]
@@ -258,9 +380,12 @@ void addStarterPhrase(project::Pattern& pattern)
     }
 
     self.statusField.stringValue = [NSString stringWithFormat:
-        @"INCDAW %s  ·  %lu notes  ·  %@  ·  %@  ·  space: play   click: add   drag: move   "
-        @"right-click: delete   Q: quantize   ⌘Z: undo",
-        app::Version::string(), static_cast<unsigned long>(noteCount), audio, undo];
+        @"INCDAW %s  ·  %@  ·  %@  ·  %lu notes  ·  %@  ·  %@  ·  space: play   ⌘M: song/pattern   "
+        @"click: add   right-click: delete   Q: quantize   ⌘Z: undo",
+        app::Version::string(),
+        _mode == project::PlaybackMode::song ? @"song" : @"pattern",
+        channel != nullptr ? [NSString stringWithUTF8String:channel->name.c_str()] : @"—",
+        static_cast<unsigned long>(noteCount), audio, undo];
 }
 
 - (void)buildMenu
@@ -286,6 +411,15 @@ void addStarterPhrase(project::Pattern& pattern)
     [editMenu addItem:[NSMenuItem separatorItem]];
     [editMenu addItemWithTitle:@"Select All" action:nil keyEquivalent:@"a"];
     editItem.submenu = editMenu;
+
+    NSMenuItem* transportItem = [[NSMenuItem alloc] init];
+    [menuBar addItem:transportItem];
+
+    NSMenu* transportMenu = [[NSMenu alloc] initWithTitle:@"Transport"];
+    [transportMenu addItemWithTitle:@"Song / Pattern Mode"
+                             action:@selector(toggleSongMode)
+                      keyEquivalent:@"m"];
+    transportItem.submenu = transportMenu;
 
     NSApp.mainMenu = menuBar;
 }

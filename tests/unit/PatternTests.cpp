@@ -1,6 +1,7 @@
 #include "doctest.h"
 
 #include "app/CommandRegistry.h"
+#include "app/PianoRollModel.h"
 #include "app/StepSequencerModel.h"
 #include "app/commands/PatternCommands.h"
 #include "engine/core/AudioBufferPool.h"
@@ -694,4 +695,58 @@ TEST_CASE("pan is constant power and mute is not a zero volume")
 
     strip.setMuted(false);
     CHECK(strip.volume() == doctest::Approx(1.0));   // unmuting restores the level
+}
+
+// ── Piano Roll channel filter ─────────────────────────────────────────────────
+
+TEST_CASE("the piano roll edits one channel and shows the rest as ghosts")
+{
+    Project project;
+    const EntityId lead = project.addChannel("Lead").id;
+    const EntityId bass = project.addChannel("Bass").id;
+
+    Pattern pattern;
+    pattern.events.push_back(noteAt(0, 60, lead, 480));
+    pattern.events.push_back(noteAt(0, 48, bass, 480));
+
+    app::PianoRollModel model;
+
+    app::PianoRollModel::Viewport viewport;
+    viewport.firstTick    = 0;
+    viewport.visibleTicks = ticksPerQuarterNote * 4;
+    viewport.lowestKey    = 36;
+    viewport.visibleKeys  = 36;
+    viewport.width        = 800.0;
+    viewport.height       = 600.0;
+    model.setViewport(viewport);
+
+    std::vector<app::PianoRollModel::VisibleNote> visible;
+
+    // No filter: everything is editable, which is what a one-channel project
+    // wants and what every test written before channels existed assumes.
+    model.collectVisibleNotes(pattern, visible);
+    REQUIRE(visible.size() == 2);
+    CHECK_FALSE(visible[0].ghost);
+    CHECK_FALSE(visible[1].ghost);
+
+    model.setChannelFilter(lead, project.defaultChannel());
+    model.collectVisibleNotes(pattern, visible);
+
+    REQUIRE(visible.size() == 2);      // both drawn
+    CHECK_FALSE(visible[0].ghost);
+    CHECK(visible[1].ghost);           // the bass note is context, not a target
+
+    const double leadY = model.keyToY(60) + 1.0;
+    const double bassY = model.keyToY(48) + 1.0;
+
+    CHECK(model.noteAtPoint(pattern, 10.0, leadY) == 0);
+    CHECK(model.noteAtPoint(pattern, 10.0, bassY) == app::PianoRollModel::noNote);
+
+    // Box selection cannot pick up a ghost either, or a drag would silently
+    // move notes the user cannot see themselves editing.
+    std::vector<std::size_t> selected;
+    model.notesInRectangle(pattern, 0.0, 0.0, 800.0, 600.0, selected);
+
+    REQUIRE(selected.size() == 1);
+    CHECK(selected[0] == 0);
 }

@@ -20,6 +20,11 @@ namespace incdaw::app     { class CommandRegistry; }
 /// Pattern being edited, by entity id value.
 @property (nonatomic, assign) unsigned long long patternIdValue;
 
+/// Channel being edited, by entity id value. Notes belonging to other channels
+/// are drawn as ghosts — visible for context, not editable. Zero edits every
+/// note in the pattern regardless of channel.
+@property (nonatomic, assign) unsigned long long channelIdValue;
+
 /// Playhead position in ticks; negative hides it.
 @property (nonatomic, assign) long long playheadTick;
 

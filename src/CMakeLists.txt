@@ -97,6 +97,7 @@ if(APPLE)
     add_executable(INCDAW MACOSX_BUNDLE
         ui/macos/main.mm
         ui/macos/PianoRollView.mm
+        ui/macos/ChannelRackView.mm
         ui/macos/PianoRollRenderer.mm)
     target_link_libraries(INCDAW
         PRIVATE incdaw_app incdaw_warnings
