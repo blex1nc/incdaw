@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 0.9
-Status: PHASES 0-7 COMPLETE / PHASE 8 NEXT
+Version: 1.0
+Status: PHASES 0-8 COMPLETE / PHASE 9 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -125,9 +125,8 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 
 Current phase:
 
-PHASES 0-5 COMPLETE (2026-08-14)
-PHASE 7 (instruments) — COMPLETE
-PHASE 8 (patterns) — NOT STARTED
+PHASES 0-8 COMPLETE (2026-08-14)
+PHASE 9 (playlist) — NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -139,7 +138,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  223 test cases, 30,674 assertions, green in both Debug and Release.
+  246 test cases, 30,872 assertions, green.
   Zero compiler warnings (-Werror is on).
 
 Implemented:
@@ -194,32 +193,81 @@ Phase 7 — COMPLETE. Done and tested:
   rebuilds the graph and swaps it in atomically. Verified on hardware:
   6 s arpeggio, 0 overruns, 0 realtime allocations.
 
+Phase 8 — COMPLETE. Done and tested:
+
+  project/GraphCompiler          THE SEAM. compileProjectGraph(project, tempoMap,
+                                 options) -> CompiledGraph. One InstrumentNode +
+                                 one ChannelStripNode per channel, into a master
+                                 gain. main.mm no longer builds a graph (D-013).
+  project/InstrumentFactory      PluginIdentifier -> Instrument. An unhostable
+                                 format renders silence and KEEPS its channel,
+                                 so a project naming a VST3 still opens and saves.
+  engine/dsp/ChannelStripNode    channel volume, constant-power pan, mute,
+                                 smoothed. NOT the mixer — Phase 10 goes
+                                 downstream of it.
+  MidiEvent::channelId           a note names the channel that plays it (D-012),
+                                 so one pattern holds a whole kit. Untagged =
+                                 the project's first channel, which is what
+                                 every v1.0 file means.
+  Pattern::channelSettings       per-channel loop length (polymetric) and swing.
+                                 No note data — that stays in events.
+  PatternCompiler                per-channel compile, swing, polymetric repeat,
+                                 and compileArrangement for song mode. Every
+                                 placement of a pattern is seeded from the
+                                 pattern, so placements cannot diverge.
+  app/StepSequencerModel         the step grid as a VIEW over the notes, not a
+                                 second model. Reports the notes it cannot show.
+  app/commands/PatternCommands   pattern add/duplicate/delete/rename/length/
+                                 swing, channel add/delete/rename/volume/pan/
+                                 mute/solo, step toggle, clip add/delete/move.
+                                 Ids survive undo+redo, so a clip never ends up
+                                 pointing at a pattern that changed identity.
+  ui/macos/ChannelRackView       channels with mute/solo and a 16-step grid,
+                                 Core Graphics. Steps outside a channel's own
+                                 loop are greyed; off-grid notes are counted,
+                                 not hidden.
+  Piano Roll ghost notes         edits the selected channel, dims the rest.
+                                 Ghosts are not clickable or box-selectable.
+
+  Project format is now 1.1 (additive). The v1.0 fixture loads through the
+  migration hook; a hand-written v1.1 fixture joins it.
+
+  Exit criterion MET: tests/unit/PatternTests.cpp, "one pattern placed twice
+  plays identically at both placements". Verified on hardware: the app launches,
+  Metal is ready, CoreAudio runs at 48 kHz / 256 frames, first frame drawn.
+
 WHAT THE APP STILL DOES NOT DO:
 
-  - no mixer: the signal path is instrument -> master gain -> device. The
-    MixerNode/RoutingConnection types serialize but nothing evaluates them.
+  - no mixer: the signal path is instrument -> channel strip -> master gain ->
+    device. MixerNode/RoutingConnection serialize but nothing evaluates them.
   - no automation: AutomationLane serializes, nothing reads it.
-  - no playlist/arrangement: one pattern, looped. Clip types serialize only.
+  - no playlist UI: pattern clips play in song mode (Cmd+M) and AddPatternClip/
+    Move/Delete commands exist, but there is no timeline to see or drag them on.
+    Song mode places the first pattern once so the mode is not a silent puzzle.
   - no audio clips, no recording into the timeline, no plugins, no sampler.
   - the project is never saved from the UI: ProjectFile works and is tested,
     but no menu action calls it.
+  - the step grid shows 16 steps regardless of pattern length; longer patterns
+    are edited in the Piano Roll.
+  - per-step parameters beyond velocity and probability (per-step pan, pitch,
+    note repeat) are not implemented.
 
 Not started:
 
-  Phase 7  Channels/instruments            Phase 13  Plugin hosting
-  Phase 7  Channels/instruments            Phase 14  Sampler
-  Phase 8  Patterns (model exists, no      Phase 15  Built-in DSP
-           playback)                       Phase 16  MIDI hardware
-  Phase 9  Playlist                        Phase 17  Render/export
-  Phase 10 Mixer/routing (model exists,    Phase 18  Performance
-           no signal path)                 Phase 19  QA
-  Phase 11 Automation (model exists,       Phase 20  Release
-           no evaluation)
+  Phase 9  Playlist (clips play in song    Phase 15  Built-in DSP
+           mode; no timeline UI)           Phase 16  MIDI hardware
+  Phase 10 Mixer/routing (model exists,    Phase 17  Render/export
+           no signal path)                 Phase 18  Performance
+  Phase 11 Automation (model exists,       Phase 19  QA
+           no evaluation)                  Phase 20  Release
   Phase 12 Recording/audio editor
+  Phase 13 Plugin hosting
+  Phase 14 Sampler
 
-Important: several Phase 4 model types (MixerNode, AutomationLane, Clip,
-Channel) currently SERIALIZE but are not yet WIRED INTO THE AUDIO GRAPH. They
-are data, not behaviour. Do not describe the mixer or automation as working.
+Important: MixerNode, RoutingConnection and AutomationLane still SERIALIZE but
+are not WIRED INTO THE AUDIO GRAPH. They are data, not behaviour. Do not
+describe the mixer or automation as working. Channel and Clip are now real:
+channels compile into the graph, and pattern clips play in song mode.
 
 Environment (verified 2026-08-14):
 
@@ -236,9 +284,14 @@ Dependencies in tree:
 
 Graphify:
 
-  STALE. `graphify .` fails with "no LLM API key found". The graph in
-  graphify-out/ predates all source code. Export GEMINI_API_KEY,
-  ANTHROPIC_API_KEY or equivalent and re-run to refresh it.
+  graph.json IS CURRENT for code (rebuilt 2026-08-14 with `graphify . --code-only`:
+  1834 nodes, 3315 edges, 100 communities over the real source tree).
+
+  GRAPH_REPORT.md is STALE — it still describes the documentation-only graph,
+  because naming communities needs an LLM and `graphify .` without --code-only
+  fails with "no LLM API key found". Export GEMINI_API_KEY, ANTHROPIC_API_KEY or
+  equivalent and re-run `graphify .` to refresh the report. Until then, use
+  `graphify query "..."`, which reads graph.json and is accurate.
 
 ---
 
@@ -822,12 +875,13 @@ All systems must share the same underlying transport, timing, project state and 
 
 # 22. CURRENT HANDOFF MESSAGE
 
-Phases 0-4 are implemented, tested and committed. The engine makes sound, keeps
-sample-accurate time, and saves and loads a versioned project.
+Phases 0-8 are implemented, tested and committed. The engine makes sound, keeps
+sample-accurate time, saves and loads a versioned project, and now plays what
+the project model says rather than what the UI hardcodes.
 
 Read first:
 
-1. docs/DECISIONS.md    — what was decided and why (D-001..D-010)
+1. docs/DECISIONS.md    — what was decided and why (D-001..D-013)
 2. docs/ARCHITECTURE.md — layers, threading, data model, commands
 3. docs/ROADMAP.md      — phases and their exit criteria
 4. git log              — each phase is one commit with its rationale
@@ -838,21 +892,30 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 8 (patterns), then 9 (playlist) and 10 (mixer).
+Next step: Phase 9 (playlist), then 10 (mixer) and 11 (automation).
 
-  Those three are what make it feel like a DAW rather than a pattern editor.
   In dependency order:
 
-  8  multiple patterns; a pattern list in the UI; one InstrumentNode per
-     channel rather than one hardcoded node in main.mm
-  9  the playlist: place pattern clips on a timeline, several tracks
-  10 the mixer: make MixerNode and RoutingConnection actually compile into
-     the render graph, with PDC. The types already exist and serialize.
+  9  the playlist: a timeline view for the clips that already play. The model
+     (Clip), the commands (AddPatternClip / MoveClip / DeleteClip) and the
+     playback path (compileArrangement, song mode) all exist and are tested —
+     Phase 9 is the editing surface plus split, resize, stretch, fade, clip
+     gain, track folders, markers.
+  10 the mixer: make MixerNode and RoutingConnection compile into the render
+     graph, with PDC. ChannelStripNode already gives each channel its volume
+     and pan; the mixer goes between the strips and the master.
+  11 automation: AutomationLane is generic and serializes; nothing evaluates it.
 
-  Practical note for whoever continues: main.mm currently builds the graph by
-  hand from patterns()[0]. That is the seam. Phase 8 should replace it with a
-  proper project -> graph compiler in project/ (it cannot live in engine/,
-  which cannot see a Project), and everything after that becomes additive.
+  Practical note for whoever continues: the seam is now
+  project::compileProjectGraph (src/project/GraphCompiler.cpp). Every phase
+  after this one adds nodes there — mixer nodes between the strips and the
+  master, automation readers feeding parameters, plugin nodes in insert
+  chains. Do not build graphs anywhere else (D-013).
+
+  Also note: a pattern list UI does not exist. The app opens one pattern and
+  the rack shows it; AddPattern/Duplicate/Delete commands are implemented and
+  tested but nothing in the UI invokes them yet. That is a small, obvious first
+  task if you want a warm-up before the playlist.
 
   docs/DECISIONS.md D-011 records why Metal shaders compile at runtime (no
   `metal` compiler without full Xcode). Deployment target is 14.0 for NSView
@@ -873,6 +936,16 @@ Things to be careful about:
     is servicing, not the one the property query reports. Both the scratch
     sizing and the profiler budget now account for this; do not reintroduce an
     assumption that they match.
+  - Project::addChannel/addPattern/addClip return a reference INTO A VECTOR.
+    The next add can move it. Capture the id, not the reference — this already
+    cost one debugging session in the Phase 8 tests.
+  - "Which channel is first" is load-bearing: an untagged note belongs to it
+    (D-012). DeleteChannelCommand resolves the default before deleting anything
+    for exactly this reason. Anything that reorders channels must think about
+    it.
+  - A pattern's length is a loop marker, not a guillotine: compilePattern only
+    truncates when `bounded` is set or the content repeats. Clips set it;
+    pattern mode does not.
 
 ---
 
