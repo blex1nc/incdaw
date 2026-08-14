@@ -419,3 +419,70 @@ explicit "swing as quantise target" operation, not as a tolerance here.
 
 **Date:** 2026-08-14
 **Status:** ACCEPTED
+
+---
+
+## D-015 — The Channel Rack is drawn with CoreGraphics, not Metal
+
+**Context:** The Piano Roll is a Metal, layer-hosting view driven by a display
+link, because docs/ROADMAP.md Phase 6 requires 60 fps with 10,000 notes. Phase
+8b adds two more panes. The obvious move is to reuse the renderer.
+
+**Options:**
+- One Metal renderer shared by every pane
+- CoreGraphics `drawRect:` for the rack and the pattern list
+- An abstraction layer that hides which one is in use
+
+**Chosen:** CoreGraphics for the rack and the pattern list; the Piano Roll keeps
+Metal.
+
+**Reason:** The two have genuinely different budgets. A rack draws a few
+rectangles per channel per visible step, invalidated on edits and on the
+playhead moving one cell — tens to low hundreds of rectangles, at rates a CPU
+path handles without effort. Metal there costs a shader, a pipeline, a drawable
+and a display link to save nothing measurable, and it makes text — channel
+names, M/S, the pattern list — the hard part of a pane that is mostly text.
+
+**Tradeoffs:** Two rendering paths in `ui/macos/`. The seam is per-view and
+neither path is exposed outside its view, so a pane can switch later if a
+measurement demands it. The rule is the measurement, not the API: a pane moves
+to Metal when its frame time says so.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-016 — A step is a note, and its pitch belongs to the channel
+
+**Context:** A step sequencer needs to know what a lit cell means. Most designs
+give steps their own type — a bit per step, with parallel arrays for velocity
+and probability — and convert to notes at playback.
+
+**Options:**
+- A dedicated step type, converted to MIDI when the pattern compiles
+- Steps ARE notes: a lit cell is an ordinary `MidiEvent` in the pattern
+- Steps as notes, but at one fixed pitch for every channel
+
+**Chosen:** Steps are ordinary notes, written at a per-channel `Channel::stepKey`
+(default 60). A cell is a half-open tick range, so a note nudged off the grid
+still reads as programmed.
+
+**Reason:** A second representation is a second source of truth, and the rack
+and the Piano Roll edit the same pattern: with a step type, giving a step a
+different length or probability in the Piano Roll would either be impossible or
+would silently desynchronise the two views. Because a step is a note, every
+existing note command, the compiler, undo and the project format apply to it
+with no extra code. The pitch is per channel because a drum channel's steps have
+to land on the key its sampler maps that drum to — a global constant would work
+only until Phase 14.
+
+**Tradeoffs:** "Is this step on?" is a search rather than a bit test, and a
+channel programmed across many pitches shows only its step key in the rack. The
+search is bounded by one channel's events in one pattern; if it ever shows up in
+a profile, it is an index over an already-sorted list, not a data model change.
+Project format 1.1 → 1.2 for the new field, additive and defaulted.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+

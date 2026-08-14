@@ -8,6 +8,46 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 8b — Channel Rack, pattern list, step sequencer — 2026-08-14
+
+**Added**
+
+- `app/commands/ChannelCommands` — add, remove, rename, mute, solo, volume
+  (mergeable), step key. Removing a channel takes its content in every pattern
+  with it and gives all of it back.
+- `app/commands/PatternCommands` — add, duplicate, remove, rename, length,
+  swing.
+- `app/commands/StepCommands` — `ToggleStepCommand` and `noteAtStep`. A step is
+  an ordinary note (D-016).
+- `app/ChannelRackModel` — rack geometry and hit testing, drawn by nobody and
+  therefore tested headlessly.
+- `ui/macos/ChannelRackView` — channels, mute/solo, volume, and the step grid,
+  with drag-painting and a playhead column (D-015).
+- `ui/macos/PatternListView` — select, add, duplicate, rename, remove.
+- `Channel::stepKey` — the pitch a channel's steps are written at.
+- `Project::insertChannel` / `insertPattern` / `removeChannel` / `removePattern`
+  / `indexOfChannel` / `indexOfPattern` — what undo needs to put an entity back
+  where it was, with the identity it had.
+- `tests/unit/ChannelRackTests.cpp` — 13 cases: command round trips, mute and
+  solo reaching the compiled graph, steps visible to the Piano Roll, rack hit
+  testing.
+- `tests/fixtures/v1.1/` — the 1.1 fixture, now that 1.1 is no longer current.
+
+**Changed**
+
+- Project format 1.1 → 1.2, additive: a 1.1 file has no `stepKey` and reads back
+  as middle C. Both fixtures load.
+- The transport loops the selected pattern rather than `patterns()[0]`.
+- Retargeting the Piano Roll clears its selection, since note indices belong to
+  one channel's list in one pattern.
+- Space and ⌘Z work from any pane.
+
+**Known gaps**
+
+- Drag-painting steps leaves one undo entry per cell rather than one per stroke.
+- The project is still never saved from the UI.
+- Channel colour and step key have commands but no UI to reach them.
+
 ### Phase 8a — Pattern system: model and compilation — 2026-08-14
 
 **Added**
@@ -37,8 +77,9 @@ public version yet.
 **Known gaps**
 
 - No Channel Rack, pattern list, or step sequencer UI yet (Phase 8b): the app
-  still opens one pattern on one channel.
+  still opens one pattern on one channel. *(Closed by Phase 8b.)*
 - No `tests/fixtures/v1.1/` fixture yet — required before 1.1 ships.
+  *(Closed by Phase 8b.)*
 
 ### Phase 0 — Research and architecture — 2026-08-14
 

@@ -126,9 +126,15 @@ content, swing, polymetric channel lengths, arrangement compilation, and
 covered by "one pattern placed several times plays identically at each
 placement" in `tests/unit/PatternTests.cpp`.
 
-**8b — UI: NOT STARTED.** Channel Rack, pattern list, step sequencer grid.
+**8b — UI: COMPLETE (2026-08-14).** Channel Rack with mute, solo, volume and a
+step grid; pattern list with add, duplicate, rename and remove; every edit a
+command on the shared undo stack. A step is an ordinary note (D-016), so the
+rack and the Piano Roll edit the same objects.
+
 Automation inside patterns is Phase 11; `Pattern::automationLanes` serializes
-but nothing evaluates it.
+but nothing evaluates it. Per-step probability and per-step parameters are
+reachable through the Piano Roll — they are note properties — but the rack has
+no UI for them yet.
 
 ---
 

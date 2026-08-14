@@ -80,6 +80,7 @@ requires a migration step.
 |---|---|---|
 | 1.0 | 4 | First format. |
 | 1.1 | 8 | Pattern notes stored per channel (`channels[]` in a `.pat` file) instead of one flat `events[]`; patterns gained `swing` / `swingGrid`; clips gained `startTick` / `lengthTicks` / `sourceOffsetTicks`. |
+| 1.2 | 8b | Channels gained `stepKey`, the pitch a step sequencer step is written at. Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -93,10 +94,16 @@ has been restored — creating a channel if the project has none. Notes that
 loaded but belonged to no channel would be present in the model and silent on
 playback, which is worse than not loading them.
 
-> **Outstanding:** `tests/fixtures/v1.1/` does not exist yet. The 1.1 shape is
-> covered by the save/load round-trip test, which is weaker: it only proves the
-> code agrees with itself. A hand-written 1.1 fixture is required before 1.1
-> ships.
+**Reading a 1.1 file.** Purely additive: a 1.1 document has no `stepKey` and the
+reader defaults it to 60, which is the pitch those projects behaved as if they
+had. Nothing is rewritten, but the path is still declared in
+`ProjectFile::migrate` — an undeclared version is refused, because silently
+accepting unknown ones is how a loader starts dropping fields.
+
+`tests/fixtures/v1.1/Fixture.incdaw` is kept permanently, alongside the 1.0 one.
+It is a frozen document rather than something the current writer regenerates:
+two channels, one pattern with per-channel content and swing, and no `stepKey`
+anywhere.
 
 ---
 

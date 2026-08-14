@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.0
-Status: PHASES 0-7 COMPLETE, PHASE 8a COMPLETE / PHASE 8b NEXT
+Version: 1.1
+Status: PHASES 0-8 COMPLETE / PHASE 9 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -125,9 +125,10 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 
 Current phase:
 
-PHASES 0-7 COMPLETE (2026-08-14)
+PHASES 0-8 COMPLETE (2026-08-14)
 PHASE 8a (pattern model + compilation) — COMPLETE
-PHASE 8b (Channel Rack / pattern list / step sequencer UI) — NOT STARTED
+PHASE 8b (Channel Rack / pattern list / step sequencer UI) — COMPLETE
+PHASE 9 (playlist) — NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -139,7 +140,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  238 test cases, 30,749 assertions, green in both Debug and Release.
+  254 test cases, 30,895 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -178,6 +179,30 @@ Phase 6 — COMPLETE. Done and tested:
   right edge to resize, right-click to delete, shift-drag to box select,
   Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
   scroll to pan, Cmd+scroll to zoom.
+
+Phase 8b — COMPLETE. Done and tested:
+
+  app/commands/ChannelCommands    add, remove, rename, mute, solo, volume
+                                  (mergeable), step key
+  app/commands/PatternCommands    add, duplicate, remove, rename, length, swing
+  app/commands/StepCommands       ToggleStepCommand + noteAtStep. A step IS a
+                                  note: there is no step data type, so the rack
+                                  and the Piano Roll cannot disagree (D-016)
+  app/ChannelRackModel            rack geometry and hit testing, headless
+  ui/macos/ChannelRackView        channels, mute/solo, volume, step grid, drag
+                                  painting, playhead column (CoreGraphics, D-015)
+  ui/macos/PatternListView        select, add, duplicate, rename, remove
+  project::Project                insert/remove/indexOf for channels and
+                                  patterns — what undo needs to restore an
+                                  entity with the identity it had
+
+  Verified on the running app, not only in tests: adding a channel, programming
+  four steps on it, muting it, undoing the mute, creating and switching
+  patterns, and playing — the four steps show up in the Piano Roll as four
+  notes, and the note count goes 12 -> 16.
+
+  Project format 1.1 -> 1.2 (Channel::stepKey), additive. Fixtures for 1.0 and
+  1.1 both load.
 
 Phase 8a — COMPLETE. Done and tested:
 
@@ -228,11 +253,10 @@ Phase 7 — COMPLETE. Done and tested:
 
 WHAT THE APP STILL DOES NOT DO:
 
-  - no Channel Rack, no pattern list, no step sequencer. main.mm creates one
-    channel and one pattern; the Piano Roll edits that single pair. The model
-    supports many of both — the UI does not expose them. THIS IS PHASE 8b.
   - patterns can carry automation lanes in the model; nothing evaluates them.
-
+  - drag-painting steps leaves one undo entry per cell, not one per stroke.
+  - channel colour and step key have commands but nothing in the UI reaches
+    them; a drum channel has to be given its key in code.
   - no mixer: the signal path is instrument -> master gain -> device. The
     MixerNode/RoutingConnection types serialize but nothing evaluates them.
   - no automation: AutomationLane serializes, nothing reads it.
@@ -243,16 +267,14 @@ WHAT THE APP STILL DOES NOT DO:
 
 Not started:
 
-  Phase 7  Channels/instruments            Phase 13  Plugin hosting
-  Phase 7  Channels/instruments            Phase 14  Sampler
-  Phase 8  Patterns (model exists, no      Phase 15  Built-in DSP
-           playback)                       Phase 16  MIDI hardware
-  Phase 9  Playlist                        Phase 17  Render/export
-  Phase 10 Mixer/routing (model exists,    Phase 18  Performance
-           no signal path)                 Phase 19  QA
-  Phase 11 Automation (model exists,       Phase 20  Release
-           no evaluation)
-  Phase 12 Recording/audio editor
+  Phase 9  Playlist                        Phase 15  Built-in DSP
+  Phase 10 Mixer/routing (model exists,    Phase 16  MIDI hardware
+           no signal path)                 Phase 17  Render/export
+  Phase 11 Automation (model exists,       Phase 18  Performance
+           no evaluation)                  Phase 19  QA
+  Phase 12 Recording/audio editor          Phase 20  Release
+  Phase 13 Plugin hosting
+  Phase 14 Sampler
 
 Important: several Phase 4 model types (MixerNode, AutomationLane, Clip,
 Channel) currently SERIALIZE but are not yet WIRED INTO THE AUDIO GRAPH. They
@@ -273,9 +295,15 @@ Dependencies in tree:
 
 Graphify:
 
-  STALE. `graphify .` fails with "no LLM API key found". The graph in
-  graphify-out/ predates all source code. Export GEMINI_API_KEY,
-  ANTHROPIC_API_KEY or equivalent and re-run to refresh it.
+  CURRENT FOR CODE, as of Phase 8b. `graphify . --code-only` needs no API key
+  and now indexes the real source tree: 1794 nodes, 3207 edges, built from
+  commit 1972c70. Refresh it after changes with:
+
+    graphify . --code-only && graphify cluster-only .
+
+  The documentation half is still unindexed: plain `graphify .` fails with
+  "no LLM API key found" for the 15 doc files. Export GEMINI_API_KEY,
+  ANTHROPIC_API_KEY or equivalent if the docs need to be in the graph too.
 
 ---
 
@@ -875,36 +903,20 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 8b (Channel Rack / pattern list / step sequencer UI), then
-9 (playlist) and 10 (mixer).
+Next step: Phase 9 (the playlist), then 10 (the mixer).
 
-  8b is UI only — the model and the compiler underneath it are done and tested.
-  What it needs:
+  Phase 9 is where patterns stop being the whole song. What it needs:
 
-    - a Channel Rack: add/remove/rename channels, mute, solo, volume, colour,
-      and selecting which channel the Piano Roll edits
-      (set INCDAWPianoRollView.channelIdValue)
-    - a pattern list: add/rename/select patterns
-      (set INCDAWPianoRollView.patternIdValue)
-    - a step sequencer grid: steps ARE notes on a grid, deliberately — there is
-      no separate step data type, so the two editors cannot diverge
-    - commands for all of the above, in app/commands/, so the Channel Rack goes
-      through the same undo stack as everything else. NoteCommands is the
-      pattern to follow.
+    - tracks in the playlist, and pattern clips placed on them by tick
+      (Clip::startTick already exists and serializes; nothing draws or plays it)
+    - project::compileArrangement is written and tested — switching the graph
+      compiler from PlaybackSource::pattern to ::arrangement is the seam
+    - a playlist view, and a transport that loops the song rather than a pattern
+    - the exit criterion is in docs/ROADMAP.md: a full arrangement plays back
+      sample-accurately, and clip gain and normalize are applied pre-mixer
 
-  main.mm's rebuildGraph is already a single call to compileProjectGraph, so
-  new channels and patterns become audible with no further engine work.
-
-  9  the playlist: place pattern clips on a timeline, several tracks. The
-     arrangement compile (project::compileArrangement) and tick-based clip
-     placement already exist and are tested; Phase 9 is the UI plus audio clips.
-  10 the mixer: make MixerNode and RoutingConnection actually compile into the
-     render graph, with PDC, and move channel pan there — the graph compiler
-     deliberately does not apply pan today (D-013 note in ARCHITECTURE §7).
-
-  docs/DECISIONS.md D-011 records why Metal shaders compile at runtime (no
-  `metal` compiler without full Xcode). Deployment target is 14.0 for NSView
-  displayLink.
+  main.mm's rebuildGraph is one call to compileProjectGraph, so the arrangement
+  becomes audible by changing the options it passes, not by rewriting the UI.
 
 Things to be careful about:
 

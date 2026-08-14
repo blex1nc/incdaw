@@ -236,6 +236,24 @@ rather than a change to the compiler.
 Channel **pan** is deliberately not applied at this stage. A pan law belongs to
 the mixer (Phase 10), and an approximation here would have to be unpicked.
 
+### The editors above it
+
+Every editing pane follows the same shape: a headless model holding geometry and
+hit testing (`app::PianoRollModel`, `app::ChannelRackModel`), a view that turns
+input into commands and a draw list into pixels, and no path to the project
+model that does not go through `app::CommandRegistry`. The panes therefore share
+one undo history rather than keeping their own, and a pane's arithmetic is
+tested without a window.
+
+The Channel Rack and the Piano Roll edit *the same notes*: a step is an ordinary
+`MidiEvent` at the channel's `stepKey` (D-016). There is no step data type and
+so nothing for the two views to disagree about.
+
+Rendering is chosen per pane by measurement, not by policy: the Piano Roll is
+Metal because it must cull ten thousand notes inside a frame, the rack and the
+pattern list are CoreGraphics because they are tens of rectangles and mostly
+text (D-015).
+
 ---
 
 ## 8. Plugin isolation
