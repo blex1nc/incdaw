@@ -18,6 +18,8 @@ dist/
 
 # ── Graphify (machine-local / derived) ────────────────
 graphify-out/cache/
+# Dated backups graphify writes before re-clustering; derived, not source.
+graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
 graphify-out/cost.json
 graphify-out/manifest.json
 graphify-out/.graphify_*
