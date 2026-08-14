@@ -1,5 +1,7 @@
 #include "engine/graph/RenderGraph.h"
 
+#include "engine/dsp/DelayLineNode.h"
+
 #include "engine/core/RealtimeGuard.h"
 
 #include <algorithm>
@@ -60,6 +62,110 @@ void GraphBuilder::connect(NodeIndex source, NodeIndex destination)
     connections_.push_back({source, destination});
 }
 
+GraphBuilder::Topology GraphBuilder::analyse() const
+{
+    const std::size_t count = nodes_.size();
+
+    Topology topology;
+    topology.sources.assign(count, {});
+    topology.latencyTo.assign(count, 0);
+    topology.order.reserve(count);
+
+    std::vector<std::vector<NodeIndex>> successors(count);
+    std::vector<std::size_t>            remainingInputs(count, 0);
+
+    for (const Connection& connection : connections_) {
+        successors[connection.source].push_back(connection.destination);
+        topology.sources[connection.destination].push_back(connection.source);
+        ++remainingInputs[connection.destination];
+    }
+
+    std::deque<NodeIndex> ready;
+
+    for (NodeIndex index = 0; index < count; ++index)
+        if (remainingInputs[index] == 0)
+            ready.push_back(index);
+
+    while (!ready.empty()) {
+        const NodeIndex current = ready.front();
+        ready.pop_front();
+        topology.order.push_back(current);
+
+        for (const NodeIndex successor : successors[current])
+            if (--remainingInputs[successor] == 0)
+                ready.push_back(successor);
+    }
+
+    topology.acyclic = topology.order.size() == count;
+    if (!topology.acyclic)
+        return topology;
+
+    // Longest path to each node, in frames: what a summing point downstream has
+    // to wait for.
+    for (const NodeIndex index : topology.order) {
+        FrameCount incoming = 0;
+        for (const NodeIndex source : topology.sources[index])
+            incoming = std::max(incoming, topology.latencyTo[source]);
+
+        topology.latencyTo[index] = incoming + nodes_[index]->latencyFrames();
+    }
+
+    return topology;
+}
+
+bool GraphBuilder::insertDelayCompensation(const Topology& topology)
+{
+    bool inserted = false;
+
+    // Collected first, applied after: adding nodes while walking the edges
+    // would invalidate the analysis this loop is reading.
+    struct Compensation {
+        std::size_t connection = 0;
+        FrameCount  delay      = 0;
+    };
+
+    std::vector<Compensation> needed;
+
+    for (NodeIndex destination = 0; destination < topology.sources.size(); ++destination) {
+        const std::vector<NodeIndex>& sources = topology.sources[destination];
+        if (sources.size() < 2)
+            continue;   // a single source is trivially aligned with itself
+
+        FrameCount latest = 0;
+        for (const NodeIndex source : sources)
+            latest = std::max(latest, topology.latencyTo[source]);
+
+        for (std::size_t index = 0; index < connections_.size(); ++index) {
+            const Connection& connection = connections_[index];
+            if (connection.destination != destination)
+                continue;
+
+            const FrameCount delay = latest - topology.latencyTo[connection.source];
+            if (delay > 0)
+                needed.push_back({index, delay});
+        }
+    }
+
+    for (const Compensation& compensation : needed) {
+        // By index throughout: appending to `connections_` may reallocate it,
+        // and a reference taken before the append would dangle.
+        const NodeIndex source = connections_[compensation.connection].source;
+
+        // source -> delay -> destination. The delay reports its own latency, so
+        // the recomputed arrival time at the destination is the one every other
+        // path already had.
+        const NodeIndex delayIndex =
+            addNode(std::make_unique<dsp::DelayLineNode>(compensation.delay));
+
+        connections_.push_back({source, delayIndex});
+        connections_[compensation.connection].source = delayIndex;
+
+        inserted = true;
+    }
+
+    return inserted;
+}
+
 std::unique_ptr<CompiledGraph> GraphBuilder::compile(SampleRate sampleRate, FrameCount maxBlockSize,
                                                      std::size_t channelCount)
 {
@@ -84,36 +190,10 @@ std::unique_ptr<CompiledGraph> GraphBuilder::compile(SampleRate sampleRate, Fram
         }
     }
 
-    // ── Topological sort (Kahn) ───────────────────────────────────────────────
-    std::vector<std::vector<NodeIndex>> successors(count);
-    std::vector<std::size_t>            remainingInputs(count, 0);
-    std::vector<std::vector<NodeIndex>> sources(count);
+    // ── Topology, latency, and delay compensation ─────────────────────────────
+    Topology topology = analyse();
 
-    for (const Connection& connection : connections_) {
-        successors[connection.source].push_back(connection.destination);
-        sources[connection.destination].push_back(connection.source);
-        ++remainingInputs[connection.destination];
-    }
-
-    std::deque<NodeIndex>  ready;
-    std::vector<NodeIndex> order;
-    order.reserve(count);
-
-    for (NodeIndex index = 0; index < count; ++index)
-        if (remainingInputs[index] == 0)
-            ready.push_back(index);
-
-    while (!ready.empty()) {
-        const NodeIndex current = ready.front();
-        ready.pop_front();
-        order.push_back(current);
-
-        for (const NodeIndex successor : successors[current])
-            if (--remainingInputs[successor] == 0)
-                ready.push_back(successor);
-    }
-
-    if (order.size() != count) {
+    if (!topology.acyclic) {
         // Kahn's algorithm stalls exactly when a cycle exists. Rejecting is the
         // only honest outcome: breaking an arbitrary edge would render a graph
         // that is not the one the user built.
@@ -121,20 +201,23 @@ std::unique_ptr<CompiledGraph> GraphBuilder::compile(SampleRate sampleRate, Fram
         return nullptr;
     }
 
-    // ── Latency accumulation ──────────────────────────────────────────────────
-    // Longest path to each node, in frames. Full delay compensation (inserting
-    // delay lines on the shorter paths) arrives with the mixer in Phase 10;
-    // what the engine needs now is the correct total to report to the device
-    // and to the recording path.
-    std::vector<FrameCount> latencyTo(count, 0);
+    // Compensation adds nodes and rewrites edges, so the analysis has to be
+    // redone afterwards. Once is enough: the delay lines are sized from the
+    // final arrival times and report that delay themselves, so the second pass
+    // finds every summing point already aligned.
+    if (compensate_ && insertDelayCompensation(topology)) {
+        topology = analyse();
 
-    for (const NodeIndex index : order) {
-        FrameCount incoming = 0;
-        for (const NodeIndex source : sources[index])
-            incoming = std::max(incoming, latencyTo[source]);
-
-        latencyTo[index] = incoming + nodes_[index]->latencyFrames();
+        if (!topology.acyclic) {
+            error_ = "the connections contain a cycle";
+            return nullptr;
+        }
     }
+
+    const std::size_t nodeCountAfterCompensation = nodes_.size();
+    const std::vector<std::vector<NodeIndex>>& sources = topology.sources;
+    const std::vector<NodeIndex>&              order   = topology.order;
+    const std::vector<FrameCount>&             latencyTo = topology.latencyTo;
 
     // ── Buffer assignment ─────────────────────────────────────────────────────
     // One buffer per node output. Buffer reuse (handing a node the buffer of a
@@ -143,7 +226,7 @@ std::unique_ptr<CompiledGraph> GraphBuilder::compile(SampleRate sampleRate, Fram
     // forbids optimising before measuring. Correct and obvious first.
     auto graph = std::make_unique<CompiledGraph>();
 
-    graph->pool_.allocate(count, channelCount, maxBlockSize);
+    graph->pool_.allocate(nodeCountAfterCompensation, channelCount, maxBlockSize);
     graph->sampleRate_   = sampleRate;
     graph->maxBlockSize_ = maxBlockSize;
     graph->totalLatency_ = latencyTo[master_];
@@ -153,7 +236,7 @@ std::unique_ptr<CompiledGraph> GraphBuilder::compile(SampleRate sampleRate, Fram
 
     std::size_t widestInput = 0;
 
-    graph->steps_.reserve(count);
+    graph->steps_.reserve(nodeCountAfterCompensation);
     for (const NodeIndex index : order) {
         CompiledGraph::Step step;
         step.node         = nodes_[index].get();

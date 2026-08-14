@@ -86,6 +86,16 @@ public:
     /// The node whose output reaches the device.
     void setMaster(NodeIndex node) noexcept { master_ = node; }
 
+    /// Delay compensation: when a node sums sources that sit at different
+    /// latencies, the compiler inserts delay lines on the shorter paths so that
+    /// everything arrives together (docs/AUDIO_ENGINE.md §7).
+    ///
+    /// On by default, because a mixer without it is silently wrong. The switch
+    /// exists so that the compensation can be tested against its own absence —
+    /// a PDC test that passes with compensation disabled is testing nothing.
+    void setDelayCompensationEnabled(bool enabled) noexcept { compensate_ = enabled; }
+    [[nodiscard]] bool isDelayCompensationEnabled() const noexcept { return compensate_; }
+
     [[nodiscard]] std::size_t nodeCount() const noexcept { return nodes_.size(); }
 
     /// Reason the last `compile` failed. Empty on success.
@@ -106,9 +116,24 @@ private:
         NodeIndex destination = invalidNode;
     };
 
+    /// Sources of each node and the longest path to it, in frames.
+    struct Topology {
+        std::vector<std::vector<NodeIndex>> sources;
+        std::vector<NodeIndex>              order;
+        std::vector<FrameCount>             latencyTo;
+        bool                                acyclic = false;
+    };
+
+    [[nodiscard]] Topology analyse() const;
+
+    /// Rewrites edges that arrive early as source -> delay -> destination.
+    /// Returns false when nothing needed compensating.
+    bool insertDelayCompensation(const Topology& topology);
+
     std::vector<std::unique_ptr<Node>> nodes_;
     std::vector<Connection>            connections_;
     NodeIndex                          master_ = invalidNode;
+    bool                               compensate_ = true;
     std::string                        error_;
 };
 

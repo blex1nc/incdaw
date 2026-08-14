@@ -38,6 +38,8 @@ add_library(incdaw_engine STATIC
     engine/transport/Transport.cpp
     engine/dsp/SineOscillatorNode.cpp
     engine/dsp/GainNode.cpp
+    engine/dsp/DelayLineNode.cpp
+    engine/dsp/MixerStripNode.cpp
     engine/dsp/MetronomeNode.cpp
     engine/midi/MidiInput.cpp
     engine/midi/MidiRecorder.cpp
