@@ -1,16 +1,24 @@
 // INCDAW — macOS application.
 //
-// Phase 6: the Piano Roll is live. The audio engine, transport and MIDI engine
-// exist and are tested, but are NOT yet connected to this window — playback of
-// edited notes needs the instrument system (Phase 7). Nothing here pretends
-// otherwise.
+// Phase 7: the Piano Roll is live and audible. Editing a note changes what
+// plays, because every edit rebuilds the render graph and hands it to the audio
+// engine through an atomic swap.
+//
+// Not yet present: the mixer (Phase 10) and automation (Phase 11). The signal
+// path is instrument -> master gain -> device, and nothing pretends otherwise.
 
 #import <Cocoa/Cocoa.h>
 
 #include "app/CommandRegistry.h"
 #include "app/Version.h"
+#include "engine/AudioEngine.h"
+#include "engine/dsp/GainNode.h"
+#include "engine/instrument/InstrumentNode.h"
+#include "engine/instrument/SimpleSynth.h"
+#include "engine/graph/RenderGraph.h"
 #include "platform/SystemInfo.h"
 #include "project/Model.h"
+#include "project/PatternCompiler.h"
 #include "ui/macos/PianoRollView.h"
 
 #include <memory>
@@ -52,6 +60,10 @@ void addStarterPhrase(project::Pattern& pattern)
 @implementation INCDAWAppDelegate {
     std::unique_ptr<project::Project>     _project;
     std::unique_ptr<app::CommandRegistry> _registry;
+    std::unique_ptr<engine::AudioEngine>  _audio;
+
+    NSTimer* _housekeeping;
+    BOOL     _audioReady;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -98,7 +110,25 @@ void addStarterPhrase(project::Pattern& pattern)
     [content addSubview:self.statusField];
 
     __weak INCDAWAppDelegate* weakSelf = self;
-    self.pianoRoll.onChange = ^{ [weakSelf refreshStatus]; };
+    self.pianoRoll.onChange = ^{
+        [weakSelf rebuildGraph];
+        [weakSelf refreshStatus];
+    };
+
+    [self startAudio];
+
+    __weak INCDAWAppDelegate* weakAudioSelf = self;
+    self.pianoRoll.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
+
+    // Drives the playhead and reclaims retired graphs. Both are non-realtime
+    // work that must happen off the audio thread; 30 Hz is smooth enough for a
+    // playhead and cheap enough to ignore.
+    _housekeeping = [NSTimer scheduledTimerWithTimeInterval:1.0 / 30.0
+                                                    repeats:YES
+                                                      block:^(NSTimer* timer) {
+        (void)timer;
+        [weakAudioSelf housekeeping];
+    }];
 
     [self buildMenu];
     [self refreshStatus];
@@ -106,6 +136,108 @@ void addStarterPhrase(project::Pattern& pattern)
     [self.window makeKeyAndOrderFront:nil];
     [self.window makeFirstResponder:self.pianoRoll];
     [NSApp activateIgnoringOtherApps:YES];
+}
+
+- (void)startAudio
+{
+    _audio = std::make_unique<engine::AudioEngine>();
+
+    platform::AudioDeviceConfig config;
+    config.sampleRate     = 48000.0;
+    config.bufferSize     = 256;
+    config.outputChannels = 2;
+
+    std::string error;
+    if (!_audio->start(config, error)) {
+        // Reported, not hidden: an editor that silently does not play is
+        // indistinguishable from a broken one.
+        NSLog(@"INCDAW: audio unavailable: %s", error.c_str());
+        _audioReady = NO;
+        return;
+    }
+
+    _audioReady = YES;
+    _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
+
+    NSLog(@"INCDAW: audio started — %s, %.0f Hz, %lld frames",
+          _audio->deviceName().c_str(), _audio->sampleRate(),
+          static_cast<long long>(_audio->bufferSize()));
+
+    [self rebuildGraph];
+}
+
+/// Rebuilds the render graph from the current project and swaps it in.
+///
+/// A whole-graph rebuild per edit rather than mutating the live one: the audio
+/// thread may be halfway through reading the sequence, and the engine already
+/// provides an atomic swap with deferred reclamation for exactly this
+/// (docs/ARCHITECTURE.md §7). Edits happen at human speed; a rebuild costs
+/// microseconds.
+- (void)rebuildGraph
+{
+    if (!_audioReady || _project->patterns().empty())
+        return;
+
+    auto instrument = std::make_unique<engine::InstrumentNode>(
+        std::make_unique<engine::SimpleSynth>(), _audio->transport().tempoMap());
+
+    project::compilePatternInto(instrument->sequence(), _project->patterns()[0]);
+
+    engine::GraphBuilder builder;
+    const auto channel = builder.addNode(std::move(instrument));
+    const auto master  = builder.addNode(std::make_unique<engine::dsp::GainNode>(0.8f));
+
+    builder.connect(channel, master);
+    builder.setMaster(master);
+
+    auto graph = builder.compile(_audio->sampleRate(), _audio->bufferSize(),
+                                 _audio->outputChannels());
+    if (graph == nullptr) {
+        NSLog(@"INCDAW: graph rebuild failed: %s", builder.lastError().c_str());
+        return;
+    }
+
+    _audio->setGraph(std::move(graph));
+}
+
+- (void)toggleTransport
+{
+    if (!_audioReady)
+        return;
+
+    auto& transport = _audio->transport();
+
+    if (transport.isPlaying()) {
+        transport.stop();
+    } else {
+        // Loop the pattern, so playback repeats rather than running off into
+        // silence after two bars.
+        const project::Pattern& pattern = _project->patterns()[0];
+        const auto loopEnd = transport.tempoMap().frameForTick(pattern.length > 0 ? pattern.length
+                                                                                  : ticksPerQuarterNote * 8);
+        transport.setLoopRange(0, loopEnd);
+        transport.setLoopEnabled(YES);
+        transport.seek(0);
+        transport.play();
+    }
+
+    [self refreshStatus];
+}
+
+- (void)housekeeping
+{
+    if (!_audioReady)
+        return;
+
+    _audio->collectRetiredGraphs();
+
+    const auto position = _audio->transport().position();
+    self.pianoRoll.playheadTick = _audio->transport().isPlaying()
+                                      ? _audio->transport().tempoMap().tickForFrame(position)
+                                      : -1;
+
+    [self.pianoRoll requestRedraw];
+    [self refreshStatus];
 }
 
 - (void)refreshStatus
@@ -117,11 +249,18 @@ void addStarterPhrase(project::Pattern& pattern)
                          ? [NSString stringWithFormat:@"undo: %s", _registry->undoName().c_str()]
                          : @"undo: —";
 
+    NSString* audio = @"audio: unavailable";
+    if (_audioReady) {
+        const bool playing = _audio->transport().isPlaying();
+        audio = [NSString stringWithFormat:@"%@ · %.0f%% cpu",
+                 playing ? @"▶ playing" : @"■ stopped",
+                 _audio->profiler().peakLoad() * 100.0];
+    }
+
     self.statusField.stringValue = [NSString stringWithFormat:
-        @"INCDAW %s  ·  %s  ·  %lu notes  ·  %@  ·  click: add   drag: move   right-click: delete   "
-        @"shift-drag: select   Q: quantize   ⌘Z: undo",
-        app::Version::string(), app::Version::phase(),
-        static_cast<unsigned long>(noteCount), undo];
+        @"INCDAW %s  ·  %lu notes  ·  %@  ·  %@  ·  space: play   click: add   drag: move   "
+        @"right-click: delete   Q: quantize   ⌘Z: undo",
+        app::Version::string(), static_cast<unsigned long>(noteCount), audio, undo];
 }
 
 - (void)buildMenu
@@ -149,6 +288,18 @@ void addStarterPhrase(project::Pattern& pattern)
     editItem.submenu = editMenu;
 
     NSApp.mainMenu = menuBar;
+}
+
+- (void)applicationWillTerminate:(NSNotification*)notification
+{
+    (void)notification;
+
+    // Stop the device before the graph it is reading goes away.
+    [_housekeeping invalidate];
+    _housekeeping = nil;
+
+    if (_audio != nullptr)
+        _audio->stop();
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender

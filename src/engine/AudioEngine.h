@@ -102,6 +102,7 @@ private:
     Transport                              transport_;
     MidiInput                              midiInput_;
     MidiBuffer                             blockMidi_;
+    MidiBuffer                             segmentMidi_;
 
     std::atomic<CompiledGraph*>                active_{nullptr};
     std::unique_ptr<CompiledGraph>             owned_;      ///< the installed graph

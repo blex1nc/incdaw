@@ -26,7 +26,15 @@ namespace incdaw::app     { class CommandRegistry; }
 /// Text describing the last action, for the status line.
 @property (nonatomic, copy, readonly) NSString* statusText;
 
-/// Called after any edit, so the host window can refresh its status line.
+/// Called after any edit, so the host can refresh its status line and rebuild
+/// the playback graph.
 @property (nonatomic, copy) void (^onChange)(void);
+
+/// Called when the user asks to start or stop playback (space bar).
+@property (nonatomic, copy) void (^onTransportToggle)(void);
+
+/// Redraws on the next display-link tick. Used to animate the playhead without
+/// the host having to know how frames are scheduled.
+- (void)requestRedraw;
 
 @end

@@ -37,7 +37,8 @@ public:
     /// to be the master. Measured against the cost of a block, it does not
     /// register; if it ever does, the master node can be given the device
     /// buffer directly.
-    void process(const AudioBufferView& output, FrameCount frameCount, FramePosition playPosition) noexcept;
+    void process(const AudioBufferView& output, FrameCount frameCount, FramePosition playPosition,
+                 const MidiBuffer* liveMidi = nullptr) noexcept;
 
     [[nodiscard]] std::size_t nodeCount()     const noexcept { return nodes_.size(); }
     [[nodiscard]] FrameCount  latencyFrames() const noexcept { return totalLatency_; }

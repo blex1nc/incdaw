@@ -560,6 +560,12 @@ enum class DragMode { none, move, resize, boxSelect };
         return;
     }
 
+    if (character == ' ') {
+        if (self.onTransportToggle != nil)
+            self.onTransportToggle();
+        return;
+    }
+
     if (character == 'q' || character == 'Q') {
         if (_registry->execute(std::make_unique<app::QuantizeNotesCommand>(
                 project::EntityId{_patternIdValue},
@@ -585,6 +591,11 @@ enum class DragMode { none, move, resize, boxSelect };
     }
 
     [super keyDown:event];
+}
+
+- (void)requestRedraw
+{
+    _needsRedraw = YES;
 }
 
 - (void)reportAction:(NSString*)action

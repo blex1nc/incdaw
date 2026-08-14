@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 0.8
-Status: PHASES 0-6 COMPLETE / PHASE 7 NEXT
+Version: 0.9
+Status: PHASES 0-7 COMPLETE / PHASE 8 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -126,7 +126,8 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 Current phase:
 
 PHASES 0-5 COMPLETE (2026-08-14)
-PHASE 6 (Piano Roll) — COMPLETE
+PHASE 7 (instruments) — COMPLETE
+PHASE 8 (patterns) — NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -138,7 +139,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  201 test cases, 30,450 assertions, green in both Debug and Release.
+  223 test cases, 30,674 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
 Implemented:
@@ -175,12 +176,33 @@ Phase 6 — COMPLETE. Done and tested:
   Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
   scroll to pan, Cmd+scroll to zoom.
 
+Phase 7 — COMPLETE. Done and tested:
+
+  engine/instrument/Instrument     API; the base class does the block-splitting
+                                   so no instrument can get event timing wrong
+  engine/instrument/SimpleSynth    polyphonic, PolyBLEP band-limited saw/square,
+                                   ADSR, voice stealing prefers released voices
+  engine/instrument/InstrumentNode merges sequenced and live MIDI; silences
+                                   voices on a transport discontinuity
+  engine/midi/NoteSequence         dual-sorted (by start, by end) so note-offs
+                                   cost O(log n), not a scan per block
+  project/PatternCompiler          Pattern -> SequencedNote; probability is
+                                   rolled here, deterministically, so playback
+                                   and offline render will agree
+
+  THE APP IS NOW AUDIBLE. Space plays the pattern on loop; editing a note
+  rebuilds the graph and swaps it in atomically. Verified on hardware:
+  6 s arpeggio, 0 overruns, 0 realtime allocations.
+
 WHAT THE APP STILL DOES NOT DO:
 
-  Editing notes produces no sound. The audio engine, transport and MIDI engine
-  all work and are tested, but nothing connects a pattern to an instrument yet
-  — there is no instrument. That is Phase 7. Do not describe the app as
-  playing anything.
+  - no mixer: the signal path is instrument -> master gain -> device. The
+    MixerNode/RoutingConnection types serialize but nothing evaluates them.
+  - no automation: AutomationLane serializes, nothing reads it.
+  - no playlist/arrangement: one pattern, looped. Clip types serialize only.
+  - no audio clips, no recording into the timeline, no plugins, no sampler.
+  - the project is never saved from the UI: ProjectFile works and is tested,
+    but no menu action calls it.
 
 Not started:
 
@@ -816,23 +838,25 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 7 — the channel and instrument system.
+Next step: Phase 8 (patterns), then 9 (playlist) and 10 (mixer).
 
-  This is what makes the app audible. Required:
-  - an instrument API (build the API before any instrument, CLAUDE.md §13)
-  - one reference instrument, simple enough to be obviously correct
-  - a channel that owns an instrument and routes to a mixer node
-  - a graph node that reads a pattern through the transport and emits
-    MidiMessages into the instrument, sample-accurately
-  - AudioEngine already owns the Transport and MidiInput; the missing piece is
-    a node that turns pattern content into notes
+  Those three are what make it feel like a DAW rather than a pattern editor.
+  In dependency order:
 
-  Exit criterion: a MIDI note played into a channel produces audible sound
-  through the graph, correctly routed to the mixer.
+  8  multiple patterns; a pattern list in the UI; one InstrumentNode per
+     channel rather than one hardcoded node in main.mm
+  9  the playlist: place pattern clips on a timeline, several tracks
+  10 the mixer: make MixerNode and RoutingConnection actually compile into
+     the render graph, with PDC. The types already exist and serialize.
 
-  Note: docs/DECISIONS.md D-011 records why Metal shaders compile at runtime
-  (no `metal` compiler without full Xcode). The deployment target is now 14.0
-  because NSView displayLink requires it.
+  Practical note for whoever continues: main.mm currently builds the graph by
+  hand from patterns()[0]. That is the seam. Phase 8 should replace it with a
+  proper project -> graph compiler in project/ (it cannot live in engine/,
+  which cannot see a Project), and everything after that becomes additive.
+
+  docs/DECISIONS.md D-011 records why Metal shaders compile at runtime (no
+  `metal` compiler without full Xcode). Deployment target is 14.0 for NSView
+  displayLink.
 
 Things to be careful about:
 

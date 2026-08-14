@@ -72,6 +72,11 @@ public:
     [[nodiscard]] const TempoMap& tempoMap() const noexcept { return tempoMap_; }
     void setTempoMap(TempoMap map);
 
+    /// Mutable access, for setting the sample rate once the device is open.
+    /// Not safe while the audio thread is running — the project layer routes
+    /// tempo edits through a graph rebuild.
+    [[nodiscard]] TempoMap& tempoMapForEdit() noexcept { return tempoMap_; }
+
     // ── Queries (safe from either side) ──────────────────────────────────────
 
     [[nodiscard]] TransportState state()    const noexcept { return state_.load(std::memory_order_acquire); }

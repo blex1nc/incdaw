@@ -9,12 +9,15 @@
 //
 //   incdaw-audiocheck [--seconds N] [--buffer N] [--rate N] [--freq HZ]
 //                     [--amplitude A] [--silent] [--list] [--device UID] [--midi]
+//                     [--play]
 
 #include "engine/AudioEngine.h"
 #include "engine/core/RealtimeGuard.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/SineOscillatorNode.h"
 #include "engine/graph/RenderGraph.h"
+#include "engine/instrument/InstrumentNode.h"
+#include "engine/instrument/SimpleSynth.h"
 #include "platform/HostTime.h"
 #include "platform/MidiDevice.h"
 
@@ -39,6 +42,7 @@ struct Options {
     bool        listOnly  = false;
     std::string device;      ///< output device uid; empty selects the default
     bool        midi = false;///< also open MIDI input and report what arrives
+    bool        play = false;///< play a phrase through the instrument instead of a tone
 };
 
 Options parseArguments(int argc, char** argv)
@@ -58,6 +62,7 @@ Options parseArguments(int argc, char** argv)
         else if (argument == "--list")      options.listOnly  = true;
         else if (argument == "--device")    options.device    = next();
         else if (argument == "--midi")      options.midi      = true;
+        else if (argument == "--play")      options.play      = true;
     }
 
     return options;
@@ -125,15 +130,6 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    // ── Build the graph before starting the device ───────────────────────────
-    engine::GraphBuilder builder;
-    const auto oscillator = builder.addNode(
-        std::make_unique<engine::dsp::SineOscillatorNode>(options.frequency, options.amplitude));
-    const auto master = builder.addNode(std::make_unique<engine::dsp::GainNode>(1.0f));
-
-    builder.connect(oscillator, master);
-    builder.setMaster(master);
-
     platform::AudioDeviceConfig config;
     config.outputDeviceIdentifier = options.device;
     config.sampleRate     = options.rate;
@@ -146,8 +142,45 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Compile against the format the device actually granted, not the one asked
-    // for: a device is free to ignore either request.
+    // Built after the device is open, so it is compiled against the format the
+    // device actually granted rather than the one we asked for.
+    engine::GraphBuilder builder;
+    engine::NodeIndex    source = engine::invalidNode;
+
+    if (options.play) {
+        // The full audible chain: sequenced notes -> instrument -> master.
+        audioEngine.transport().tempoMapForEdit().setSampleRate(audioEngine.sampleRate());
+
+        auto instrument = std::make_unique<engine::InstrumentNode>(
+            std::make_unique<engine::SimpleSynth>(), audioEngine.transport().tempoMap());
+
+        // A C major arpeggio in eighths, two bars, looped.
+        const int  degrees[] = {0, 4, 7, 12, 16, 12, 7, 4};
+        const auto step      = engine::ticksPerQuarterNote / 2;
+
+        std::vector<engine::SequencedNote> notes;
+        for (int index = 0; index < 16; ++index)
+            notes.push_back({static_cast<engine::Tick>(index) * step, step - 40, 0,
+                             60 + degrees[index % 8], 100});
+
+        instrument->sequence().setNotes(std::move(notes));
+        source = builder.addNode(std::move(instrument));
+
+        const auto loopEnd = audioEngine.transport().tempoMap().frameForTick(
+            engine::ticksPerQuarterNote * 8);
+
+        audioEngine.transport().setLoopRange(0, loopEnd);
+        audioEngine.transport().setLoopEnabled(true);
+        audioEngine.transport().play();
+    } else {
+        source = builder.addNode(
+            std::make_unique<engine::dsp::SineOscillatorNode>(options.frequency, options.amplitude));
+    }
+
+    const auto master = builder.addNode(std::make_unique<engine::dsp::GainNode>(1.0f));
+    builder.connect(source, master);
+    builder.setMaster(master);
+
     auto graph = builder.compile(audioEngine.sampleRate(), audioEngine.bufferSize(),
                                  audioEngine.outputChannels());
     if (graph == nullptr) {
@@ -185,8 +218,10 @@ int main(int argc, char** argv)
               << (rate > 0.0 ? static_cast<double>(audioEngine.totalOutputLatencyFrames()) / rate * 1000.0 : 0.0)
               << " ms)\n"
               << "Graph delay : " << graphLatency << " frames\n"
-              << "Signal      : " << options.frequency << " Hz sine at amplitude "
-              << std::setprecision(3) << options.amplitude << "\n"
+              << "Signal      : " << (options.play
+                     ? std::string("sequenced arpeggio through the reference synth")
+                     : std::to_string(static_cast<int>(options.frequency)) + " Hz sine")
+              << "\n"
               << "Guard       : " << (engine::rt::guardEnabled() ? "armed" : "NOT COMPILED IN") << "\n"
               << "\nRunning for " << std::setprecision(1) << options.seconds << " s ...\n"
               << std::flush;

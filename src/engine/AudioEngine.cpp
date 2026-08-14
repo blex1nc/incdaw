@@ -173,8 +173,13 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
             if (segment.length <= 0)
                 continue;
 
+            // MIDI offsets are relative to the whole block; each segment
+            // re-bases the ones that fall inside it before rendering.
+            segmentMidi_ = blockMidi_;
+            segmentMidi_.rebase(-segment.offset, segment.length);
+
             graph->process(output.subBlock(segment.offset, segment.length),
-                           segment.length, segment.startFrame);
+                           segment.length, segment.startFrame, &segmentMidi_);
         }
 
         if (output.hasNonFiniteSamples()) {

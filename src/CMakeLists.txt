@@ -41,6 +41,10 @@ add_library(incdaw_engine STATIC
     engine/dsp/MetronomeNode.cpp
     engine/midi/MidiInput.cpp
     engine/midi/MidiRecorder.cpp
+    engine/midi/NoteSequence.cpp
+    engine/instrument/Instrument.cpp
+    engine/instrument/SimpleSynth.cpp
+    engine/instrument/InstrumentNode.cpp
     engine/AudioEngine.cpp)
 target_include_directories(incdaw_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_engine
@@ -65,7 +69,8 @@ add_library(incdaw_project STATIC
     project/Json.cpp
     project/Model.cpp
     project/ProjectFile.cpp
-    project/MidiCapture.cpp)
+    project/MidiCapture.cpp
+    project/PatternCompiler.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_project
     PUBLIC  incdaw_engine

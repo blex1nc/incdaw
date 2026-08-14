@@ -2,6 +2,7 @@
 
 #include "engine/core/AudioBuffer.h"
 #include "engine/core/Time.h"
+#include "engine/midi/MidiBuffer.h"
 
 #include <cstddef>
 
@@ -23,9 +24,12 @@ struct ProcessContext {
     FrameCount    frameCount = 0;
     SampleRate    sampleRate = 0.0;
 
-    /// Timeline position of the first frame of this block. Meaningful once the
-    /// transport exists (Phase 3); zero until then.
+    /// Timeline position of the first frame of this block.
     FramePosition playPosition = 0;
+
+    /// MIDI arriving from hardware or the on-screen keyboard for this block,
+    /// with offsets relative to it. Null when there is no live input.
+    const MidiBuffer* liveMidi = nullptr;
 
     [[nodiscard]] AudioBufferView input(std::size_t index) const noexcept
     {
