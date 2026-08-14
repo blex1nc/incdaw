@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 0.5
-Status: PHASES 0-4 COMPLETE / PHASE 5 NEXT
+Version: 0.6
+Status: PHASES 0-5 COMPLETE / PHASE 6 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -125,8 +125,8 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 
 Current phase:
 
-PHASES 0-4 COMPLETE (2026-08-14)
-PHASE 5 (MIDI engine) — NOT STARTED
+PHASES 0-5 COMPLETE (2026-08-14)
+PHASE 6 (Piano Roll) — NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -138,7 +138,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  125 test cases, 29,609 assertions, green in both Debug and Release.
+  156 test cases, 29,858 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
 Implemented:
@@ -150,10 +150,11 @@ Implemented:
   Phase 3  TempoMap, Transport, block-split plan, MetronomeNode
   Phase 4  Json (deterministic), full entity model, .incdaw v1.0, migration
            hook, permanent v1.0 fixture
+  Phase 5  HostTime, CoreMIDI device, MidiMessage/MidiBuffer, MidiInput
+           (host time -> frame offset), MidiRecorder, quantize/humanize
 
 Not started:
 
-  Phase 5  MIDI engine (CoreMIDI in/out, recording, quantize, MPE-ready)
   Phase 6  Piano Roll (Metal)              Phase 13  Plugin hosting
   Phase 7  Channels/instruments            Phase 14  Sampler
   Phase 8  Patterns (model exists, no      Phase 15  Built-in DSP
@@ -786,24 +787,31 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 5, the MIDI engine.
+Next step: Phase 6, the Piano Roll.
 
-  - platform/macos/CoreMidiDevice behind a platform/MidiDevice.h interface,
-    mirroring how AudioDevice is structured
-  - timestamped input converted through the tempo map, not the block counter
-    (FL Studio 2026's release notes call out MIDI jitter and tempo-change
-    handling specifically — that is the bar)
-  - the MidiEvent type already exists in project/Model.h and already carries
-    the per-note property slot; do not introduce a second event type
-  - UMP/MIDI 2.0 is available in the SDK (MIDIMessages.h, MIDICIDevice.h)
+  - Metal-rendered editing surface in ui/, per D-006
+  - exit criterion is 60 fps with 10,000 notes, so viewport culling is part of
+    the design, not an optimisation added later
+  - every edit must go through a command object; the command registry does not
+    exist yet and Phase 6 is where it has to be built (docs/ARCHITECTURE.md §6)
+  - the note model already exists: project::MidiEvent, with label, probability,
+    pan and fine tune. Do not introduce a second one.
 
-Two things to be careful about:
+Things to be careful about:
 
   - The mixer, automation and clip types serialize but have no audio path.
-    Phase 10 and 11 must build that; nothing today evaluates them.
+    Phases 10 and 11 must build that; nothing today evaluates them.
+  - MIDI input works but nothing plays it: there is no instrument yet, so a
+    note in reaches the recorder and the pattern, not a sound. Phase 7.
+  - Sysex is not handled by the CoreMIDI reader (it breaks out of the packet
+    walk). Fine until a plugin or controller needs it.
   - The realtime guard cannot see allocations the optimiser elides. Tests that
     deliberately allocate must call ::operator new directly, not use a
     new-expression, or they silently pass in Release.
+  - A device shared with another process delivers whatever block size CoreAudio
+    is servicing, not the one the property query reports. Both the scratch
+    sizing and the profiler budget now account for this; do not reintroduce an
+    assumption that they match.
 
 ---
 
