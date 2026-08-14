@@ -19,9 +19,10 @@ namespace incdaw::engine {
 /// the block is, that is what plays.
 ///
 /// Honoured per clip today: placement, source offset, gain, mute, linear
-/// fade in/out. Deliberately NOT yet: pan, normalize, reverse, pitch,
-/// stretch — those arrive with the playlist's audio-clip polish (9b), and
-/// silently half-implementing them here would misrepresent the model.
+/// fade in/out — and normalize, which the compiler folds into the placement
+/// gain so this node stays one multiply per sample. Deliberately NOT yet:
+/// pan, reverse, pitch, stretch — silently half-implementing them here
+/// would misrepresent the model.
 ///
 /// A clip's audio comes from one of two places: whole files preloaded at
 /// compile time (recorded takes, ordinary clips), or the disk streamer's

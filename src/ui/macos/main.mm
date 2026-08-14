@@ -503,6 +503,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 - (void)audioAssetChanged
 {
     [self.audioEditor reloadWaveform];
+    [self.playlist invalidateWaveformCache];
     [self rebuildGraph];
     [self.playlist setNeedsDisplay:YES];
     [self refreshStatus];
@@ -810,9 +811,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     _audio->collectRetiredGraphs();
 
-    // An undo or redo may have rewritten the file the editor is showing.
+    // An undo or redo may have rewritten the file the editor and the
+    // playlist's clip waveforms are showing.
     if (_registry->undoDepth() != _undoDepthSeen) {
         _undoDepthSeen = _registry->undoDepth();
+
+        [self.playlist invalidateWaveformCache];
 
         if (!self.audioEditor.hidden && self.audioEditor.assetIdValue != 0) {
             [self.audioEditor reloadWaveform];

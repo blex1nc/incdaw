@@ -8,6 +8,7 @@
 #include "project/PatternCompiler.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <unordered_map>
 
@@ -331,6 +332,35 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 placed.gain          = static_cast<engine::Sample>(clip.gain);
                 placed.fadeInFrames  = clip.fadeInFrames;
                 placed.fadeOutFrames = clip.fadeOutFrames;
+
+                // Clip normalize folds into the placement gain here, at
+                // compile time — the node stays one multiply per sample. The
+                // peak is the CLIP'S content (the source range it plays),
+                // not the whole file's.
+                if (clip.normalize) {
+                    if (placed.audio != nullptr) {
+                        const engine::FrameCount from =
+                            std::min(clip.sourceOffset, placed.audio->frameCount);
+                        const engine::FrameCount to =
+                            std::min(clip.sourceOffset + clip.length, placed.audio->frameCount);
+
+                        engine::Sample peak = 0.0f;
+                        for (const auto& channel : placed.audio->channels)
+                            for (engine::FrameCount frame = from; frame < to; ++frame)
+                                peak = std::max(peak,
+                                                std::abs(channel[static_cast<std::size_t>(frame)]));
+
+                        if (peak > 0.0f)
+                            placed.gain /= peak;
+                    } else {
+                        // A streamed clip's exact peak would cost a full file
+                        // pass on every rebuild. Deferred honestly rather
+                        // than approximated silently.
+                        compiled.warnings.push_back(
+                            "normalize on a streamed clip is not yet supported; played at "
+                            "clip gain: " + clip.name);
+                    }
+                }
 
                 node->addClip(std::move(placed));
             }

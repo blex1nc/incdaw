@@ -8,6 +8,33 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 9b — Audio clips are first-class playlist citizens — 2026-08-15
+
+**Added / changed**
+
+- `MoveClipsCommand` / `ResizeClipsCommand` — audio clips move and resize on
+  the tick grid with the delta converted through the tempo map at the clip's
+  own position (resize converts at the clip's END, where the handle is);
+  undo restores frame snapshots, because tick->frame does not invert exactly
+  across tempo changes. A pure track move never round-trips the position.
+- Fixed a latent merged-drag bug: redo of a merged move replayed only the
+  gesture's FIRST step. `mergeWith` now accumulates the requested deltas
+  too, so redo replays the whole gesture (pinned by a test).
+- Playlist: audio clips draw their waveform in the clip body (mono-folded,
+  from `WaveformOverview`), cached per asset, invalidated by the host after
+  any edit/undo that may have rewritten a file. Resize handle re-enabled.
+- `ProjectGraphCompiler` — `clip.normalize` is honoured: the clip content's
+  peak (its source range) folds into the placement gain at compile time, so
+  the node stays one multiply per sample. Streamed clips defer with a
+  warning (exact peak would cost a file pass per rebuild).
+- `tests/unit/AudioClipEditingTests.cpp` — move/resize/undo exactness,
+  mixed-selection clamping, merged-drag redo, minimum-length clamp; plus a
+  pre-mixer normalize equivalence test in RecordingPlacementTests.
+
+**Phase 9 is COMPLETE**: a full arrangement (pattern + audio clips) plays
+back sample-accurately, and clip gain and normalize are applied pre-mixer
+and recalled from the project file. Deferred items are listed in ROADMAP.
+
 ### Phase 12 (part 5) — The audio editor — 2026-08-15
 
 **Added**

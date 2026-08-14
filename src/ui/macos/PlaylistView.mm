@@ -4,6 +4,7 @@
 #include "app/PlaylistModel.h"
 #include "app/commands/ClipCommands.h"
 #include "app/commands/TrackCommands.h"
+#include "engine/audio/WaveformOverview.h"
 #include "project/PatternCompiler.h"
 #include "project/Model.h"
 
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace incdaw;
@@ -69,6 +71,11 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     std::unique_ptr<app::PlaylistModel> _model;
 
     std::vector<app::PlaylistModel::VisibleClip> _visible;
+
+    /// Waveform overviews per asset, built lazily on first draw. Invalidated
+    /// by the host after any edit that may have rewritten an asset's file —
+    /// the view cannot see a file change, only the host knows one happened.
+    std::unordered_map<unsigned long long, engine::WaveformOverview> _waveforms;
     std::vector<project::EntityId>               _boxed;
 
     PlaylistDrag _drag;
@@ -265,6 +272,10 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
                  colourFrom(clip.colour, clip.muted ? 0.55 : 1.0));
 
         const project::Clip& model = _project->clips()[clip.index];
+
+        if (model.type == project::ClipType::audio)
+            [self drawWaveformFor:model inRect:rect];
+
         drawText(@(model.name.c_str()),
                  NSMakeRect(rect.origin.x + 4.0, rect.origin.y + 1.0,
                             std::max(0.0, rect.size.width - 8.0), 13.0),
@@ -275,6 +286,82 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
             NSFrameRect(rect);
         }
     }
+}
+
+- (const engine::WaveformOverview*)overviewForAsset:(unsigned long long)assetId
+{
+    if (const auto found = _waveforms.find(assetId); found != _waveforms.end())
+        return &found->second;
+
+    // A failed build inserts the empty overview too, so a missing file costs
+    // one attempt rather than one per frame.
+    engine::WaveformOverview& slot = _waveforms[assetId];
+
+    for (const project::AudioAsset& asset : _project->audioAssets()) {
+        if (asset.id.value() != assetId)
+            continue;
+
+        const std::string& path = !asset.absolutePath.empty() ? asset.absolutePath
+                                                              : asset.relativePath;
+        (void)engine::WaveformOverview::build(path, slot);
+        break;
+    }
+
+    return &slot;
+}
+
+- (void)drawWaveformFor:(const project::Clip&)model inRect:(NSRect)rect
+{
+    const engine::WaveformOverview* overview = [self overviewForAsset:model.source.value()];
+    if (overview->bucketCount() == 0 || overview->channelCount == 0 || model.length <= 0)
+        return;
+
+    // Below the name cap; folded to mono — a clip body is a reminder of what
+    // the audio looks like, not the editor.
+    const NSRect body = NSMakeRect(rect.origin.x, rect.origin.y + 15.0,
+                                   rect.size.width, rect.size.height - 17.0);
+    if (body.size.height < 6.0 || body.size.width < 2.0)
+        return;
+
+    const double middle = NSMidY(body);
+    const double scale  = body.size.height * 0.45;
+    const double framesPerPoint = static_cast<double>(model.length) / body.size.width;
+
+    [[NSColor colorWithCalibratedWhite:0.05 alpha:0.5] setFill];
+
+    for (double x = 0.0; x < body.size.width; x += 1.0) {
+        const auto from = model.sourceOffset
+                        + static_cast<engine::FrameCount>(x * framesPerPoint);
+        const auto to   = model.sourceOffset
+                        + static_cast<engine::FrameCount>((x + 1.0) * framesPerPoint);
+
+        if (from >= overview->frameCount)
+            break;   // the clip extends past the audio: the rest is silence
+
+        const auto firstBucket = static_cast<std::size_t>(from / overview->framesPerBucket);
+        const auto lastBucket  = static_cast<std::size_t>(
+            std::max<engine::FrameCount>(from, to - 1) / overview->framesPerBucket);
+
+        float low = 0.0f, high = 0.0f;
+
+        for (std::size_t channel = 0; channel < overview->channelCount; ++channel)
+            for (std::size_t bucket = firstBucket;
+                 bucket <= lastBucket && bucket < overview->bucketCount(); ++bucket) {
+                low  = std::min(low, overview->channels[channel][bucket].low);
+                high = std::max(high, overview->channels[channel][bucket].high);
+            }
+
+        NSRectFillUsingOperation(
+            NSMakeRect(body.origin.x + x, middle - static_cast<double>(high) * scale, 1.0,
+                       std::max(1.0, static_cast<double>(high - low) * scale)),
+            NSCompositingOperationSourceOver);
+    }
+}
+
+- (void)invalidateWaveformCache
+{
+    _waveforms.clear();
+    [self setNeedsDisplay:YES];
 }
 
 - (void)drawPlayhead

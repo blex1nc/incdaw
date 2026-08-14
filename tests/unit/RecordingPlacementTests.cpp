@@ -244,6 +244,60 @@ TEST_CASE("an audio clip in the arrangement is audible through the master")
     }
 }
 
+TEST_CASE("clip normalize scales the clip's content to full scale, pre-mixer")
+{
+    ScratchDir scratch{"incdaw-clip-normalize"};
+
+    const auto audio = makeAudio(1, 256);   // tone() peaks well below 1.0
+    REQUIRE(bool(WavFile::write(scratch.path / "quiet.wav", *audio)));
+
+    Sample peak = 0.0f;
+    for (const Sample value : audio->channels[0])
+        peak = std::max(peak, std::abs(value));
+    REQUIRE(peak < 0.9f);
+
+    project::Project projectModel;
+    auto& track = projectModel.addTrack(project::TrackType::audio, "Audio 1");
+    auto& asset = projectModel.addAudioAsset((scratch.path / "quiet.wav").string());
+    asset.sampleRate = 48000.0;
+    asset.frameCount = 256;
+
+    auto& clip  = projectModel.addClip(project::ClipType::audio, track.id, asset.id);
+    clip.start  = 0;
+    clip.length = 256;
+
+    project::GraphCompileOptions options;
+    options.source     = project::PlaybackSource::arrangement;
+    options.masterGain = 1.0f;
+
+    const auto render = [&]() {
+        auto compiled = compileProjectGraph(projectModel, projectModel.tempoMap(), options);
+        REQUIRE(bool(compiled));
+        CHECK(compiled.warnings.empty());
+
+        AudioBufferPool pool;
+        pool.allocate(1, 2, 256);
+        pool.buffer(0).clear();
+        compiled.graph->process(pool.buffer(0), 256, 0);
+
+        std::vector<Sample> out(256);
+        for (FrameCount frame = 0; frame < 256; ++frame)
+            out[static_cast<std::size_t>(frame)] = pool.buffer(0).channel(0)[frame];
+        return out;
+    };
+
+    const auto plain = render();
+
+    projectModel.findClip(clip.id)->normalize = true;
+    const auto normalized = render();
+
+    // Normalize is exactly a pre-mixer gain of 1/peak — recallable from the
+    // model, applied before the strip.
+    for (FrameCount frame = 0; frame < 256; ++frame)
+        REQUIRE(std::abs(normalized[static_cast<std::size_t>(frame)]
+                         - plain[static_cast<std::size_t>(frame)] / peak) < 1.0e-5f);
+}
+
 TEST_CASE("a wrong-rate asset stays silent and says why")
 {
     ScratchDir scratch{"incdaw-clip-wrongrate"};

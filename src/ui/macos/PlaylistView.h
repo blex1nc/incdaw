@@ -39,4 +39,8 @@ namespace incdaw::app     { class CommandRegistry; }
 /// id — the host opens it in the audio editor.
 @property (nonatomic, copy) void (^onOpenAudioAsset)(unsigned long long);
 
+/// Drops cached clip waveforms. The host calls this after any edit, undo or
+/// redo that may have rewritten an asset's file.
+- (void)invalidateWaveformCache;
+
 @end

@@ -154,11 +154,19 @@ compiles (D-018). The first half of the exit criterion — a full arrangement
 playing back sample-accurately — is tested through the compiled graph in
 `tests/unit/PlaylistTests.cpp`.
 
-**9b — audio clips: NOT STARTED.** Clip gain, normalize, fades, crossfades,
-stretch and reverse are audio-clip properties, and INCDAW has no audio file
-reader or disk streamer yet; that infrastructure belongs with Phase 12. The
-second half of the exit criterion is therefore outstanding, and **Phase 9 is not
-complete**. Automation clips wait on Phase 11.
+**9b — audio clips: COMPLETE (2026-08-15).** Audio clips play through
+`AudioClipNode` (preloaded or streamed, Phase 12 parts 3-4), are visible in
+the playlist with their waveform drawn in the clip body, move and resize on
+the grid with tempo-aware frame math and snapshot-exact undo
+(`tests/unit/AudioClipEditingTests.cpp`), and clip gain, normalize and
+linear fades are applied pre-mixer and recalled from the project file —
+**the exit criterion's second half, asserted in
+`tests/unit/RecordingPlacementTests.cpp`**. Phase 9 is COMPLETE.
+
+Deferred, deliberately: split/stretch/crossfades and clip pan/reverse (with
+the time-stretch subsystem, Phase 16-adjacent), normalize on STREAMED clips
+(a full file pass per rebuild; needs a cached peak), track folders, lanes,
+markers and regions, clip grouping/locking. Automation clips wait on 11b.
 
 ---
 

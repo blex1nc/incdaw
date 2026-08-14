@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.9
-Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12: RECORDING, STREAMING AND THE EDITOR WORK
+Version: 2.0
+Status: PHASES 0-10 COMPLETE, 11a COMPLETE (11b OUTSTANDING) / PHASE 12: RECORDING, STREAMING AND THE EDITOR WORK
 Last updated: 2026-08-15
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -126,8 +126,7 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 Current phase:
 
 PHASES 0-8 COMPLETE (2026-08-14)
-PHASE 9a (playlist: pattern arrangement) — COMPLETE
-PHASE 9b (playlist: audio clips) — NOT STARTED, needs a file reader
+PHASE 9 (playlist) — COMPLETE (9b done 2026-08-15; deferred items in ROADMAP)
 PHASE 10 (mixer, routing, PDC) — COMPLETE
 PHASE 11a (automation subsystem) — COMPLETE
 PHASE 11b (automation UI, clips, recording) — NOT STARTED
@@ -142,7 +141,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  336 test cases, 145,702 assertions, green in both Debug and Release.
+  343 test cases, 146,006 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -1126,12 +1125,10 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: the remaining Phase 12 items are small next to what is done, and
-9b/11b are now unblocked. Recommended order:
+Next step (9b is DONE — audio clips move/resize with snapshot-exact undo,
+draw their waveforms, and clip gain/normalize/fades apply pre-mixer; the
+merged-drag redo bug found on the way is fixed and pinned by a test):
 
-    - 9b playlist polish: move/resize audio clips (frame-anchored moves with
-      tempo-aware deltas — the D-013 accessor is the seam), waveform in the
-      clip body (WaveformOverview is ready for it). This completes Phase 9.
     - 11b automation UI/clips/recording — automation recording rides the
       TimelineAnchor unchanged. This completes Phase 11.
     - input monitoring (input -> a strip, with the usual latency caveats)
@@ -1140,6 +1137,9 @@ Next step: the remaining Phase 12 items are small next to what is done, and
     - the pre-record buffer / Audio Logger (a capture-side ring that is
       always running; the recorder's machinery already fits it)
     - editor polish: markers, regions, cut/copy/paste between files
+    - normalize on STREAMED clips needs a cached peak (computed once when
+      the asset first streams, stored on the asset) — deferred with a
+      compile warning today
 
 Things to be careful about:
 

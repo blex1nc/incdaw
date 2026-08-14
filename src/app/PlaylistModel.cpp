@@ -125,11 +125,6 @@ bool PlaylistModel::isOverResizeHandle(const Project& project, std::size_t index
     if (index >= project.clips().size())
         return false;
 
-    // Audio clips are frame-anchored and not yet resizable from the grid;
-    // offering the handle would start a drag that cannot apply (9b work).
-    if (project.clips()[index].type == project::ClipType::audio)
-        return false;
-
     const Rect rect = clipRect(project, project.clips()[index]);
     if (!rect.contains(x, y))
         return false;

@@ -105,18 +105,21 @@ bool MoveClipsCommand::execute(Project& project)
     if (clips_.empty() || (tickDelta_ == 0 && trackDelta_ == 0))
         return false;
 
+    const engine::TempoMap& tempoMap = project.tempoMap();
+
     // Clamp once for the whole selection rather than per clip: clips keep their
     // relative positions when a drag hits the start of the timeline, which is
-    // what dragging a group means.
+    // what dragging a group means. Audio clips take part through the D-013
+    // accessor, so a mixed selection clamps as one.
     Tick tickDelta  = tickDelta_;
     int  trackDelta = trackDelta_;
 
     for (const EntityId id : clips_) {
         const Clip* clip = project.findClip(id);
-        if (clip == nullptr || clip->type == project::ClipType::audio)
+        if (clip == nullptr)
             continue;
 
-        tickDelta = std::max(tickDelta, -clip->startTick);
+        tickDelta = std::max(tickDelta, -project::clipStartTicks(*clip, tempoMap));
 
         if (trackDelta != 0 && !trackAtOffset(project, clip->track, trackDelta).isValid())
             trackDelta = 0;
@@ -125,16 +128,27 @@ bool MoveClipsCommand::execute(Project& project)
     if (tickDelta == 0 && trackDelta == 0)
         return false;
 
+    movedAudio_.clear();
+
     for (const EntityId id : clips_) {
         Clip* clip = project.findClip(id);
-
-        // Audio clips are frame-anchored; a tick-based move would need the
-        // tempo map and a per-clip frame delta for undo. That arrives with
-        // 9b — until then they stay where the recording put them.
-        if (clip == nullptr || clip->type == project::ClipType::audio)
+        if (clip == nullptr)
             continue;
 
-        clip->startTick += tickDelta;
+        if (clip->type == project::ClipType::audio) {
+            movedAudio_.push_back({id, clip->start});
+
+            // Only when time actually moves: a pure track move must not push
+            // the frame position through a tick round trip, which can shift
+            // it by a frame for nothing.
+            if (tickDelta != 0) {
+                const Tick startTicks = project::clipStartTicks(*clip, tempoMap);
+                clip->start = std::max<project::FramePosition>(
+                    0, tempoMap.frameForTick(startTicks + tickDelta));
+            }
+        } else {
+            clip->startTick += tickDelta;
+        }
 
         if (trackDelta != 0) {
             const EntityId target = trackAtOffset(project, clip->track, trackDelta);
@@ -152,10 +166,11 @@ void MoveClipsCommand::undo(Project& project)
 {
     for (const EntityId id : clips_) {
         Clip* clip = project.findClip(id);
-        if (clip == nullptr || clip->type == project::ClipType::audio)
+        if (clip == nullptr)
             continue;
 
-        clip->startTick -= appliedTickDelta_;
+        if (clip->type != project::ClipType::audio)
+            clip->startTick -= appliedTickDelta_;
 
         if (appliedTrackDelta_ != 0) {
             const EntityId target = trackAtOffset(project, clip->track, -appliedTrackDelta_);
@@ -163,6 +178,12 @@ void MoveClipsCommand::undo(Project& project)
                 clip->track = target;
         }
     }
+
+    // Frame positions come back from the snapshot, not from arithmetic:
+    // tick->frame conversion does not invert exactly across tempo changes.
+    for (const MovedAudioClip& moved : movedAudio_)
+        if (Clip* clip = project.findClip(moved.id))
+            clip->start = moved.previousStart;
 }
 
 bool MoveClipsCommand::canMergeWith(const Command& next) const noexcept
@@ -176,6 +197,13 @@ void MoveClipsCommand::mergeWith(const Command& next)
     if (const auto* other = dynamic_cast<const MoveClipsCommand*>(&next)) {
         appliedTickDelta_  += other->appliedTickDelta_;
         appliedTrackDelta_ += other->appliedTrackDelta_;
+
+        // The requested deltas must accumulate too: redo re-runs execute(),
+        // and an execute that replayed only the gesture's first step would
+        // desynchronise the history on the next undo. `movedAudio_` keeps
+        // OUR snapshots — the gesture's starting positions.
+        tickDelta_  += other->appliedTickDelta_;
+        trackDelta_ += other->appliedTrackDelta_;
     }
 }
 
@@ -186,19 +214,44 @@ bool ResizeClipsCommand::execute(Project& project)
     if (clips_.empty() || lengthDelta_ == 0)
         return false;
 
+    const engine::TempoMap& tempoMap = project.tempoMap();
+
     previousLengths_.clear();
     previousLengths_.reserve(clips_.size());
+    previousFrameLengths_.clear();
+    previousFrameLengths_.reserve(clips_.size());
 
     bool changed = false;
 
     for (const EntityId id : clips_) {
         Clip* clip = project.findClip(id);
-        if (clip == nullptr || clip->type == project::ClipType::audio) {
+        if (clip == nullptr) {
             previousLengths_.push_back(0);
+            previousFrameLengths_.push_back(0);
+            continue;
+        }
+
+        if (clip->type == project::ClipType::audio) {
+            previousLengths_.push_back(0);
+            previousFrameLengths_.push_back(clip->length);
+
+            // The delta arrives in ticks (the grid the user drags on); it is
+            // applied at the clip's END, where the handle is — with a tempo
+            // change inside the clip, that is the only point where grid and
+            // audio agree about what just happened.
+            const Tick endTick = tempoMap.tickForFrame(clip->start + clip->length);
+            const project::FramePosition newEnd = tempoMap.frameForTick(endTick + lengthDelta_);
+
+            const project::FrameCount length =
+                std::max<project::FrameCount>(1, newEnd - clip->start);
+
+            changed = changed || length != clip->length;
+            clip->length = length;
             continue;
         }
 
         previousLengths_.push_back(clip->lengthTicks);
+        previousFrameLengths_.push_back(0);
 
         const Tick length = std::max(minimumClipLength, clip->lengthTicks + lengthDelta_);
         changed = changed || length != clip->lengthTicks;
@@ -212,12 +265,15 @@ void ResizeClipsCommand::undo(Project& project)
 {
     for (std::size_t index = 0; index < clips_.size() && index < previousLengths_.size(); ++index) {
         Clip* clip = project.findClip(clips_[index]);
-
-        // Mirrors the skip in execute: what was not resized is not restored.
-        if (clip == nullptr || clip->type == project::ClipType::audio)
+        if (clip == nullptr)
             continue;
 
-        clip->lengthTicks = previousLengths_[index];
+        if (clip->type == project::ClipType::audio) {
+            if (index < previousFrameLengths_.size())
+                clip->length = previousFrameLengths_[index];
+        } else {
+            clip->lengthTicks = previousLengths_[index];
+        }
     }
 }
 

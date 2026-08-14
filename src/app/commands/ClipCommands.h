@@ -96,6 +96,16 @@ private:
     /// tick zero or the ends of the track list. Undo reverses what happened.
     Tick    appliedTickDelta_  = 0;
     int     appliedTrackDelta_ = 0;
+
+    /// Audio clips are frame-anchored, and tick->frame conversion does not
+    /// invert exactly across tempo changes — so their undo restores a
+    /// snapshot instead of arithmetic. Recaptured on every execute, which is
+    /// what makes redo-after-undo land on the same frames.
+    struct MovedAudioClip {
+        EntityId               id;
+        project::FramePosition previousStart = 0;
+    };
+    std::vector<MovedAudioClip> movedAudio_;
 };
 
 /// Changes clip lengths. Mergeable.
@@ -120,6 +130,10 @@ private:
     ClipIds           clips_;
     Tick              lengthDelta_ = 0;
     std::vector<Tick> previousLengths_;
+
+    /// Aligned with `previousLengths_`; meaningful only for audio clips,
+    /// whose lengths live in frames (same snapshot reasoning as moves).
+    std::vector<project::FrameCount> previousFrameLengths_;
 };
 
 /// Copies clips, offset in time and tracks.
