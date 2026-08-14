@@ -112,6 +112,22 @@ void expand(const Pattern& pattern, const PatternChannelContent& content,
     }
 }
 
+
+/// True when a clip on `track` should be heard.
+///
+/// A clip whose track has been deleted is silent rather than an error: the
+/// arrangement can outlive a track for as long as an undo entry holds it.
+bool isTrackAudible(const Track* track, bool anySoloed) noexcept
+{
+    if (track == nullptr)
+        return false;
+
+    if (track->muted)
+        return false;
+
+    return !anySoloed || track->soloed;
+}
+
 } // namespace
 
 std::vector<engine::SequencedNote> compilePattern(const Pattern& pattern, EntityId channel,
@@ -140,8 +156,18 @@ std::vector<engine::SequencedNote> compileArrangement(const Project& project, En
 {
     std::vector<engine::SequencedNote> notes;
 
+    // Track solo is exclusive across the arrangement, exactly as channel solo is
+    // across the rack: the moment any track is soloed, every other one goes
+    // quiet. Resolved here rather than on the audio thread, because a muted
+    // track's notes are then simply never compiled.
+    const bool anyTrackSoloed = std::any_of(project.tracks().begin(), project.tracks().end(),
+                                            [](const Track& track) { return track.soloed; });
+
     for (const Clip& clip : project.clips()) {
         if (clip.type != ClipType::pattern || clip.muted)
+            continue;
+
+        if (!isTrackAudible(project.findTrack(clip.track), anyTrackSoloed))
             continue;
 
         const Pattern* pattern = project.findPattern(clip.source);
@@ -213,6 +239,9 @@ Tick arrangementLengthTicks(const Project& project)
 {
     Tick end = 0;
 
+    // Muted and silenced clips still count towards the length. The song is as
+    // long as the user drew it; unmuting a track at the end must not have
+    // changed where the song ended.
     for (const Clip& clip : project.clips()) {
         if (clip.type != ClipType::pattern)
             continue;

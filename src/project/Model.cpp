@@ -58,6 +58,23 @@ Pattern& Project::insertPattern(std::size_t index, Pattern pattern)
                              std::move(pattern));
 }
 
+Track& Project::insertTrack(std::size_t index, Track track)
+{
+    ids_.observe(track.id);
+
+    const std::size_t position = std::min(index, tracks_.size());
+    return *tracks_.insert(tracks_.begin() + static_cast<std::ptrdiff_t>(position),
+                           std::move(track));
+}
+
+Clip& Project::insertClip(std::size_t index, Clip clip)
+{
+    ids_.observe(clip.id);
+
+    const std::size_t position = std::min(index, clips_.size());
+    return *clips_.insert(clips_.begin() + static_cast<std::ptrdiff_t>(position), std::move(clip));
+}
+
 bool Project::removeChannel(EntityId id) noexcept
 {
     const std::size_t index = indexOfChannel(id);
@@ -78,6 +95,26 @@ bool Project::removePattern(EntityId id) noexcept
     return true;
 }
 
+bool Project::removeTrack(EntityId id) noexcept
+{
+    const std::size_t index = indexOfTrack(id);
+    if (index == notFound)
+        return false;
+
+    tracks_.erase(tracks_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
+bool Project::removeClip(EntityId id) noexcept
+{
+    const std::size_t index = indexOfClip(id);
+    if (index == notFound)
+        return false;
+
+    clips_.erase(clips_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
 std::size_t Project::indexOfChannel(EntityId id) const noexcept
 {
     for (std::size_t index = 0; index < channels_.size(); ++index)
@@ -91,6 +128,24 @@ std::size_t Project::indexOfPattern(EntityId id) const noexcept
 {
     for (std::size_t index = 0; index < patterns_.size(); ++index)
         if (patterns_[index].id == id)
+            return index;
+
+    return notFound;
+}
+
+std::size_t Project::indexOfTrack(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < tracks_.size(); ++index)
+        if (tracks_[index].id == id)
+            return index;
+
+    return notFound;
+}
+
+std::size_t Project::indexOfClip(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < clips_.size(); ++index)
+        if (clips_[index].id == id)
             return index;
 
     return notFound;
@@ -218,6 +273,25 @@ const Track* Project::findTrack(EntityId id) const noexcept
             return &track;
 
     return nullptr;
+}
+
+Track* Project::findTrack(EntityId id) noexcept
+{
+    return const_cast<Track*>(std::as_const(*this).findTrack(id));
+}
+
+const Clip* Project::findClip(EntityId id) const noexcept
+{
+    for (const Clip& clip : clips_)
+        if (clip.id == id)
+            return &clip;
+
+    return nullptr;
+}
+
+Clip* Project::findClip(EntityId id) noexcept
+{
+    return const_cast<Clip*>(std::as_const(*this).findClip(id));
 }
 
 const Channel* Project::findChannel(EntityId id) const noexcept

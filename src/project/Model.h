@@ -349,6 +349,8 @@ public:
     /// than out of bounds.
     Channel& insertChannel(std::size_t index, Channel channel);
     Pattern& insertPattern(std::size_t index, Pattern pattern);
+    Track&   insertTrack(std::size_t index, Track track);
+    Clip&    insertClip(std::size_t index, Clip clip);
 
     /// Removes an entity by id. False when there is nothing to remove.
     ///
@@ -357,11 +359,15 @@ public:
     /// which is the only party that can put it back.
     bool removeChannel(EntityId id) noexcept;
     bool removePattern(EntityId id) noexcept;
+    bool removeTrack(EntityId id) noexcept;
+    bool removeClip(EntityId id) noexcept;
 
     static constexpr std::size_t notFound = static_cast<std::size_t>(-1);
 
     [[nodiscard]] std::size_t indexOfChannel(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfPattern(EntityId id) const noexcept;
+    [[nodiscard]] std::size_t indexOfTrack(EntityId id) const noexcept;
+    [[nodiscard]] std::size_t indexOfClip(EntityId id) const noexcept;
 
     [[nodiscard]] std::vector<Track>&             tracks()      noexcept { return tracks_; }
     [[nodiscard]] std::vector<Channel>&           channels()    noexcept { return channels_; }
@@ -384,6 +390,9 @@ public:
     [[nodiscard]] EntityId masterMixerNode() const noexcept { return master_; }
 
     [[nodiscard]] const Track*     findTrack(EntityId id) const noexcept;
+    [[nodiscard]] Track*           findTrack(EntityId id) noexcept;
+    [[nodiscard]] const Clip*      findClip(EntityId id) const noexcept;
+    [[nodiscard]] Clip*            findClip(EntityId id) noexcept;
     [[nodiscard]] const Channel*   findChannel(EntityId id) const noexcept;
     [[nodiscard]] Channel*         findChannel(EntityId id) noexcept;
     [[nodiscard]] const Pattern*   findPattern(EntityId id) const noexcept;
