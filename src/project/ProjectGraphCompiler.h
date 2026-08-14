@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/audio/AudioStream.h"
 #include "engine/graph/RenderGraph.h"
 #include "engine/instrument/Instrument.h"
 #include "engine/automation/AutomationNode.h"
@@ -56,6 +57,17 @@ struct GraphCompileOptions {
     engine::SampleRate sampleRate   = 48000.0;
     engine::FrameCount maxBlockSize = 512;
     std::size_t        channelCount = 2;
+
+    /// Audio assets longer than this stream from disk instead of being
+    /// preloaded whole (needs `diskStreamer` set; without one everything
+    /// preloads). 30 seconds of 48 kHz stereo is ~11 MB decoded — an
+    /// arbitrary but generous line between "a take" and "an hour of audio".
+    engine::FrameCount streamingThresholdFrames = 48000ll * 30;
+
+    /// The service that keeps streamed clips' windows filled. Owned by the
+    /// application (or the test); graphs only weak-reference it via the
+    /// streams they register.
+    engine::DiskStreamer* diskStreamer = nullptr;
 
     /// Applied at the master strip, on top of the master mixer node's own
     /// volume. Headroom for a project that has not been mixed yet, not a

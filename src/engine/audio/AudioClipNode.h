@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/audio/AudioStream.h"
 #include "engine/audio/WavFile.h"
 #include "engine/graph/Node.h"
 
@@ -22,13 +23,18 @@ namespace incdaw::engine {
 /// stretch — those arrive with the playlist's audio-clip polish (9b), and
 /// silently half-implementing them here would misrepresent the model.
 ///
-/// Preloading whole files is correct for recorded takes and ordinary clips;
-/// clips longer than memory want the disk streamer, which does not exist yet
-/// and is recorded as outstanding Phase 12 work.
+/// A clip's audio comes from one of two places: whole files preloaded at
+/// compile time (recorded takes, ordinary clips), or the disk streamer's
+/// window for files too long to preload. The compiler decides per asset;
+/// this node plays both identically — the streamed path serves silence and
+/// counts an underrun when the window cannot keep up, it never blocks.
 class AudioClipNode final : public Node {
 public:
     struct PlacedClip {
-        std::shared_ptr<const AudioFileData> audio;   ///< released off-RT with the graph
+        /// Exactly one of these is set. Both are released off-RT with the
+        /// graph, like everything else the reaper handles.
+        std::shared_ptr<const AudioFileData> audio;
+        std::shared_ptr<AudioStream>         stream;
 
         FramePosition start        = 0;   ///< timeline frame of the clip's first frame
         FrameCount    length       = 0;   ///< frames of the clip on the timeline
@@ -44,12 +50,16 @@ public:
 
     [[nodiscard]] std::size_t clipCount() const noexcept { return clips_.size(); }
 
+    /// Sizes the fetch scratch the streamed path copies through.
+    void prepare(SampleRate sampleRate, FrameCount maxBlockSize) override;
+
     void process(const ProcessContext& context) noexcept override;
 
     [[nodiscard]] const char* name() const noexcept override { return "AudioClipNode"; }
 
 private:
     std::vector<PlacedClip> clips_;
+    std::vector<Sample>     fetchScratch_;   ///< maxBlockSize samples, allocated in prepare
 };
 
 } // namespace incdaw::engine

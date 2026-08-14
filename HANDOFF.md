@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.7
-Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12: RECORDING INTO THE TIMELINE WORKS
+Version: 1.8
+Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12: RECORDING + STREAMING DONE, EDITOR OUTSTANDING
 Last updated: 2026-08-15
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  322 test cases, 66,791 assertions, green in both Debug and Release.
+  328 test cases, 122,061 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -251,12 +251,35 @@ Phase 12 — IN PROGRESS. Done and tested so far:
   transport rolled the arpeggio — 0 drops, 0 overruns, 0 rt allocations,
   placement computed against the rolling transport.
 
-  NOT started within Phase 12: the disk-streaming READER, input monitoring,
-  loop/punch recording (per-segment anchoring, see D-024 tradeoffs), the
-  pre-record buffer / Audio Logger, and the audio editor. Audio-clip
-  move/resize in the playlist is 9b (the commands skip audio clips explicitly
-  rather than corrupting frame-anchored placement with tick math). The phase
-  is NOT complete.
+  Part 4 (2026-08-15) — the disk streamer:
+
+  engine/audio/WavStreamReader  random-access decode; streaming chunk walk;
+                                shares ONE decoder with WavFile (WavBytes.h
+                                decodeSample) so they cannot disagree
+  engine/audio/AudioStream      double-buffered window, two segments under
+                                seqlocks; wait-free RT read; misses are
+                                counted silence, never a wait; a seek is just
+                                a position the next service pass moves to
+  engine/audio/DiskStreamer     one thread services all live streams (weakly
+                                held — streams die with their graphs);
+                                serviceOnce() public for deterministic tests
+  AudioClipNode                 plays preloaded OR streamed through one
+                                gain-and-fade path; prepare() sizes scratch
+  ProjectGraphCompiler          assets > streamingThresholdFrames (30 s
+                                default) stream, ONE STREAM PER CLIP (shared
+                                windows would fight, D-025), prefilled at
+                                compile so rebuilds start warm; the app owns
+                                the DiskStreamer
+
+  Proven bit-exact: streamed playback == preloaded playback through the
+  compiled graph, with tiny segments forcing refills mid-play. Starvation
+  and seek behaviour asserted; RT read path allocation-free under the guard.
+
+  NOT started within Phase 12: input monitoring, loop/punch recording
+  (per-segment anchoring, see D-024 tradeoffs), the pre-record buffer /
+  Audio Logger, and the audio editor. Audio-clip move/resize in the playlist
+  is 9b (the commands skip audio clips explicitly rather than corrupting
+  frame-anchored placement with tick math). The phase is NOT complete.
 
 Phase 11a — COMPLETE. Done and tested:
 
@@ -1078,23 +1101,23 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: finish Phase 12 — the streaming reader and the audio editor.
+Next step: finish Phase 12 — the audio editor is the big remaining piece.
 
-  What exists after part 3: the full recording loop. R records; the take
-  lands as an audio clip at its latency-compensated position; the clip is
-  audible in song mode and visible in the playlist; undo removes the landing
-  whole. All of it hardware-verified against a rolling transport.
+  What exists after part 4: the full recording loop (R records, the take
+  lands sample-accurately as an audible clip, one undo removes it) and
+  streamed playback for long assets, proven bit-identical to preloading.
 
   What remains, in dependency order:
 
-    - the disk-streaming READER (playback side of streaming): audio clips
-      longer than memory, and the prerequisite for the pre-record buffer /
-      Audio Logger. Today clips are preloaded whole at compile time.
+    - the audio editor UI (waveform view, trim, fade, normalize, gain,
+      reverse, silence, markers, regions) — audio exists in the timeline to
+      look at, and WavStreamReader can feed a waveform overview without
+      loading whole files
     - input monitoring (input -> a strip, with the usual latency caveats)
     - loop/punch recording: per-segment anchoring (D-024 records why the
       current linear map cannot survive a seek or wrap mid-take)
-    - the audio editor UI (waveform view, trim, fade, normalize) — audio now
-      exists in the timeline to look at
+    - the pre-record buffer / Audio Logger (a capture-side ring that is
+      always running; the recorder's machinery already fits it)
     - 9b playlist polish: move/resize audio clips (frame-anchored moves with
       tempo-aware deltas), waveform rendering in the clip body
     - 11b (automation recording) rides the same anchor machinery unchanged

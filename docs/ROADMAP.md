@@ -241,9 +241,17 @@ lands asset + clip undoably; `AudioClipNode` makes audio clips audible in
 the arrangement; the app records on `R`, opening the input only when asked.
 Verified on hardware against a rolling transport.
 
-Outstanding within this phase: the disk-streaming reader, input monitoring,
-loop/punch recording (per-segment anchoring), the pre-record buffer / Audio
-Logger, and the audio editor. Audio-clip move/resize in the playlist is 9b.
+Part 4: the disk streamer. `WavStreamReader` decodes any frame range without
+loading the file; `AudioStream` is a double-buffered window under seqlocks —
+wait-free realtime reads, starvation served as counted silence (D-025);
+`DiskStreamer` services every live stream from one thread. Assets over a
+threshold stream, one window per clip, prefilled at compile time; streamed
+playback is proven bit-identical to preloaded playback through the compiled
+graph.
+
+Outstanding within this phase: input monitoring, loop/punch recording
+(per-segment anchoring), the pre-record buffer / Audio Logger, and the audio
+editor. Audio-clip move/resize in the playlist is 9b.
 
 ---
 

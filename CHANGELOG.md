@@ -8,6 +8,38 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 12 (part 4) — The disk streamer — 2026-08-15
+
+**Added**
+
+- `engine/audio/WavStreamReader` — random-access WAV decode: a streaming
+  chunk walk parses the header without loading the body, and `readAt`
+  decodes any frame range through the same `WavBytes.h` decoder `WavFile`
+  uses (`decodeSample` extracted so the two readers cannot disagree).
+- `engine/audio/AudioStream` — one streamed clip's window: two segments
+  leapfrogging ahead of the play position, each under its own seqlock. The
+  realtime read is wait-free; what the window cannot serve is zero-filled
+  and counted, never waited for. Seeks are just a requested position the
+  next service pass moves the window to (D-025).
+- `engine/audio/DiskStreamer` — one background thread services every live
+  stream; streams are held weakly and die with their graphs. `serviceOnce`
+  is public so tests drive servicing deterministically instead of sleeping.
+- `AudioClipNode` — clips now play from either a preloaded buffer or a
+  stream through one gain-and-fade path; `prepare` sizes the fetch scratch.
+- `ProjectGraphCompiler` — assets longer than
+  `GraphCompileOptions::streamingThresholdFrames` (default 30 s) stream, one
+  stream per clip, windows prefilled at compile time so a rebuilt graph
+  starts warm. The app owns the `DiskStreamer`.
+- `tests/unit/DiskStreamingTests.cpp` — reader-vs-WavFile slice equality in
+  all formats, bit-exact streamed playback across forced refills, seek
+  refill, starvation honesty (counted silence, no blocking), allocation-free
+  read path under the realtime guard, and streamed == preloaded through the
+  compiled graph.
+
+Still to come in Phase 12: input monitoring, loop/punch recording
+(per-segment anchoring), the pre-record buffer / Audio Logger, and the
+audio editor.
+
 ### Phase 12 (part 3) — Recording lands in the timeline — 2026-08-15
 
 **Added**

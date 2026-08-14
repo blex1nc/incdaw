@@ -756,3 +756,46 @@ correlate against, and pretending otherwise would invent a position.
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+---
+
+## D-025 — Streaming is a window, and starving it is audible, not fatal
+
+**Context:** Phase 12 part 4. Audio clips were preloaded whole at graph
+compile time, which is right for takes and wrong for an hour of audio: memory,
+and project-load time. Streamed playback needs disk I/O that can never touch
+the audio thread.
+
+**Options:**
+- A ring buffer per stream with seek negotiation between the two sides
+- A double-buffered window: two segments leapfrogging ahead of the play
+  position, each guarded by a seqlock
+- Preload everything and cap project audio length
+
+**Chosen:** The window. Each streamed clip owns two segments (~1.4 s each at
+the default size); the audio thread's read publishes the position it wanted,
+and a service thread refills whichever segment no longer covers what comes
+next. Reads that the window cannot serve are zero-filled and counted — the
+same honesty contract as the recorder's ring. One stream PER CLIP, not per
+asset: two clips of one file at different positions would fight over a shared
+window and starve each other. The compiler decides preload-versus-stream from
+the header alone (`streamingThresholdFrames`, default 30 s), prefills the
+window at compile time so a rebuilt graph starts warm, and the application
+owns one `DiskStreamer` whose weak references let streams die with their
+graphs. Seeks are not a protocol: they are just a requested position the
+window does not cover yet, served one service-pass later.
+
+**Reason:** A seek-negotiating ring is more machinery for the same guarantee;
+the window makes the invariant visible — at most two contiguous spans exist,
+and either a span covers the request or silence is the answer. Equivalence is
+provable and proven: the streamed path renders bit-identically to the
+preloaded path in tests, with tiny segments forcing refills mid-play.
+
+**Tradeoffs:** A mid-play jump costs one window of silence (a few
+milliseconds of service latency) before audio resumes; pre-buffering around
+known jump targets (loop points) is future work alongside loop recording.
+Per-clip windows cost ~1 MB of memory each — a hundred streamed clips is
+100 MB, acceptable, and clips under the threshold never pay it.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

@@ -49,6 +49,8 @@ add_library(incdaw_engine STATIC
     engine/instrument/InstrumentNode.cpp
     engine/audio/WavFile.cpp
     engine/audio/WavStreamWriter.cpp
+    engine/audio/WavStreamReader.cpp
+    engine/audio/AudioStream.cpp
     engine/audio/AudioRecorder.cpp
     engine/audio/AudioClipNode.cpp
     engine/AudioEngine.cpp)

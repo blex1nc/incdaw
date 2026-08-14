@@ -211,26 +211,26 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     if (options.source == PlaybackSource::arrangement) {
         std::unordered_map<EntityId, std::shared_ptr<engine::AudioFileData>> loadedAssets;
 
+        const auto assetPath = [&](EntityId id) -> const std::string* {
+            for (const AudioAsset& candidate : project.audioAssets())
+                if (candidate.id == id)
+                    return !candidate.absolutePath.empty() ? &candidate.absolutePath
+                                                           : &candidate.relativePath;
+            return nullptr;
+        };
+
         const auto loadAsset =
             [&](EntityId id) -> std::shared_ptr<engine::AudioFileData> {
             if (const auto found = loadedAssets.find(id); found != loadedAssets.end())
                 return found->second;
 
-            const AudioAsset* asset = nullptr;
-            for (const AudioAsset& candidate : project.audioAssets())
-                if (candidate.id == id)
-                    asset = &candidate;
-
             std::shared_ptr<engine::AudioFileData> loaded;
 
-            if (asset != nullptr) {
-                const std::string& path = !asset->absolutePath.empty() ? asset->absolutePath
-                                                                       : asset->relativePath;
-
+            if (const std::string* path = assetPath(id)) {
                 auto data = std::make_shared<engine::AudioFileData>();
 
-                if (const auto read = engine::WavFile::read(path, *data); !read) {
-                    compiled.warnings.push_back("audio asset unreadable: " + path
+                if (const auto read = engine::WavFile::read(*path, *data); !read) {
+                    compiled.warnings.push_back("audio asset unreadable: " + *path
                                                 + " (" + read.error + ")");
                 } else if (data->sampleRate != options.sampleRate) {
                     // Playing it anyway would be the wrong pitch and the wrong
@@ -240,7 +240,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                     compiled.warnings.push_back(
                         "audio asset at " + std::to_string(data->sampleRate)
                         + " Hz in a " + std::to_string(options.sampleRate)
-                        + " Hz session, left silent: " + path);
+                        + " Hz session, left silent: " + *path);
                 } else {
                     loaded = std::move(data);
                 }
@@ -248,6 +248,54 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
             loadedAssets.emplace(id, loaded);
             return loaded;
+        };
+
+        /// True when this asset should stream rather than preload. Decided
+        /// from the header alone (probe), never by decoding.
+        const auto shouldStream = [&](EntityId id) -> bool {
+            if (options.diskStreamer == nullptr)
+                return false;
+
+            const std::string* path = assetPath(id);
+            if (path == nullptr)
+                return false;
+
+            engine::AudioFileData header;
+            return bool(engine::WavFile::probe(*path, header))
+                && header.frameCount > options.streamingThresholdFrames;
+        };
+
+        /// One stream PER CLIP, not per asset: two clips of the same file at
+        /// different positions would fight over a shared window and starve
+        /// each other into permanent underrun. A window is ~1 MB; a fight is
+        /// audible.
+        const auto openStream =
+            [&](EntityId id, engine::FrameCount prefillAt) -> std::shared_ptr<engine::AudioStream> {
+            const std::string* path = assetPath(id);
+            if (path == nullptr)
+                return nullptr;
+
+            auto stream = std::make_shared<engine::AudioStream>();
+
+            if (const auto opened = stream->open(*path); !opened) {
+                compiled.warnings.push_back("audio asset unreadable: " + *path
+                                            + " (" + opened.error + ")");
+                return nullptr;
+            }
+
+            if (stream->sampleRate() != options.sampleRate) {
+                compiled.warnings.push_back(
+                    "audio asset at " + std::to_string(stream->sampleRate())
+                    + " Hz in a " + std::to_string(options.sampleRate)
+                    + " Hz session, left silent: " + *path);
+                return nullptr;
+            }
+
+            // Warm the window here, off the audio thread, so a graph swap
+            // never begins with an underrun on its first block.
+            stream->prefill(prefillAt);
+            options.diskStreamer->add(stream);
+            return stream;
         };
 
         const bool anyTrackSoloed = std::any_of(project.tracks().begin(), project.tracks().end(),
@@ -265,12 +313,18 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 if (clip.type != ClipType::audio || clip.track != track.id || clip.muted)
                     continue;
 
-                auto audio = loadAsset(clip.source);
-                if (audio == nullptr)
-                    continue;
-
                 engine::AudioClipNode::PlacedClip placed;
-                placed.audio         = std::move(audio);
+
+                if (shouldStream(clip.source)) {
+                    placed.stream = openStream(clip.source, clip.sourceOffset);
+                    if (placed.stream == nullptr)
+                        continue;
+                } else {
+                    placed.audio = loadAsset(clip.source);
+                    if (placed.audio == nullptr)
+                        continue;
+                }
+
                 placed.start         = clip.start;
                 placed.length        = clip.length;
                 placed.sourceOffset  = clip.sourceOffset;

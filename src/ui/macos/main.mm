@@ -97,14 +97,19 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     /// One take at a time, from arm to placement (project/RecordingSession.h).
     project::RecordingSession _recording;
     NSString*                 _lastRecordError;
+
+    /// Keeps streamed audio clips' windows filled. Graphs hold the streams;
+    /// this only services them, so destruction order does not matter.
+    std::unique_ptr<engine::DiskStreamer> _diskStreamer;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
 {
     (void)notification;
 
-    _project  = std::make_unique<project::Project>();
-    _registry = std::make_unique<app::CommandRegistry>(*_project);
+    _project      = std::make_unique<project::Project>();
+    _registry     = std::make_unique<app::CommandRegistry>(*_project);
+    _diskStreamer = std::make_unique<engine::DiskStreamer>();
 
     const project::EntityId channelId = _project->addChannel("Channel 1").id;
     const project::EntityId patternId = _project->addPattern("Pattern 1").id;
@@ -526,6 +531,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     options.source       = _songMode ? project::PlaybackSource::arrangement
                                      : project::PlaybackSource::pattern;
     options.pattern      = project::EntityId{self.pianoRoll.patternIdValue};
+    options.diskStreamer = _diskStreamer.get();
 
     auto compiled = project::compileProjectGraph(*_project, _audio->transport().tempoMap(), options);
     if (!compiled) {

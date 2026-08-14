@@ -51,17 +51,14 @@ WavFile::Result parseHeader(const std::vector<std::uint8_t>& bytes, ParsedHeader
         const std::size_t   body      = offset + 8;
 
         if (std::memcmp(chunkId, "fmt ", 4) == 0 && body + 16 <= bytes.size()) {
-            header.format        = readU16(bytes.data() + body);
-            header.channels      = readU16(bytes.data() + body + 2);
-            header.sampleRate    = readU32(bytes.data() + body + 4);
-            header.bitsPerSample = readU16(bytes.data() + body + 14);
-
-            // WAVE_FORMAT_EXTENSIBLE wraps the real format in a sub-GUID whose
-            // first two bytes are the classic code.
-            if (header.format == formatExtensible && body + 26 <= bytes.size())
-                header.format = readU16(bytes.data() + body + 24);
-
-            sawFmt = true;
+            wav::FormatInfo info;
+            if (wav::interpretFmtChunk(bytes.data() + body, bytes.size() - body, info)) {
+                header.format        = info.format;
+                header.channels      = info.channels;
+                header.sampleRate    = info.sampleRate;
+                header.bitsPerSample = info.bitsPerSample;
+                sawFmt = true;
+            }
         } else if (std::memcmp(chunkId, "data", 4) == 0) {
             header.dataOffset = body;
             header.dataSize   = std::min<std::size_t>(chunkSize, bytes.size() - body);
@@ -80,12 +77,13 @@ WavFile::Result parseHeader(const std::vector<std::uint8_t>& bytes, ParsedHeader
         return result;
     }
 
-    const bool supported = (header.format == formatPcm
-                            && (header.bitsPerSample == 16 || header.bitsPerSample == 24
-                                || header.bitsPerSample == 32))
-                        || (header.format == formatFloat && header.bitsPerSample == 32);
+    wav::FormatInfo info;
+    info.format        = header.format;
+    info.channels      = header.channels;
+    info.sampleRate    = header.sampleRate;
+    info.bitsPerSample = header.bitsPerSample;
 
-    if (!supported) {
+    if (!wav::isSupportedFormat(info)) {
         result.error = "unsupported format: code " + std::to_string(header.format) + ", "
                      + std::to_string(header.bitsPerSample) + " bits";
         return result;
@@ -165,29 +163,8 @@ WavFile::Result WavFile::read(const std::filesystem::path& path, AudioFileData& 
             const std::uint8_t* sample = data
                 + (static_cast<std::size_t>(frame) * out.channelCount + channel) * bytesPerSample;
 
-            Sample value = 0.0f;
-
-            if (header.format == formatFloat) {
-                std::uint32_t raw = readU32(sample);
-                float decoded = 0.0f;
-                std::memcpy(&decoded, &raw, sizeof(decoded));
-                value = decoded;
-            } else if (header.bitsPerSample == 16) {
-                const auto raw = static_cast<std::int16_t>(readU16(sample));
-                value = static_cast<Sample>(raw) / 32768.0f;
-            } else if (header.bitsPerSample == 24) {
-                // Sign-extend 24 bits via a shift up to 32 and back down.
-                const std::int32_t raw = static_cast<std::int32_t>(
-                    (static_cast<std::uint32_t>(sample[0]) << 8)
-                    | (static_cast<std::uint32_t>(sample[1]) << 16)
-                    | (static_cast<std::uint32_t>(sample[2]) << 24)) >> 8;
-                value = static_cast<Sample>(raw) / 8388608.0f;
-            } else {   // PCM 32
-                const auto raw = static_cast<std::int32_t>(readU32(sample));
-                value = static_cast<Sample>(static_cast<double>(raw) / 2147483648.0);
-            }
-
-            out.channels[channel][static_cast<std::size_t>(frame)] = value;
+            out.channels[channel][static_cast<std::size_t>(frame)] =
+                wav::decodeSample(sample, header.format, header.bitsPerSample);
         }
     }
 

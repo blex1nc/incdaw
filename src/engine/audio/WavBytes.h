@@ -81,6 +81,74 @@ inline void encodeSample(std::vector<std::uint8_t>& out, Sample value, WavFile::
     }
 }
 
+/// Decodes one sample. The exact inverse of `encodeSample`, and the ONLY
+/// decoder: WavFile (whole-file) and WavStreamReader (random access) both
+/// call this, so they cannot disagree about what a file contains.
+[[nodiscard]] inline Sample decodeSample(const std::uint8_t* bytes, std::uint16_t format,
+                                         std::uint16_t bitsPerSample) noexcept
+{
+    if (format == formatFloat) {
+        const std::uint32_t raw = readU32(bytes);
+        float decoded = 0.0f;
+        std::memcpy(&decoded, &raw, sizeof(decoded));
+        return decoded;
+    }
+
+    if (bitsPerSample == 16) {
+        const auto raw = static_cast<std::int16_t>(readU16(bytes));
+        return static_cast<Sample>(raw) / 32768.0f;
+    }
+
+    if (bitsPerSample == 24) {
+        // Sign-extend 24 bits via a shift up to 32 and back down.
+        const std::int32_t raw = static_cast<std::int32_t>(
+            (static_cast<std::uint32_t>(bytes[0]) << 8)
+            | (static_cast<std::uint32_t>(bytes[1]) << 16)
+            | (static_cast<std::uint32_t>(bytes[2]) << 24)) >> 8;
+        return static_cast<Sample>(raw) / 8388608.0f;
+    }
+
+    // PCM 32.
+    const auto raw = static_cast<std::int32_t>(readU32(bytes));
+    return static_cast<Sample>(static_cast<double>(raw) / 2147483648.0);
+}
+
+/// What both readers extract from a fmt chunk.
+struct FormatInfo {
+    std::uint16_t format        = 0;
+    std::uint16_t channels      = 0;
+    std::uint32_t sampleRate    = 0;
+    std::uint16_t bitsPerSample = 0;
+};
+
+/// Interprets a fmt chunk body (16 bytes minimum; EXTENSIBLE unwrapped when
+/// the body carries the sub-format GUID).
+[[nodiscard]] inline bool interpretFmtChunk(const std::uint8_t* body, std::size_t size,
+                                            FormatInfo& info) noexcept
+{
+    if (size < 16)
+        return false;
+
+    info.format        = readU16(body);
+    info.channels      = readU16(body + 2);
+    info.sampleRate    = readU32(body + 4);
+    info.bitsPerSample = readU16(body + 14);
+
+    // WAVE_FORMAT_EXTENSIBLE wraps the real format in a sub-GUID whose first
+    // two bytes are the classic code.
+    if (info.format == formatExtensible && size >= 26)
+        info.format = readU16(body + 24);
+
+    return true;
+}
+
+[[nodiscard]] inline bool isSupportedFormat(const FormatInfo& info) noexcept
+{
+    return (info.format == formatPcm
+            && (info.bitsPerSample == 16 || info.bitsPerSample == 24 || info.bitsPerSample == 32))
+        || (info.format == formatFloat && info.bitsPerSample == 32);
+}
+
 /// Appends the canonical 44-byte header. `dataBytes` may be a placeholder;
 /// WavStreamWriter patches the two size fields on finalize.
 inline void appendCanonicalHeader(std::vector<std::uint8_t>& out, WavFile::Format format,
