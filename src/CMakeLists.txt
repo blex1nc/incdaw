@@ -31,8 +31,11 @@ add_library(incdaw_engine STATIC
     engine/core/CallbackProfiler.cpp
     engine/core/RealtimeGuard.cpp
     engine/graph/RenderGraph.cpp
+    engine/transport/TempoMap.cpp
+    engine/transport/Transport.cpp
     engine/dsp/SineOscillatorNode.cpp
     engine/dsp/GainNode.cpp
+    engine/dsp/MetronomeNode.cpp
     engine/AudioEngine.cpp)
 target_include_directories(incdaw_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_engine

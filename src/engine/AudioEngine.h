@@ -2,6 +2,7 @@
 
 #include "engine/core/CallbackProfiler.h"
 #include "engine/graph/RenderGraph.h"
+#include "engine/transport/Transport.h"
 #include "platform/AudioDevice.h"
 
 #include <atomic>
@@ -51,6 +52,11 @@ public:
 
     [[nodiscard]] std::size_t retiredGraphCount() const;
 
+    /// The single time authority. Nodes read position from the block plan this
+    /// produces; nothing else in the engine keeps its own clock.
+    [[nodiscard]] Transport&       transport()       noexcept { return transport_; }
+    [[nodiscard]] const Transport& transport() const noexcept { return transport_; }
+
     [[nodiscard]] const CallbackProfiler& profiler() const noexcept { return profiler_; }
     [[nodiscard]] CallbackProfiler&       profiler()       noexcept { return profiler_; }
 
@@ -83,6 +89,7 @@ private:
     };
 
     std::unique_ptr<platform::AudioDevice> device_;
+    Transport                              transport_;
 
     std::atomic<CompiledGraph*>                active_{nullptr};
     std::unique_ptr<CompiledGraph>             owned_;      ///< the installed graph

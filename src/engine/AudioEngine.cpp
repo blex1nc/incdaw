@@ -151,8 +151,22 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
     output.clear();
 
     if (CompiledGraph* graph = active_.load(std::memory_order_acquire)) {
-        graph->process(output, frameCount, static_cast<FramePosition>(
-            blockCounter_.load(std::memory_order_relaxed) * static_cast<std::uint64_t>(frameCount)));
+        // The transport decides how this block is divided. A loop wrap in the
+        // middle of a block becomes two segments, each rendered with its own
+        // timeline position, so events land on their exact frame rather than
+        // being rounded to the block boundary.
+        BlockSegment      plan[Transport::maxSegmentsPerBlock];
+        const std::size_t segmentCount =
+            transport_.processBlock(frameCount, plan, Transport::maxSegmentsPerBlock);
+
+        for (std::size_t index = 0; index < segmentCount; ++index) {
+            const BlockSegment& segment = plan[index];
+            if (segment.length <= 0)
+                continue;
+
+            graph->process(output.subBlock(segment.offset, segment.length),
+                           segment.length, segment.startFrame);
+        }
 
         if (output.hasNonFiniteSamples()) {
             // Contain it here rather than letting it reach the speakers or
