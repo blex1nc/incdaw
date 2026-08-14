@@ -7,6 +7,12 @@
 
 #include "doctest.h"
 
+#include "engine/core/AudioBufferPool.h"
+#include "engine/core/RealtimeGuard.h"
+#include "engine/dsp/GainNode.h"
+#include "engine/dsp/SineOscillatorNode.h"
+#include "engine/graph/RenderGraph.h"
+#include "plugins/PluginNode.h"
 #include "plugins/PluginScan.h"
 #include "plugins/clap/ClapLibrary.h"
 
@@ -78,6 +84,70 @@ TEST_CASE("EXIT CRITERION SEED: a plugin that crashes on load kills the scanner,
     // assertion, which is the whole point of the isolation strategy.
     CHECK(outcome.status == plugins::ScanOutcome::Status::crashed);
     CHECK(outcome.plugins.empty());
+}
+
+TEST_CASE("a hosted plugin processes inside the render graph, allocation-free")
+{
+    using namespace incdaw::engine;
+
+    plugins::ClapLibrary library;
+    std::string error;
+    REQUIRE(library.open(INCDAW_TESTGAIN_PLUGIN, error));
+
+    auto instance = library.create("com.incdaw.testgain", 48000.0, 256, error);
+    REQUIRE(instance != nullptr);
+
+    // sine -> plugin insert -> master. What reaches the master must be the
+    // sine through the plugin's -6 dB, sample for sample.
+    GraphBuilder builder;
+    const auto source = builder.addNode(std::make_unique<dsp::SineOscillatorNode>(220.0, 0.4f));
+    const auto insert = builder.addNode(
+        std::make_unique<plugins::PluginNode>(std::move(instance)));
+    const auto master = builder.addNode(std::make_unique<dsp::GainNode>(1.0f));
+    builder.connect(source, insert);
+    builder.connect(insert, master);
+    builder.setMaster(master);
+
+    auto withPlugin = builder.compile(48000.0, 256, 2);
+    REQUIRE(withPlugin != nullptr);
+
+    GraphBuilder reference;
+    const auto referenceSource =
+        reference.addNode(std::make_unique<dsp::SineOscillatorNode>(220.0, 0.4f));
+    const auto referenceMaster = reference.addNode(std::make_unique<dsp::GainNode>(0.5f));
+    reference.connect(referenceSource, referenceMaster);
+    reference.setMaster(referenceMaster);
+
+    auto expected = reference.compile(48000.0, 256, 2);
+    REQUIRE(expected != nullptr);
+
+    AudioBufferPool pool;
+    pool.allocate(2, 2, 256);
+
+    rt::resetViolations();
+
+    for (int block = 0; block < 8; ++block) {
+        pool.buffer(0).clear();
+        pool.buffer(1).clear();
+
+        {
+            const rt::ScopedRealtimeContext realtimeScope;
+            withPlugin->process(pool.buffer(0), 256,
+                                static_cast<FramePosition>(block) * 256);
+        }
+
+        expected->process(pool.buffer(1), 256, static_cast<FramePosition>(block) * 256);
+
+        for (std::size_t channel = 0; channel < 2; ++channel)
+            for (FrameCount frame = 0; frame < 256; ++frame)
+                REQUIRE(pool.buffer(0).channel(channel)[frame]
+                        == pool.buffer(1).channel(channel)[frame]);
+    }
+
+    if (rt::guardEnabled()) {
+        CHECK(rt::allocationViolations() == 0);
+        CHECK(rt::deallocationViolations() == 0);
+    }
 }
 
 TEST_CASE("a path that is not a plugin fails without crashing anyone")

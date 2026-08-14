@@ -14,6 +14,7 @@
 add_library(incdaw_platform STATIC
     platform/SystemInfo.cpp
     platform/SharedLibrary.cpp
+    platform/ChildProcess.cpp
     platform/macos/CoreAudioDevice.cpp
     platform/macos/CoreMidiDevice.cpp
     platform/macos/HostTime.cpp)
@@ -80,8 +81,10 @@ target_include_directories(incdaw_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # includes a clap header is a design rule, enforced by review, not by the
 # build — engine/ and project/ have no reason to and do not.
 target_include_directories(incdaw_plugins PUBLIC ${CMAKE_SOURCE_DIR}/third_party/clap)
+# plugins sits beside engine (same layer rank): PluginNode derives the
+# graph's Node, so the link goes plugins -> engine -> platform.
 target_link_libraries(incdaw_plugins
-    PUBLIC  incdaw_platform
+    PUBLIC  incdaw_engine
     PRIVATE incdaw_warnings)
 
 # ── project/ : data model, serialization, versioning ──────────────────────────

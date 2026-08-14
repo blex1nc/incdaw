@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  371 test cases, 150,351 assertions, green in both Debug and Release.
+  377 test cases, 154,475 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1149,15 +1149,23 @@ recording and the Audio Logger all work. What remains in it is polish):
   ClapInstance, out-of-process scanner with crash classification, the test
   suite's own well-behaved + hostile CLAP plugins, isolation proven in CI.
 
+  Phase 13 parts 2-3 are ALSO DONE: PluginRegistry with a persisted,
+  reasoned blacklist and a zero-rescan cache (size+mtime); PluginNode
+  processing a hosted plugin inside the render graph, bit-exact and
+  allocation-free (plugins now links engine — same layer rank; process
+  spawning moved to platform/ChildProcess when the layering checker
+  objected, correctly).
+
   Phase 13 continues, in dependency order:
-    - PluginRegistry + blacklist persistence (scan cache keyed on path,
-      size, mtime; user-clearable; PLUGIN_HOST.md §3)
-    - PluginNode: a ClapInstance in the render graph, RT-safe, behind the
-      format-agnostic PluginInstance interface; insert chains on mixer
-      strips (the Phase 10 deferral)
+    - MODEL + COMPILER wiring: MixerNode gains an insert list (serialized);
+      ProjectGraphCompiler routes a strip's incoming edges through its
+      insert chain (needs separate input/output index maps); a
+      PluginInstanceManager owning ClapLibraries for the app's lifetime
+      (PluginNode's library must outlive it — header documents this)
     - parameter discovery -> ParameterRegistry (generic automation, §5)
     - state save/load into the project (§6), latency reporting -> PDC
     - editor hosting (§7), then AU, then VST3 (D-007 order)
+    - the browser/UI story: pick a plugin from the registry onto a strip
 
 Things to be careful about:
 

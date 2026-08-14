@@ -8,6 +8,23 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 3) — A plugin in the graph — 2026-08-15
+
+**Added**
+
+- `plugins/PluginNode` — a hosted plugin as a render-graph node: sums its
+  inputs like a strip (an insert processes the mixed signal), then the
+  plugin runs in place on the node's output. Mono graphs pass through
+  rather than handing the plugin two aliases of one buffer. plugins now
+  links engine (same layer rank; the checker allows it) so the node can
+  derive `engine::Node`.
+- `platform/ChildProcess` — fork/exec/capture moved behind the platform
+  boundary where the layering checker rightly demanded it; `PluginScan`
+  now contains no OS API.
+- Test: sine -> plugin insert -> master renders bit-identically to the
+  same chain with the gain baked in, under the realtime guard with zero
+  allocations.
+
 ### Phase 13 (part 2) — The registry and its blacklist — 2026-08-15
 
 **Added**
