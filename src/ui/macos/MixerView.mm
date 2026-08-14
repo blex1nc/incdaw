@@ -429,8 +429,14 @@ enum class MixerDrag { none, fader, pan };
 
     const project::EntityId nodeId = _project->mixerNodes()[index].id;
 
-    if (_registry->executeMerging(std::make_unique<app::SetMixerVolumeCommand>(nodeId, gain)))
+    if (_registry->executeMerging(std::make_unique<app::SetMixerVolumeCommand>(nodeId, gain))) {
         [self parameterChangedFor:nodeId];
+
+        // `position` is already the registry's normalised volume: both sides
+        // share the cubic fader law, so a recorded pass replays identically.
+        if (self.onParameterEdited != nil)
+            self.onParameterEdited(nodeId.value(), "volume", position);
+    }
 }
 
 - (void)applyPanAt:(NSPoint)point index:(std::size_t)index
@@ -440,8 +446,12 @@ enum class MixerDrag { none, fader, pan };
 
     const project::EntityId nodeId = _project->mixerNodes()[index].id;
 
-    if (_registry->executeMerging(std::make_unique<app::SetMixerPanCommand>(nodeId, pan)))
+    if (_registry->executeMerging(std::make_unique<app::SetMixerPanCommand>(nodeId, pan))) {
         [self parameterChangedFor:nodeId];
+
+        if (self.onParameterEdited != nil)
+            self.onParameterEdited(nodeId.value(), "pan", (pan + 1.0) / 2.0);
+    }
 }
 
 /// Writes a parameter straight to the strip that is rendering, instead of

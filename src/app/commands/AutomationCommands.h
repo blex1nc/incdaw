@@ -85,4 +85,43 @@ private:
     std::string                  name_;
 };
 
+/// Lands one recorded automation pass (write mode).
+///
+/// Existing lane for (target, key): the written range replaces that range's
+/// points and everything outside it survives — writing over bars 3..5 must
+/// not erase bar 1. No lane yet: the lane is created, and with it an
+/// automation clip on the first automation track (created if none) spanning
+/// the written range, so the pass is immediately visible in the playlist —
+/// the same landing pattern as a recorded audio take. One undo removes it
+/// all; redo restores the same ids.
+class WriteAutomationCommand final : public Command {
+public:
+    WriteAutomationCommand(EntityId target, std::string parameterKey,
+                           std::vector<AutomationPoint> written)
+        : target_(target), key_(std::move(parameterKey)), written_(std::move(written)) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "automation.write"; }
+    [[nodiscard]] std::string name() const override { return "Record Automation"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    EntityId                     target_;
+    std::string                  key_;
+    std::vector<AutomationPoint> written_;
+
+    EntityId                     laneId_;
+    std::vector<AutomationPoint> previousPoints_;   ///< when writing to an existing lane
+    project::AutomationLane      laneAfter_;        ///< for redo of a created lane
+    std::size_t                  laneIndex_ = 0;
+    project::Clip                clip_;
+    project::Track               track_;
+    std::size_t                  clipIndex_  = 0;
+    std::size_t                  trackIndex_ = 0;
+    bool laneCreated_  = false;
+    bool trackCreated_ = false;
+    bool minted_       = false;
+};
+
 } // namespace incdaw::app

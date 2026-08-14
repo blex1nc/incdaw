@@ -92,6 +92,7 @@ target_link_libraries(incdaw_project
 # ── app/ : command registry, undo, session ────────────────────────────────────
 add_library(incdaw_app STATIC
     app/Version.cpp
+    app/AutomationWriteSession.cpp
     app/CommandRegistry.cpp
     app/PianoRollModel.cpp
     app/ChannelRackModel.cpp

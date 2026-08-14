@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.0
-Status: PHASES 0-10 COMPLETE, 11a COMPLETE (11b OUTSTANDING) / PHASE 12: RECORDING, STREAMING AND THE EDITOR WORK
+Version: 2.1
+Status: PHASES 0-11 COMPLETE / PHASE 12: RECORDING, STREAMING AND THE EDITOR WORK
 Last updated: 2026-08-15
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -128,8 +128,9 @@ Current phase:
 PHASES 0-8 COMPLETE (2026-08-14)
 PHASE 9 (playlist) — COMPLETE (9b done 2026-08-15; deferred items in ROADMAP)
 PHASE 10 (mixer, routing, PDC) — COMPLETE
-PHASE 11a (automation subsystem) — COMPLETE
-PHASE 11b (automation UI, clips, recording) — NOT STARTED
+PHASE 11 (automation) — COMPLETE (11b done 2026-08-15: windowed placements
+         D-026, pattern automation, automation clips in the playlist, write
+         mode recording; touch/latch + point editor deferred, see ROADMAP)
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -141,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  343 test cases, 146,006 assertions, green in both Debug and Release.
+  350 test cases, 146,050 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -1125,21 +1126,22 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step (9b is DONE — audio clips move/resize with snapshot-exact undo,
-draw their waveforms, and clip gain/normalize/fades apply pre-mixer; the
-merged-drag redo bug found on the way is fixed and pinned by a test):
+Next step (11b is DONE — phases 0-11 are all COMPLETE; what remains before
+Phase 13 (plugins) is the tail of Phase 12):
 
-    - 11b automation UI/clips/recording — automation recording rides the
-      TimelineAnchor unchanged. This completes Phase 11.
     - input monitoring (input -> a strip, with the usual latency caveats)
     - loop/punch recording: per-segment anchoring (D-024 records why the
-      current linear map cannot survive a seek or wrap mid-take)
+      current linear map cannot survive a seek or wrap mid-take); latch-mode
+      automation overdub rides the same work (D-026)
     - the pre-record buffer / Audio Logger (a capture-side ring that is
       always running; the recorder's machinery already fits it)
     - editor polish: markers, regions, cut/copy/paste between files
-    - normalize on STREAMED clips needs a cached peak (computed once when
-      the asset first streams, stored on the asset) — deferred with a
-      compile warning today
+    - deferred small items: normalize on STREAMED clips (cached peak),
+      automation point-editing surface, touch/latch modes
+
+  Or start Phase 13 (plugin hosting, CLAP first per D-007) and pick up the
+  Phase 12 tail alongside — the plugin host is the long pole for the whole
+  product and everything it needs from the engine now exists.
 
 Things to be careful about:
 

@@ -275,6 +275,8 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
         if (model.type == project::ClipType::audio)
             [self drawWaveformFor:model inRect:rect];
+        else if (model.type == project::ClipType::automation)
+            [self drawAutomationCurveFor:model inRect:rect];
 
         drawText(@(model.name.c_str()),
                  NSMakeRect(rect.origin.x + 4.0, rect.origin.y + 1.0,
@@ -362,6 +364,71 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 {
     _waveforms.clear();
     [self setNeedsDisplay:YES];
+}
+
+/// The lane's envelope across the clip's window, as a thumbnail polyline.
+/// Linear between points — curve shapes are an editing-surface concern; the
+/// clip body only has to say "this is the shape of the ride".
+- (void)drawAutomationCurveFor:(const project::Clip&)model inRect:(NSRect)rect
+{
+    const project::AutomationLane* lane = nullptr;
+    for (const project::AutomationLane& candidate : _project->automation())
+        if (candidate.id == model.source)
+            lane = &candidate;
+
+    if (lane == nullptr || lane->points.empty() || model.lengthTicks <= 0)
+        return;
+
+    const NSRect body = NSMakeRect(rect.origin.x, rect.origin.y + 15.0,
+                                   rect.size.width, rect.size.height - 17.0);
+    if (body.size.height < 6.0 || body.size.width < 2.0)
+        return;
+
+    // Lane ticks are absolute; the clip shows [sourceOffsetTicks, +length).
+    const auto valueAtTick = [lane](Tick tick) -> double {
+        if (tick <= lane->points.front().tick)
+            return lane->points.front().value;
+        if (tick >= lane->points.back().tick)
+            return lane->points.back().value;
+
+        for (std::size_t index = 1; index < lane->points.size(); ++index) {
+            const auto& before = lane->points[index - 1];
+            const auto& after  = lane->points[index];
+
+            if (tick < after.tick) {
+                const double span = static_cast<double>(after.tick - before.tick);
+                const double mix  = span > 0.0 ? static_cast<double>(tick - before.tick) / span
+                                               : 1.0;
+                return before.value + (after.value - before.value) * mix;
+            }
+        }
+
+        return lane->points.back().value;
+    };
+
+    NSBezierPath* path = [NSBezierPath bezierPath];
+    path.lineWidth = 1.5;
+
+    const double ticksPerPoint =
+        static_cast<double>(model.lengthTicks) / body.size.width;
+
+    for (double x = 0.0; x <= body.size.width; x += 2.0) {
+        const Tick tick = model.sourceOffsetTicks
+                        + static_cast<Tick>(x * ticksPerPoint);
+        const double value = std::clamp(valueAtTick(tick), 0.0, 1.0);
+
+        const NSPoint point = NSMakePoint(
+            body.origin.x + x,
+            body.origin.y + body.size.height * (1.0 - value));
+
+        if (x == 0.0)
+            [path moveToPoint:point];
+        else
+            [path lineToPoint:point];
+    }
+
+    [[NSColor colorWithCalibratedWhite:0.05 alpha:0.7] setStroke];
+    [path stroke];
 }
 
 - (void)drawPlayhead

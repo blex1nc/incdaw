@@ -799,3 +799,40 @@ Per-clip windows cost ~1 MB of memory each — a hundred streamed clips is
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+---
+
+## D-026 — Automation placement is a window over a lane
+
+**Context:** Phase 11b. 11a's lanes played everywhere; automation clips,
+pattern-scoped automation, and recorded passes all need automation that
+plays somewhere specific.
+
+**Options:**
+- Bake windows into the point data at compile time
+- Give each engine binding a tick window and let placement be data
+- A separate windowed-automation node type
+
+**Chosen:** `AutomationNode::Binding` carries a half-open tick window and
+simply does not evaluate outside it. The compiler turns every placement — an
+automation clip, or a pattern clip whose pattern lists lanes — into one
+windowed binding with the lane's points shifted to position. A lane placed
+anywhere plays only through its placements (a muted placement still counts
+as placed); only an unplaced lane plays globally, which is 11a's behaviour
+and what a freshly recorded pass does until it is arranged.
+
+**Reason:** Not writing outside the window gives clip semantics for free:
+nothing before the clip starts, and the value it last wrote holds after it
+ends — the parameter is a strip the fader also owns, and silence from the
+automation side means the fader's value stands. Baking windows into points
+cannot express "do not touch", and a second node type would duplicate the
+evaluator for a two-field difference.
+
+**Tradeoffs:** Overlapping placements of the same lane both write; the later
+binding in compile order wins within a block. Write-mode recording restarts
+its stream on a loop wrap rather than overdubbing — loop-aware overdub is
+latch-mode work, recorded as deferred along with touch mode and a dedicated
+point-editing surface.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

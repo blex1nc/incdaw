@@ -73,8 +73,6 @@ void PlaylistModel::collectVisibleClips(const Project& project, std::vector<Visi
 
     for (std::size_t index = 0; index < clips.size(); ++index) {
         const Clip& clip = clips[index];
-        if (clip.type == project::ClipType::automation)
-            continue;   // automation clips arrive with Phase 11b
 
         const Rect rect = clipRect(project, clip);
         if (rect.width <= 0.0)
@@ -107,12 +105,8 @@ std::size_t PlaylistModel::clipAtPoint(const Project& project, double x, double 
 
     for (std::size_t index = clips.size(); index > 0; --index) {
         const std::size_t position = index - 1;
-        const Clip& clip = clips[position];
 
-        if (clip.type == project::ClipType::automation)
-            continue;
-
-        if (clipRect(project, clip).contains(x, y))
+        if (clipRect(project, clips[position]).contains(x, y))
             return position;
     }
 
@@ -146,9 +140,6 @@ void PlaylistModel::clipsInRectangle(const Project& project, double x, double y,
     const double bottom = std::max(y, y + height);
 
     for (const Clip& clip : project.clips()) {
-        if (clip.type == project::ClipType::automation)
-            continue;
-
         const Rect rect = clipRect(project, clip);
         if (rect.width <= 0.0)
             continue;

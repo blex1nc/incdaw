@@ -8,6 +8,37 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 11b — Automation placement and recording — 2026-08-15
+
+**Added**
+
+- `AutomationNode::Binding` — a half-open tick window; the binding simply
+  does not evaluate outside it (D-026). Clip semantics fall out: nothing
+  before the clip starts, the last written value holds after it ends.
+- `ProjectGraphCompiler` — every placement becomes a windowed binding with
+  the lane's points shifted into position: automation clips, and pattern
+  clips whose pattern lists lanes (`Pattern::automationLanes` is finally
+  evaluated). A placed lane plays only through its placements — a muted
+  placement silences it rather than promoting it to global; only an
+  unplaced lane plays everywhere (11a behaviour).
+- `app/AutomationWriteSession` + `WriteAutomationCommand` — write-mode
+  recording: armed fader/pan moves are captured with their transport ticks,
+  thinned to where the envelope actually bends (a straight ramp keeps two
+  points), and landed undoably. Writing over an existing lane replaces only
+  the written range; a new lane arrives with an automation clip and a track,
+  as one undo — the recorded-take landing pattern.
+- Mixer: `onParameterEdited` reports moves in the registry's normalised
+  terms (both sides share the cubic fader law, so a pass replays
+  identically). Audio menu: Write Automation toggle.
+- Playlist: automation clips are visible, movable, resizable, with their
+  envelope drawn in the clip body.
+- `tests/unit/AutomationClipTests.cpp` — window semantics, muted placement,
+  global fallback, pattern-carried lanes, recorded-pass landing/undo/redo,
+  range-preserving overwrite, loop-wrap restart, thinning.
+
+**Phase 11 is COMPLETE.** Deferred: touch/latch modes, loop-aware overdub,
+a dedicated point-editing surface, copy/paste and scaling UI (ROADMAP).
+
 ### Phase 9b — Audio clips are first-class playlist citizens — 2026-08-15
 
 **Added / changed**

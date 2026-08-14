@@ -34,6 +34,11 @@ namespace incdaw::engine::dsp { class MixerStripNode; }
 /// and rebuilding the graph would reset every meter to draw the same audio.
 @property (nonatomic, copy) void (^onParameterChange)(void);
 
+/// A specific fader or pan move, in the parameter registry's normalised
+/// terms — what automation write mode records. `key` is "volume" or "pan".
+@property (nonatomic, copy) void (^onParameterEdited)(unsigned long long nodeId,
+                                                      const char* key, double normalized);
+
 /// Called when the user asks to start or stop playback (space bar).
 @property (nonatomic, copy) void (^onTransportToggle)(void);
 

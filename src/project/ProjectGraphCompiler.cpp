@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <unordered_map>
 
 namespace incdaw::project {
@@ -387,13 +388,20 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
     auto automation = std::make_unique<engine::AutomationNode>(tempoMap);
 
-    for (const AutomationLane& lane : project.automation()) {
+    /// Where a lane writes: shifted by `offsetTicks`, only inside the window.
+    struct LanePlacement {
+        Tick offsetTicks = 0;
+        Tick windowStart = std::numeric_limits<Tick>::min();
+        Tick windowEnd   = std::numeric_limits<Tick>::max();
+    };
+
+    const auto bindLane = [&](const AutomationLane& lane, const LanePlacement& placement) {
         if (lane.points.empty())
-            continue;
+            return;
 
         const ParameterRegistry::Entry* parameter = registry.find(lane.parameterKey);
         if (parameter == nullptr || !parameter->apply)
-            continue;   // a lane naming an unknown parameter is data, not an error
+            return;   // a lane naming an unknown parameter is data, not an error
 
         // The lane's target resolves to whichever strip renders it: a mixer
         // node's own strip, or the channel strip of a channel.
@@ -410,16 +418,18 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         }
 
         if (strip == nullptr)
-            continue;   // silent channel, or a target that no longer exists
+            return;   // silent channel, or a target that no longer exists
 
         engine::AutomationNode::Binding binding;
+        binding.windowStart = placement.windowStart;
+        binding.windowEnd   = placement.windowEnd;
 
         std::vector<engine::AutomationPoint> points;
         points.reserve(lane.points.size());
 
         for (const AutomationPoint& point : lane.points) {
             engine::AutomationPoint translated;
-            translated.tick    = point.tick;
+            translated.tick    = point.tick + placement.offsetTicks;
             translated.value   = static_cast<float>(point.value);
             translated.tension = static_cast<float>(point.tension);
 
@@ -441,7 +451,58 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         binding.apply = [strip, apply = parameter->apply](float value) { apply(*strip, value); };
 
         automation->addBinding(std::move(binding));
+    };
+
+    const auto findLane = [&](EntityId id) -> const AutomationLane* {
+        for (const AutomationLane& lane : project.automation())
+            if (lane.id == id)
+                return &lane;
+        return nullptr;
+    };
+
+    // A lane placed anywhere — as an automation clip, or through a pattern
+    // that lists it — plays only through its placements. Only an unplaced
+    // lane plays globally (the 11a behaviour, and what a lane freshly
+    // written by automation recording does until it is arranged).
+    std::unordered_map<EntityId, bool> lanePlaced;
+
+    if (options.source == PlaybackSource::arrangement) {
+        for (const Clip& clip : project.clips()) {
+            // A muted placement still counts as PLACED: muting the clip must
+            // silence the lane, not promote it back to playing everywhere.
+            const Track* track   = project.findTrack(clip.track);
+            const bool   audible = !clip.muted && (track == nullptr || !track->muted);
+
+            const auto place = [&](EntityId laneId) {
+                const AutomationLane* lane = findLane(laneId);
+                if (lane == nullptr)
+                    return;
+
+                lanePlaced[lane->id] = true;
+
+                if (!audible)
+                    return;
+
+                LanePlacement placement;
+                placement.offsetTicks = clip.startTick - clip.sourceOffsetTicks;
+                placement.windowStart = clip.startTick;
+                placement.windowEnd   = clip.startTick + clip.lengthTicks;
+                bindLane(*lane, placement);
+            };
+
+            if (clip.type == ClipType::automation) {
+                place(clip.source);
+            } else if (clip.type == ClipType::pattern) {
+                if (const Pattern* pattern = project.findPattern(clip.source))
+                    for (const EntityId laneId : pattern->automationLanes)
+                        place(laneId);
+            }
+        }
     }
+
+    for (const AutomationLane& lane : project.automation())
+        if (!lanePlaced[lane.id])
+            bindLane(lane, LanePlacement{});
 
     engine::AutomationNode* automationHandle = nullptr;
 

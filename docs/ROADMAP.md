@@ -212,11 +212,20 @@ smoothed setters, offline-render equivalence by construction. Exit criterion
 tested by registering an unknown key and automating it through the compiled
 graph. Commands: lane add/remove, wholesale point edits, merged drags.
 
-**11b — the UI and the rest: NOT STARTED.** Lane/clip editing surfaces,
-automation clips in the playlist, recording modes (write/touch/latch),
-copy/paste and scaling. `Pattern::automationLanes` still serializes without
-being evaluated — pattern-scoped automation joins the arrangement work in 11b.
-**Phase 11 is not complete.**
+**11b — placement and recording: COMPLETE (2026-08-15).** Automation clips
+play (a windowed engine binding per placement, D-026 — nothing before the
+clip, hold after it), `Pattern::automationLanes` is finally evaluated
+(pattern clips carry their lanes, windowed the same way), automation clips
+are visible/movable/resizable in the playlist with their envelope drawn in
+the clip body, and write-mode recording works end to end: arm Write
+Automation, ride mixer faders while the transport rolls, and the pass lands
+as thinned lane points — a new lane arrives with a clip and a track, one
+undo, same ids on redo (`tests/unit/AutomationClipTests.cpp`). Phase 11 is
+COMPLETE.
+
+Deferred, deliberately: touch/latch recording modes and loop-aware overdub
+(D-026 tradeoffs), a dedicated point-editing surface (points are edited
+through commands today), copy/paste and scaling UI.
 
 ---
 

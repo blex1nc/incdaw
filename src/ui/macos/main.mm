@@ -15,6 +15,7 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "app/AutomationWriteSession.h"
 #include "app/CommandRegistry.h"
 #include "app/Version.h"
 #include "app/commands/RecordingCommands.h"
@@ -110,6 +111,9 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     /// watching the undo stack's depth from housekeeping catches it without
     /// the registry having to know views exist.
     std::size_t _undoDepthSeen;
+
+    /// Write-mode automation recording (app/AutomationWriteSession.h).
+    app::AutomationWriteSession _autoWrite;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -226,6 +230,11 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     __weak INCDAWAppDelegate* weakSelfForEditor = self;
     self.playlist.onOpenAudioAsset = ^(unsigned long long assetId) {
         [weakSelfForEditor openAudioAssetInEditor:assetId];
+    };
+
+    self.mixer.onParameterEdited = ^(unsigned long long nodeId, const char* key,
+                                     double normalized) {
+        [weakSelfForEditor automationParameterEdited:nodeId key:key value:normalized];
     };
 
     // The editors share one region and are swapped rather than tiled: each
@@ -516,6 +525,40 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 - (void)editFadeOut:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::fadeOut factor:1.0f]; }
 - (void)editGainUp:(id)sender    { (void)sender; [self applyAudioEdit:app::AudioEditOp::gain factor:1.412538f]; }   // +3 dB
 - (void)editGainDown:(id)sender  { (void)sender; [self applyAudioEdit:app::AudioEditOp::gain factor:0.707946f]; }   // -3 dB
+
+// ── Automation write mode ────────────────────────────────────────────────────
+
+- (void)automationParameterEdited:(unsigned long long)nodeId
+                              key:(const char*)key
+                            value:(double)normalized
+{
+    if (!_autoWrite.isEnabled() || !_audioReady || !_audio->transport().isPlaying())
+        return;
+
+    _autoWrite.capture(project::EntityId{nodeId}, key,
+                       _audio->transport().positionInTicks(), normalized);
+}
+
+- (void)toggleAutomationWrite:(NSMenuItem*)sender
+{
+    if (_autoWrite.isEnabled()) {
+        _autoWrite.setEnabled(false);
+        sender.state = NSControlStateValueOff;
+
+        // Land every touched parameter's pass. Each is its own undo entry,
+        // which is what a user riding two faders expects Cmd+Z to peel back.
+        for (auto& command : _autoWrite.finish())
+            (void)_registry->execute(std::move(command));
+
+        [self rebuildGraph];
+        [self.playlist setNeedsDisplay:YES];
+    } else {
+        _autoWrite.setEnabled(true);
+        sender.state = NSControlStateValueOn;
+    }
+
+    [self refreshStatus];
+}
 
 - (void)editTrim:(id)sender
 {
@@ -997,6 +1040,16 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                                          keyEquivalent:@""];
         item.target = self;
     }
+
+    [audioMenu addItem:[NSMenuItem separatorItem]];
+
+    // Write-mode automation recording: while checked and the transport rolls,
+    // every fader and pan move in the mixer is captured; unchecking lands the
+    // passes as automation lanes (and clips, when the lane is new).
+    NSMenuItem* writeItem = [audioMenu addItemWithTitle:@"Write Automation"
+                                                 action:@selector(toggleAutomationWrite:)
+                                          keyEquivalent:@""];
+    writeItem.target = self;
 
     audioItem.submenu = audioMenu;
 

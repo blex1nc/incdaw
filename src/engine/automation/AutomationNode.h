@@ -5,6 +5,7 @@
 #include "engine/transport/TempoMap.h"
 
 #include <functional>
+#include <limits>
 #include <vector>
 
 namespace incdaw::engine {
@@ -30,6 +31,14 @@ public:
     struct Binding {
         AutomationSequence sequence;
         AutomationApplier  apply;
+
+        /// The half-open tick range this binding writes in. Outside it the
+        /// parameter is simply not touched — which is what gives a placed
+        /// automation clip its natural semantics: nothing before it starts,
+        /// and the value it left behind holds after it ends. The defaults
+        /// mean "always", which is a lane placed nowhere (11a behaviour).
+        Tick windowStart = std::numeric_limits<Tick>::min();
+        Tick windowEnd   = std::numeric_limits<Tick>::max();
     };
 
     explicit AutomationNode(const TempoMap& tempoMap) noexcept : tempoMap_(&tempoMap) {}
@@ -43,6 +52,9 @@ public:
         const Tick tick = tempoMap_->tickForFrame(context.playPosition);
 
         for (const Binding& binding : bindings_) {
+            if (tick < binding.windowStart || tick >= binding.windowEnd)
+                continue;
+
             if (!binding.sequence.isEmpty() && binding.apply)
                 binding.apply(binding.sequence.valueAt(tick));
         }
