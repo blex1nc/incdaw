@@ -3,6 +3,7 @@
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/SimpleSynth.h"
+#include "engine/automation/AutomationNode.h"
 #include "project/PatternCompiler.h"
 
 #include <algorithm>
@@ -200,6 +201,80 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         channelStripNodes.push_back(channelHandle);
     }
 
+    // ── Automation ──────────────────────────────────────────────────────────
+    // One node evaluates every lane, once per block, and writes through the
+    // same smoothed setters the mixer's own fader uses. Nothing here names a
+    // parameter: resolution goes through the registry, which is the whole of
+    // the "no parameter-specific code" requirement.
+    const ParameterRegistry builtins = ParameterRegistry::withBuiltins();
+    const ParameterRegistry& registry = options.parameters != nullptr ? *options.parameters
+                                                                      : builtins;
+
+    auto automation = std::make_unique<engine::AutomationNode>(tempoMap);
+
+    for (const AutomationLane& lane : project.automation()) {
+        if (lane.points.empty())
+            continue;
+
+        const ParameterRegistry::Entry* parameter = registry.find(lane.parameterKey);
+        if (parameter == nullptr || !parameter->apply)
+            continue;   // a lane naming an unknown parameter is data, not an error
+
+        // The lane's target resolves to whichever strip renders it: a mixer
+        // node's own strip, or the channel strip of a channel.
+        engine::dsp::MixerStripNode* strip = nullptr;
+
+        if (const auto found = stripIndices.find(lane.targetEntity); found != stripIndices.end()) {
+            for (std::size_t index = 0; index < mixerIds.size(); ++index)
+                if (mixerIds[index] == lane.targetEntity)
+                    strip = stripNodes[index];
+        } else {
+            for (std::size_t index = 0; index < channelIds.size(); ++index)
+                if (channelIds[index] == lane.targetEntity)
+                    strip = channelStripNodes[index];
+        }
+
+        if (strip == nullptr)
+            continue;   // silent channel, or a target that no longer exists
+
+        engine::AutomationNode::Binding binding;
+
+        std::vector<engine::AutomationPoint> points;
+        points.reserve(lane.points.size());
+
+        for (const AutomationPoint& point : lane.points) {
+            engine::AutomationPoint translated;
+            translated.tick    = point.tick;
+            translated.value   = static_cast<float>(point.value);
+            translated.tension = static_cast<float>(point.tension);
+
+            switch (point.curve) {
+                case AutomationCurve::hold:        translated.shape = engine::AutomationShape::hold; break;
+                case AutomationCurve::smooth:      translated.shape = engine::AutomationShape::smooth; break;
+                case AutomationCurve::exponential: translated.shape = engine::AutomationShape::exponential; break;
+                case AutomationCurve::linear:      translated.shape = engine::AutomationShape::linear; break;
+            }
+
+            points.push_back(translated);
+        }
+
+        binding.sequence.setPoints(std::move(points));
+
+        // The applier is copied into the binding: the registry may be the
+        // stack-local builtins above, and a reference into it would dangle the
+        // moment this function returns.
+        binding.apply = [strip, apply = parameter->apply](float value) { apply(*strip, value); };
+
+        automation->addBinding(std::move(binding));
+    }
+
+    engine::AutomationNode* automationHandle = nullptr;
+
+    if (automation->bindingCount() > 0) {
+        automationHandle = automation.get();
+        builder.addNode(std::move(automation));
+    }
+
     builder.setMaster(master);
 
     compiled.graph = builder.compile(options.sampleRate, options.maxBlockSize, options.channelCount);
@@ -213,6 +288,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     compiled.channelStrips = std::move(channelStripNodes);
     compiled.mixerNodes    = std::move(mixerIds);
     compiled.strips        = std::move(stripNodes);
+    compiled.automation    = automationHandle;
     return compiled;
 }
 

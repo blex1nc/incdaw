@@ -72,6 +72,7 @@ add_library(incdaw_project STATIC
     project/Model.cpp
     project/ProjectFile.cpp
     project/MidiCapture.cpp
+    project/ParameterRegistry.cpp
     project/PatternCompiler.cpp
     project/ProjectGraphCompiler.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -92,7 +93,8 @@ add_library(incdaw_app STATIC
     app/commands/StepCommands.cpp
     app/commands/TrackCommands.cpp
     app/commands/ClipCommands.cpp
-    app/commands/MixerCommands.cpp)
+    app/commands/MixerCommands.cpp
+    app/commands/AutomationCommands.cpp)
 target_include_directories(incdaw_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_app
     PUBLIC  incdaw_project

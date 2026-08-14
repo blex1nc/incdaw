@@ -2,10 +2,12 @@
 
 #include "engine/graph/RenderGraph.h"
 #include "engine/instrument/Instrument.h"
+#include "engine/automation/AutomationNode.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/InstrumentNode.h"
 #include "engine/transport/TempoMap.h"
 #include "project/Model.h"
+#include "project/ParameterRegistry.h"
 
 #include <cstdint>
 #include <functional>
@@ -69,6 +71,10 @@ struct GraphCompileOptions {
     std::uint64_t      randomSeed   = 0;
 
     InstrumentFactory  instrumentFactory;
+
+    /// The parameter system automation resolves keys against. Null uses the
+    /// built-ins ("volume", "pan"); tests and later phases register more.
+    const ParameterRegistry* parameters = nullptr;
 };
 
 /// A compiled graph plus the handles needed to drive it.
@@ -92,6 +98,10 @@ struct CompiledProjectGraph {
 
     /// Channel strips, in the same order as `channels`.
     std::vector<engine::dsp::MixerStripNode*> channelStrips;
+
+    /// The automation evaluator, or nullptr when no lane compiled. Owned by
+    /// `graph`, like everything else here.
+    engine::AutomationNode* automation = nullptr;
 
     std::string error;
 
