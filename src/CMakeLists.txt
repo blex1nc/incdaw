@@ -85,10 +85,18 @@ target_link_libraries(incdaw_app
 # ── ui/ : native shell. May use OS APIs; nothing depends on it ────────────────
 if(APPLE)
     add_executable(INCDAW MACOSX_BUNDLE
-        ui/macos/main.mm)
+        ui/macos/main.mm
+        ui/macos/PianoRollView.mm
+        ui/macos/PianoRollRenderer.mm)
     target_link_libraries(INCDAW
         PRIVATE incdaw_app incdaw_warnings
-                "-framework Cocoa")
+                "-framework Cocoa"
+                "-framework Metal"
+                "-framework QuartzCore")
+    # ARC for the Objective-C++ shell. The C++ core is manually managed and
+    # unaffected; only the UI layer holds Objective-C objects.
+    target_compile_options(INCDAW PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+
     set_target_properties(INCDAW PROPERTIES
         MACOSX_BUNDLE_BUNDLE_NAME        "INCDAW"
         MACOSX_BUNDLE_BUNDLE_VERSION     "${PROJECT_VERSION}"

@@ -293,3 +293,36 @@ noise, build output, machine-local Graphify state, and local tooling config.
 
 **Date:** 2026-08-14
 **Status:** ACCEPTED
+
+---
+
+## D-011 — Metal shaders are compiled at runtime, not built offline
+
+**Context:** The Piano Roll renderer needs a Metal shader. The normal path is to
+compile `.metal` files at build time with `xcrun metal` into a `.metallib`.
+Verified on this machine: `xcrun --find metal` fails — the Metal offline
+compiler ships with the full Xcode application, not with Command Line Tools,
+and only Command Line Tools are installed (docs/DECISIONS.md D-002).
+
+**Options:**
+- Compile the shader source at runtime with `newLibraryWithSource:options:error:`
+- Require a full Xcode installation and build a `.metallib` offline
+- Avoid Metal and draw with Core Graphics
+
+**Chosen:** Compile from an embedded source string at runtime, once, during
+renderer initialisation.
+
+**Reason:** It removes an 8 GB toolchain dependency from the build for what is,
+at present, a forty-line shader. Compilation happens once at startup, off every
+hot path, and the cost is not measurable against window creation. Core Graphics
+was rejected because it cannot hold 60 fps with ten thousand notes, which is the
+Phase 6 requirement.
+
+**Tradeoffs:** Shader errors surface at launch rather than at build time; the
+renderer therefore reports them explicitly and the view logs the failure instead
+of presenting a silently empty editor. Startup pays a few milliseconds. If the
+shader set grows substantially, or if a shipping build ever wants precompiled
+pipelines, this decision should be revisited — it would then require Xcode.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED

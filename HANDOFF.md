@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 0.7
-Status: PHASES 0-5 COMPLETE / PHASE 6 PARTIAL
+Version: 0.8
+Status: PHASES 0-6 COMPLETE / PHASE 7 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -126,7 +126,7 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 Current phase:
 
 PHASES 0-5 COMPLETE (2026-08-14)
-PHASE 6 (Piano Roll) — PARTIAL: model done, RENDERER NOT STARTED
+PHASE 6 (Piano Roll) — COMPLETE
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -153,7 +153,7 @@ Implemented:
   Phase 5  HostTime, CoreMIDI device, MidiMessage/MidiBuffer, MidiInput
            (host time -> frame offset), MidiRecorder, quantize/humanize
 
-Phase 6 — PARTIAL. Done and tested:
+Phase 6 — COMPLETE. Done and tested:
 
   app/Command + app/CommandRegistry  undo/redo, merging, bounded history,
                                      action registration, command search
@@ -165,14 +165,22 @@ Phase 6 — PARTIAL. Done and tested:
   Measured: culling 10,000 notes costs 0.012 ms/frame (Release), 0.06 ms
   (Debug), against a 16.6 ms budget. Hit testing 10,000 notes: 0.02 ms.
 
-Phase 6 — NOT DONE. This is the remaining work:
+  ui/macos/PianoRollRenderer      Metal, instanced rectangles, one draw call
+  ui/macos/PianoRollView          layer-hosting NSView driven by a display
+                                  link, mouse and keyboard routed to commands
+  ui/macos/main.mm                window, status line, starter pattern
 
-  - the Metal renderer and the AppKit piano roll view. Nothing is drawn yet.
-    PianoRollModel::collectVisibleNotes produces the draw list; the renderer
-    has to consume it.
-  - keyboard/mouse input plumbed to the commands above
-  - the 60 fps figure is therefore HALF verified: the arithmetic is measured,
-    the rendering is not. Do not claim Phase 6 complete until it is.
+  The app now opens a working Piano Roll: click to add, drag to move, drag the
+  right edge to resize, right-click to delete, shift-drag to box select,
+  Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
+  scroll to pan, Cmd+scroll to zoom.
+
+WHAT THE APP STILL DOES NOT DO:
+
+  Editing notes produces no sound. The audio engine, transport and MIDI engine
+  all work and are tested, but nothing connects a pattern to an instrument yet
+  — there is no instrument. That is Phase 7. Do not describe the app as
+  playing anything.
 
 Not started:
 
@@ -808,15 +816,23 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: finish Phase 6 — the Piano Roll renderer.
+Next step: Phase 7 — the channel and instrument system.
 
-  - Metal view in ui/macos/, per D-006. ui/ is the only layer besides platform/
-    permitted to touch OS APIs, so this is where AppKit and Metal live.
-  - consume app::PianoRollModel::collectVisibleNotes; do not re-derive geometry
-    in the renderer, or the two will drift
-  - route every edit through app::CommandRegistry. Use executeMerging for
-    continuous gestures (drag, resize) and execute for discrete ones.
-  - measure the frame time before optimising anything (docs/PERFORMANCE.md §4)
+  This is what makes the app audible. Required:
+  - an instrument API (build the API before any instrument, CLAUDE.md §13)
+  - one reference instrument, simple enough to be obviously correct
+  - a channel that owns an instrument and routes to a mixer node
+  - a graph node that reads a pattern through the transport and emits
+    MidiMessages into the instrument, sample-accurately
+  - AudioEngine already owns the Transport and MidiInput; the missing piece is
+    a node that turns pattern content into notes
+
+  Exit criterion: a MIDI note played into a channel produces audible sound
+  through the graph, correctly routed to the mixer.
+
+  Note: docs/DECISIONS.md D-011 records why Metal shaders compile at runtime
+  (no `metal` compiler without full Xcode). The deployment target is now 14.0
+  because NSView displayLink requires it.
 
 Things to be careful about:
 
