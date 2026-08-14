@@ -12,6 +12,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include "app/CommandRegistry.h"
+#include "app/commands/ArrangementCommands.h"
 #include "app/commands/PatternCommands.h"
 #include "app/Version.h"
 #include "engine/AudioEngine.h"
@@ -21,6 +22,7 @@
 #include "project/Model.h"
 #include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PianoRollView.h"
+#include "ui/macos/PlaylistView.h"
 
 #include <memory>
 #include <string>
@@ -84,6 +86,7 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
 @interface INCDAWAppDelegate : NSObject <NSApplicationDelegate>
 @property (strong) NSWindow*              window;
 @property (strong) INCDAWPianoRollView*   pianoRoll;
+@property (strong) INCDAWPlaylistView*    playlist;
 @property (strong) INCDAWChannelRackView* channelRack;
 @property (strong) NSTextField*           statusField;
 @end
@@ -161,6 +164,16 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
               project:_project.get()
              registry:_registry.get()];
 
+    self.playlist = [[INCDAWPlaylistView alloc]
+        initWithFrame:self.pianoRoll.frame
+              project:_project.get()
+             registry:_registry.get()];
+
+    self.playlist.patternIdValue  = patternId.value();
+    self.playlist.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    self.playlist.hidden = YES;
+    [content addSubview:self.playlist];
+
     self.channelRack.patternIdValue         = patternId.value();
     self.channelRack.selectedChannelIdValue = lead.value();
     self.channelRack.autoresizingMask       = NSViewWidthSizable | NSViewMaxYMargin;
@@ -188,6 +201,11 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
 
     // Selecting a channel decides which notes the Piano Roll edits; the rest
     // become ghost notes there rather than disappearing.
+    self.playlist.onChange = ^{
+        [weakSelf rebuildGraph];
+        [weakSelf refreshStatus];
+    };
+
     self.channelRack.onChannelSelected = ^{
         weakSelf.pianoRoll.channelIdValue = weakSelf.channelRack.selectedChannelIdValue;
         [weakSelf.pianoRoll requestRedraw];
@@ -198,6 +216,7 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
 
     __weak INCDAWAppDelegate* weakAudioSelf = self;
     self.pianoRoll.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
+    self.playlist.onTransportToggle  = ^{ [weakAudioSelf toggleTransport]; };
 
     // Drives the playhead and reclaims retired graphs. Both are non-realtime
     // work that must happen off the audio thread; 30 Hz is smooth enough for a
@@ -210,6 +229,13 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
     }];
 
     [self buildMenu];
+
+    // `--playlist` opens on the arrangement instead of the Piano Roll. It
+    // exists so that a launch can be verified without driving the menu, and it
+    // is the same code path ⌘2 takes.
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--playlist"])
+        [self showPlaylist];
+
     [self refreshStatus];
 
     [self.window makeKeyAndOrderFront:nil];
@@ -292,6 +318,24 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
     transport.setLoopEnabled(YES);
 }
 
+- (void)showPianoRoll
+{
+    self.playlist.hidden  = YES;
+    self.pianoRoll.hidden = NO;
+    [self.window makeFirstResponder:self.pianoRoll];
+    [self refreshStatus];
+}
+
+- (void)showPlaylist
+{
+    self.pianoRoll.hidden = YES;
+    self.playlist.hidden  = NO;
+    self.playlist.patternIdValue = self.pianoRoll.patternIdValue;
+    [self.playlist requestRedraw];
+    [self.window makeFirstResponder:self.playlist];
+    [self refreshStatus];
+}
+
 - (void)toggleSongMode
 {
     _mode = _mode == project::PlaybackMode::song ? project::PlaybackMode::pattern
@@ -351,6 +395,9 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
 
     [self.pianoRoll requestRedraw];
 
+    self.playlist.playheadFrame = _audio->transport().isPlaying() ? position : -1;
+    [self.playlist requestRedraw];
+
     self.channelRack.playheadTick = self.pianoRoll.playheadTick;
     [self.channelRack setNeedsDisplay:YES];
 
@@ -380,12 +427,14 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
     }
 
     self.statusField.stringValue = [NSString stringWithFormat:
-        @"INCDAW %s  ·  %@  ·  %@  ·  %lu notes  ·  %@  ·  %@  ·  space: play   ⌘M: song/pattern   "
-        @"click: add   right-click: delete   Q: quantize   ⌘Z: undo",
+        @"INCDAW %s  ·  %@  ·  %@  ·  %@  ·  %lu notes  ·  %lu clips  ·  %@  ·  %@  ·  "
+        @"space: play   ⌘1/⌘2: piano roll/playlist   ⌘M: song/pattern   ⌘Z: undo",
         app::Version::string(),
+        self.playlist.hidden ? @"piano roll" : @"playlist",
         _mode == project::PlaybackMode::song ? @"song" : @"pattern",
         channel != nullptr ? [NSString stringWithUTF8String:channel->name.c_str()] : @"—",
-        static_cast<unsigned long>(noteCount), audio, undo];
+        static_cast<unsigned long>(noteCount),
+        static_cast<unsigned long>(_project->clips().size()), audio, undo];
 }
 
 - (void)buildMenu
@@ -411,6 +460,14 @@ void addStarterBeat(project::Pattern& pattern, project::EntityId kick, project::
     [editMenu addItem:[NSMenuItem separatorItem]];
     [editMenu addItemWithTitle:@"Select All" action:nil keyEquivalent:@"a"];
     editItem.submenu = editMenu;
+
+    NSMenuItem* viewItem = [[NSMenuItem alloc] init];
+    [menuBar addItem:viewItem];
+
+    NSMenu* viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+    [viewMenu addItemWithTitle:@"Piano Roll" action:@selector(showPianoRoll) keyEquivalent:@"1"];
+    [viewMenu addItemWithTitle:@"Playlist" action:@selector(showPlaylist) keyEquivalent:@"2"];
+    viewItem.submenu = viewMenu;
 
     NSMenuItem* transportItem = [[NSMenuItem alloc] init];
     [menuBar addItem:transportItem];

@@ -169,6 +169,13 @@ std::vector<engine::SequencedNote> compileArrangement(const Project& project, En
         if (clip.type != ClipType::pattern || clip.muted)
             continue;
 
+        // A clip on a muted track, or on an unsoloed track while something else
+        // is soloed, is not played. Filtered here rather than silenced later so
+        // that the notes never reach an instrument at all — a muted track must
+        // cost nothing, not cost a voice.
+        if (clip.track.isValid() && !project.trackIsAudible(clip.track))
+            continue;
+
         const Pattern* pattern = project.findPattern(clip.source);
         if (pattern == nullptr || pattern->length <= 0)
             continue;
@@ -190,7 +197,19 @@ std::vector<engine::SequencedNote> compileArrangement(const Project& project, En
         options.randomSeed = randomSeed ^ pattern->id.value();
         options.bounded    = true;   // a clip owns exactly its span of the timeline
 
-        const std::vector<engine::SequencedNote> placed = compilePattern(*pattern, options);
+        std::vector<engine::SequencedNote> placed = compilePattern(*pattern, options);
+
+        // Clip gain on a pattern clip scales what the notes ask for, because a
+        // pattern clip carries no audio to attenuate. On an audio clip the same
+        // field is a gain in the signal path; both mean "this placement, quieter
+        // than the source", which is the property the user set.
+        if (clip.gain != 1.0) {
+            for (engine::SequencedNote& note : placed) {
+                const double scaled = static_cast<double>(note.velocity) * clip.gain;
+                note.velocity = static_cast<int>(std::clamp(scaled, 0.0, 127.0) + 0.5);
+            }
+        }
+
         notes.insert(notes.end(), placed.begin(), placed.end());
     }
 

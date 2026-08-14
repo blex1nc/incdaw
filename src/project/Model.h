@@ -362,6 +362,14 @@ public:
     /// True when at least one channel is soloed, in which case the unsoloed
     /// ones are silent regardless of their own mute state.
     [[nodiscard]] bool anyChannelSoloed() const noexcept;
+    [[nodiscard]] bool anyTrackSoloed() const noexcept;
+
+    /// Whether a track is heard, accounting for solo elsewhere and for the
+    /// folder tracks above it — muting a folder mutes everything inside it.
+    [[nodiscard]] bool trackIsAudible(EntityId track) const noexcept;
+
+    /// Clips on a track, in timeline order.
+    [[nodiscard]] std::vector<const Clip*> clipsOnTrack(EntityId track) const;
 
     /// Assets whose file cannot be found. A project with missing media still
     /// opens (docs/PROJECT_FORMAT.md §4); this is what the relink dialog lists.

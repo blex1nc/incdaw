@@ -8,6 +8,42 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 9 — Playlist / arrangement — 2026-08-14
+
+**Added**
+
+- `app/PlaylistModel` — the arrangement's geometry and hit testing, headless and
+  tested: culling to the viewport, clip hit testing back to front, resize
+  handles, box selection, bar snapping that rounds correctly before zero.
+  Clips are addressed by id, not index, because they are created, split and
+  deleted from several places.
+- `app/commands/ArrangementCommands` — resize, split, duplicate, clip gain and
+  pan, mute / lock / normalize, add / delete / rename track, track mute and
+  solo, and folder parenting. The placement commands moved here from
+  `PatternCommands`, where they no longer belonged.
+- Track mute and solo now decide what plays: a clip on a silent track is
+  dropped when the arrangement is compiled, so it costs no voice at all. Mute
+  inherits down folder tracks; solo does not (D-015).
+- Clip gain applies to a pattern clip by scaling velocity (D-014), pre-mixer,
+  and survives a save.
+- `ui/macos/PlaylistView` — the arrangement surface: click empty timeline to
+  place the current pattern, drag to move (between tracks in the same gesture),
+  drag the right edge to resize, S to split at the playhead, D to duplicate,
+  right-click or delete to remove, shift-drag to box select, click a track
+  header to mute it and shift-click to solo it.
+- ⌘1 / ⌘2 switch between the Piano Roll and the Playlist. `--playlist` opens on
+  the arrangement, so a launch can be verified without driving the menu.
+- 14 tests covering the Phase 9 exit criterion, splitting, locking, folder
+  mute inheritance, folder cycles, track deletion and clip gain persistence.
+
+**Changed**
+
+- `ui/macos/PianoRollRenderer` is now `ui/macos/RectangleRenderer`. It was never
+  specific to the Piano Roll, and the Playlist needs exactly the same thing — a
+  second copy of Metal device, pipeline and buffer management would have been a
+  second place for the same bug to live.
+
+
 ### Phase 8 — Pattern system — 2026-08-14
 
 **Added**

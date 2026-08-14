@@ -401,3 +401,69 @@ a second place that builds graphs.
 
 **Date:** 2026-08-14
 **Status:** ACCEPTED
+
+
+---
+
+## D-014 — Clip gain on a pattern clip scales velocity
+
+**Context:** `Clip::gain` exists on every clip type, and Phase 9's exit
+criterion requires clip gain to be applied pre-mixer. An audio clip has a signal
+to attenuate. A pattern clip has none — it has notes.
+
+**Options:**
+- Apply gain only to audio clips; ignore it on pattern clips
+- Scale note velocity when compiling a pattern clip
+- Insert a per-clip gain node into the render graph for every clip
+
+**Chosen:** Scale velocity, in `compileArrangement`, where the clip is placed.
+
+**Reason:** Both meanings answer the same user intent — *this placement, quieter
+than the source* — and doing it at compile time costs nothing at render time.
+Ignoring the field would have left a control in the model and the UI that
+silently did nothing on the clip type the project currently has most of. A gain
+node per clip was rejected as the wrong shape: clips come and go constantly
+while dragging, and a graph that changes topology on every drag frame is a graph
+that spends its time being rebuilt.
+
+**Tradeoffs:** Velocity is not gain. A synth that maps velocity to filter cutoff
+as well as level will change timbre, not just loudness, when a pattern clip's
+gain is lowered — which is musically defensible but is not what "gain" means in
+the audio domain. Audio clips will use the same field as a true signal gain when
+they arrive, so one field will have two precise meanings, documented here and at
+the call site. Velocity is also quantised to 0–127, so very small gain changes
+on quiet notes round away.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-015 — Solo applies to a track, mute inherits down a folder
+
+**Context:** Tracks can be nested in folder tracks. Both mute and solo exist on
+every track, and the arrangement compiler has to decide what a clip inside a
+muted or unsoloed folder does.
+
+**Options:**
+- Both mute and solo inherit from folders
+- Mute inherits, solo applies only to the track itself
+- Neither inherits; folders are visual grouping only
+
+**Chosen:** Mute inherits down the folder chain; solo applies to the track it is
+set on.
+
+**Reason:** Muting a folder to silence a section is the reason folders are worth
+having on a busy arrangement, so mute has to inherit. Solo is the opposite kind
+of gesture — it is "let me hear this one thing" — and a soloed track inside an
+unsoloed folder must still be heard, or soloing would depend on where the track
+happens to be filed.
+
+**Tradeoffs:** Soloing a folder is expressed by soloing the folder itself, which
+is a second gesture rather than an implicit one. `Project::trackIsAudible` walks
+the parent chain with a depth limit, because a project file is untrusted input
+and a parent cycle in it must not hang the compiler;
+`SetTrackParentCommand` refuses to create one in the first place.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED

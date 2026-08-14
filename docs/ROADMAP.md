@@ -136,6 +136,20 @@ track folders and lanes; markers and regions.
 **Exit criterion:** a full arrangement plays back sample-accurately; clip gain
 and normalize are applied pre-mixer and are recallable from the project file.
 
+**Status: PARTIALLY MET (2026-08-14).** `tests/unit/PlaylistTests.cpp`, "a full
+arrangement plays back sample-accurately" — three bars of pattern clips with a
+silent gap, rendered through the compiled graph, onsets landing within a few
+frames of each clip's start and nothing before it. Clip gain applies pre-mixer
+and survives a save (D-014); `normalize` serializes but has nothing to
+normalize yet.
+
+Pattern clips, free placement, split, resize, duplicate, move between tracks,
+mute, lock, colour, track folders with inherited mute (D-015), and box selection
+are implemented and tested. **Not implemented:** audio clips, stretching, fades
+and crossfades, markers and regions, clip grouping, track lanes. All four depend
+on audio clips, which need a file reader and a sample-playing node — Phases 12
+and 14.
+
 ---
 
 ## Phase 10 — Mixer and routing

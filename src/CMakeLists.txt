@@ -84,9 +84,11 @@ add_library(incdaw_app STATIC
     app/Version.cpp
     app/CommandRegistry.cpp
     app/PianoRollModel.cpp
+    app/PlaylistModel.cpp
     app/StepSequencerModel.cpp
     app/commands/NoteCommands.cpp
-    app/commands/PatternCommands.cpp)
+    app/commands/PatternCommands.cpp
+    app/commands/ArrangementCommands.cpp)
 target_include_directories(incdaw_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_app
     PUBLIC  incdaw_project
@@ -98,7 +100,8 @@ if(APPLE)
         ui/macos/main.mm
         ui/macos/PianoRollView.mm
         ui/macos/ChannelRackView.mm
-        ui/macos/PianoRollRenderer.mm)
+        ui/macos/PlaylistView.mm
+        ui/macos/RectangleRenderer.mm)
     target_link_libraries(INCDAW
         PRIVATE incdaw_app incdaw_warnings
                 "-framework Cocoa"

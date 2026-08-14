@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.0
-Status: PHASES 0-8 COMPLETE / PHASE 9 NEXT
+Version: 1.1
+Status: PHASES 0-9 COMPLETE (9 PARTIAL) / PHASE 10 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -126,7 +126,7 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 Current phase:
 
 PHASES 0-8 COMPLETE (2026-08-14)
-PHASE 9 (playlist) — NOT STARTED
+PHASE 9 (playlist) — PARTIAL: pattern clips yes, audio clips no
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -138,7 +138,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  246 test cases, 30,872 assertions, green.
+  260 test cases, 35,476 assertions, green.
   Zero compiler warnings (-Werror is on).
 
 Implemented:
@@ -236,14 +236,45 @@ Phase 8 — COMPLETE. Done and tested:
   plays identically at both placements". Verified on hardware: the app launches,
   Metal is ready, CoreAudio runs at 48 kHz / 256 frames, first frame drawn.
 
+Phase 9 — PARTIAL. Done and tested:
+
+  app/PlaylistModel              viewport, culling, hit testing, resize handles,
+                                 box selection, bar snap. Clips addressed by id,
+                                 not index — they are split and deleted from too
+                                 many places for an index to keep its meaning.
+  app/commands/Arrangement...    resize, split, duplicate, clip gain/pan,
+                                 mute/lock/normalize, track add/delete/rename,
+                                 track mute/solo, folder parenting with cycle
+                                 refusal. The placement commands moved here out
+                                 of PatternCommands.
+  track mute/solo in compile     a clip on a silent track is dropped before it
+                                 reaches an instrument. Mute inherits down
+                                 folders, solo does not (D-015).
+  clip gain                      scales velocity on a pattern clip (D-014),
+                                 pre-mixer, and survives a save.
+  ui/macos/PlaylistView          place, drag (across tracks), resize, split (S),
+                                 duplicate (D), delete, box select, track
+                                 mute/solo from the header. Cmd+1 / Cmd+2 switch
+                                 surfaces; --playlist opens on the arrangement.
+  ui/macos/RectangleRenderer     was PianoRollRenderer. Both surfaces are
+                                 rectangles and now share one Metal renderer.
+
+  Exit criterion PARTIALLY MET: "a full arrangement plays back sample-accurately"
+  passes (three bars, silent gap, onsets within a few frames of each clip start,
+  nothing before). `normalize` serializes but has nothing to normalize yet.
+
+  NOT implemented in Phase 9, and all four wait on audio clips (Phases 12/14,
+  which need a file reader and a sample-playing node): audio clips, time
+  stretching, fades and crossfades, markers and regions, clip grouping, lanes.
+
 WHAT THE APP STILL DOES NOT DO:
 
   - no mixer: the signal path is instrument -> channel strip -> master gain ->
     device. MixerNode/RoutingConnection serialize but nothing evaluates them.
   - no automation: AutomationLane serializes, nothing reads it.
-  - no playlist UI: pattern clips play in song mode (Cmd+M) and AddPatternClip/
-    Move/Delete commands exist, but there is no timeline to see or drag them on.
-    Song mode places the first pattern once so the mode is not a silent puzzle.
+  - no audio clips: the playlist arranges pattern clips only. Clip::source can
+    name an AudioAsset and it will serialize, but nothing renders it.
+  - no markers, regions, lanes, fades, crossfades or time stretching.
   - no audio clips, no recording into the timeline, no plugins, no sampler.
   - the project is never saved from the UI: ProjectFile works and is tested,
     but no menu action calls it.
@@ -254,14 +285,12 @@ WHAT THE APP STILL DOES NOT DO:
 
 Not started:
 
-  Phase 9  Playlist (clips play in song    Phase 15  Built-in DSP
-           mode; no timeline UI)           Phase 16  MIDI hardware
-  Phase 10 Mixer/routing (model exists,    Phase 17  Render/export
-           no signal path)                 Phase 18  Performance
-  Phase 11 Automation (model exists,       Phase 19  QA
-           no evaluation)                  Phase 20  Release
-  Phase 12 Recording/audio editor
-  Phase 13 Plugin hosting
+  Phase 10 Mixer/routing (model exists,    Phase 15  Built-in DSP
+           no signal path)                 Phase 16  MIDI hardware
+  Phase 11 Automation (model exists,       Phase 17  Render/export
+           no evaluation)                  Phase 18  Performance
+  Phase 12 Recording/audio editor          Phase 19  QA
+  Phase 13 Plugin hosting                  Phase 20  Release
   Phase 14 Sampler
 
 Important: MixerNode, RoutingConnection and AutomationLane still SERIALIZE but
@@ -875,13 +904,14 @@ All systems must share the same underlying transport, timing, project state and 
 
 # 22. CURRENT HANDOFF MESSAGE
 
-Phases 0-8 are implemented, tested and committed. The engine makes sound, keeps
+Phases 0-9 are implemented, tested and committed (9 partial — no audio
+clips). The engine makes sound, keeps
 sample-accurate time, saves and loads a versioned project, and now plays what
 the project model says rather than what the UI hardcodes.
 
 Read first:
 
-1. docs/DECISIONS.md    — what was decided and why (D-001..D-013)
+1. docs/DECISIONS.md    — what was decided and why (D-001..D-015)
 2. docs/ARCHITECTURE.md — layers, threading, data model, commands
 3. docs/ROADMAP.md      — phases and their exit criteria
 4. git log              — each phase is one commit with its rationale
@@ -892,15 +922,10 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 9 (playlist), then 10 (mixer) and 11 (automation).
+Next step: Phase 10 (mixer), then 11 (automation).
 
   In dependency order:
 
-  9  the playlist: a timeline view for the clips that already play. The model
-     (Clip), the commands (AddPatternClip / MoveClip / DeleteClip) and the
-     playback path (compileArrangement, song mode) all exist and are tested —
-     Phase 9 is the editing surface plus split, resize, stretch, fade, clip
-     gain, track folders, markers.
   10 the mixer: make MixerNode and RoutingConnection compile into the render
      graph, with PDC. ChannelStripNode already gives each channel its volume
      and pan; the mixer goes between the strips and the master.
@@ -914,8 +939,14 @@ Next step: Phase 9 (playlist), then 10 (mixer) and 11 (automation).
 
   Also note: a pattern list UI does not exist. The app opens one pattern and
   the rack shows it; AddPattern/Duplicate/Delete commands are implemented and
-  tested but nothing in the UI invokes them yet. That is a small, obvious first
-  task if you want a warm-up before the playlist.
+  tested but nothing in the UI invokes them yet. That is still the smallest
+  obvious task in the repository, and the playlist needs it — placing a second
+  pattern currently requires editing the one that exists.
+
+  The Phase 9 remainder (audio clips, fades, stretching, markers) is deliberately
+  deferred, not forgotten: it needs an audio file reader and a sample-playing
+  node, which are Phases 12 and 14. Doing it before them would have meant a fake
+  waveform editor, which CLAUDE.md §17 forbids.
 
   docs/DECISIONS.md D-011 records why Metal shaders compile at runtime (no
   `metal` compiler without full Xcode). Deployment target is 14.0 for NSView
@@ -946,6 +977,10 @@ Things to be careful about:
   - A pattern's length is a loop marker, not a guillotine: compilePattern only
     truncates when `bounded` is set or the content repeats. Clips set it;
     pattern mode does not.
+  - Clip positions are FRAMES, not ticks. compileArrangement converts through
+    the tempo map. That means a clip does not follow a tempo change the way a
+    note does — a known consequence of the Phase 4 model, worth revisiting if
+    tempo automation ever lands (it would belong in Phase 11).
 
 ---
 

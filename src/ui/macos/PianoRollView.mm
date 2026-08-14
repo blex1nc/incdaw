@@ -3,7 +3,7 @@
 #include "app/CommandRegistry.h"
 #include "app/PianoRollModel.h"
 #include "app/commands/NoteCommands.h"
-#include "ui/macos/PianoRollRenderer.h"
+#include "ui/macos/RectangleRenderer.h"
 
 #import <QuartzCore/CAMetalLayer.h>
 #import <QuartzCore/CADisplayLink.h>
@@ -54,7 +54,7 @@ enum class DragMode { none, move, resize, boxSelect };
     app::CommandRegistry* _registry;
 
     std::unique_ptr<app::PianoRollModel>   _model;
-    std::unique_ptr<ui::PianoRollRenderer> _renderer;
+    std::unique_ptr<ui::RectangleRenderer> _renderer;
 
     std::vector<ui::Rect>                        _rectangles;
     std::vector<app::PianoRollModel::VisibleNote> _visible;
@@ -84,7 +84,7 @@ enum class DragMode { none, move, resize, boxSelect };
     _project  = project;
     _registry = registry;
     _model    = std::make_unique<app::PianoRollModel>();
-    _renderer = std::make_unique<ui::PianoRollRenderer>();
+    _renderer = std::make_unique<ui::RectangleRenderer>();
 
     _dragMode         = DragMode::none;
     _dragAppliedTicks = 0;

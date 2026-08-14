@@ -3,6 +3,7 @@
 #include "app/CommandRegistry.h"
 #include "app/PianoRollModel.h"
 #include "app/StepSequencerModel.h"
+#include "app/commands/ArrangementCommands.h"
 #include "app/commands/PatternCommands.h"
 #include "engine/core/AudioBufferPool.h"
 #include "engine/dsp/ChannelStripNode.h"

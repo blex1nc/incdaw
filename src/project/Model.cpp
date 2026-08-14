@@ -1,5 +1,6 @@
 #include "project/Model.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <utility>
 
@@ -177,6 +178,59 @@ bool Project::anyChannelSoloed() const noexcept
             return true;
 
     return false;
+}
+
+bool Project::anyTrackSoloed() const noexcept
+{
+    for (const Track& track : tracks_)
+        if (track.soloed)
+            return true;
+
+    return false;
+}
+
+bool Project::trackIsAudible(EntityId track) const noexcept
+{
+    const bool anySoloed = anyTrackSoloed();
+
+    // Walks up through folder tracks. A muted folder silences everything inside
+    // it, which is the only reason folders are worth having on a busy
+    // arrangement. The depth limit is not paranoia: a project file is untrusted
+    // input and a parent cycle in it must not hang the compiler.
+    EntityId current = track;
+
+    for (int depth = 0; depth < 64 && current.isValid(); ++depth) {
+        const Track* entry = findTrack(current);
+        if (entry == nullptr)
+            return false;
+
+        if (entry->muted)
+            return false;
+
+        // Solo applies to the track itself, not to its folders: soloing a
+        // folder is expressed by soloing it, and a soloed track inside an
+        // unsoloed folder still plays.
+        if (current == track && anySoloed && !entry->soloed)
+            return false;
+
+        current = entry->parent;
+    }
+
+    return true;
+}
+
+std::vector<const Clip*> Project::clipsOnTrack(EntityId track) const
+{
+    std::vector<const Clip*> result;
+
+    for (const Clip& clip : clips_)
+        if (clip.track == track)
+            result.push_back(&clip);
+
+    std::sort(result.begin(), result.end(),
+              [](const Clip* a, const Clip* b) { return a->start < b->start; });
+
+    return result;
 }
 
 const PatternChannelSettings* Pattern::settingsFor(EntityId channel) const noexcept

@@ -1,4 +1,4 @@
-#include "ui/macos/PianoRollRenderer.h"
+#include "ui/macos/RectangleRenderer.h"
 
 #import <Foundation/Foundation.h>
 
@@ -54,9 +54,9 @@ fragment float4 fragmentMain(VertexOut in [[stage_in]])
 
 } // namespace
 
-PianoRollRenderer::~PianoRollRenderer() = default;
+RectangleRenderer::~RectangleRenderer() = default;
 
-bool PianoRollRenderer::initialise(CAMetalLayer* layer, std::string& error)
+bool RectangleRenderer::initialise(CAMetalLayer* layer, std::string& error)
 {
     device_ = MTLCreateSystemDefaultDevice();
     if (device_ == nil) {
@@ -109,7 +109,7 @@ bool PianoRollRenderer::initialise(CAMetalLayer* layer, std::string& error)
     return true;
 }
 
-bool PianoRollRenderer::ensureInstanceCapacity(std::size_t count)
+bool RectangleRenderer::ensureInstanceCapacity(std::size_t count)
 {
     if (count <= instanceCapacity_ && instances_ != nil)
         return true;
@@ -129,7 +129,7 @@ bool PianoRollRenderer::ensureInstanceCapacity(std::size_t count)
     return true;
 }
 
-void PianoRollRenderer::draw(CAMetalLayer* layer, const std::vector<Rect>& rectangles,
+void RectangleRenderer::draw(CAMetalLayer* layer, const std::vector<Rect>& rectangles,
                              float widthPoints, float heightPoints)
 {
     if (pipeline_ == nil || layer == nil || widthPoints <= 0.0f || heightPoints <= 0.0f)
