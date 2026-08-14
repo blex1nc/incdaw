@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 0.6
-Status: PHASES 0-5 COMPLETE / PHASE 6 NEXT
+Version: 0.7
+Status: PHASES 0-5 COMPLETE / PHASE 6 PARTIAL
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -126,7 +126,7 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 Current phase:
 
 PHASES 0-5 COMPLETE (2026-08-14)
-PHASE 6 (Piano Roll) — NOT STARTED
+PHASE 6 (Piano Roll) — PARTIAL: model done, RENDERER NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -138,7 +138,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  156 test cases, 29,858 assertions, green in both Debug and Release.
+  201 test cases, 30,450 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
 Implemented:
@@ -153,9 +153,30 @@ Implemented:
   Phase 5  HostTime, CoreMIDI device, MidiMessage/MidiBuffer, MidiInput
            (host time -> frame offset), MidiRecorder, quantize/humanize
 
+Phase 6 — PARTIAL. Done and tested:
+
+  app/Command + app/CommandRegistry  undo/redo, merging, bounded history,
+                                     action registration, command search
+  app/commands/NoteCommands          add, delete, move, resize, velocity,
+                                     quantize — all reversible, drags merge
+  app/PianoRollModel                 viewport, culling, hit testing, box
+                                     selection, snap, selection bookkeeping
+
+  Measured: culling 10,000 notes costs 0.012 ms/frame (Release), 0.06 ms
+  (Debug), against a 16.6 ms budget. Hit testing 10,000 notes: 0.02 ms.
+
+Phase 6 — NOT DONE. This is the remaining work:
+
+  - the Metal renderer and the AppKit piano roll view. Nothing is drawn yet.
+    PianoRollModel::collectVisibleNotes produces the draw list; the renderer
+    has to consume it.
+  - keyboard/mouse input plumbed to the commands above
+  - the 60 fps figure is therefore HALF verified: the arithmetic is measured,
+    the rendering is not. Do not claim Phase 6 complete until it is.
+
 Not started:
 
-  Phase 6  Piano Roll (Metal)              Phase 13  Plugin hosting
+  Phase 7  Channels/instruments            Phase 13  Plugin hosting
   Phase 7  Channels/instruments            Phase 14  Sampler
   Phase 8  Patterns (model exists, no      Phase 15  Built-in DSP
            playback)                       Phase 16  MIDI hardware
@@ -787,15 +808,15 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 6, the Piano Roll.
+Next step: finish Phase 6 — the Piano Roll renderer.
 
-  - Metal-rendered editing surface in ui/, per D-006
-  - exit criterion is 60 fps with 10,000 notes, so viewport culling is part of
-    the design, not an optimisation added later
-  - every edit must go through a command object; the command registry does not
-    exist yet and Phase 6 is where it has to be built (docs/ARCHITECTURE.md §6)
-  - the note model already exists: project::MidiEvent, with label, probability,
-    pan and fine tune. Do not introduce a second one.
+  - Metal view in ui/macos/, per D-006. ui/ is the only layer besides platform/
+    permitted to touch OS APIs, so this is where AppKit and Metal live.
+  - consume app::PianoRollModel::collectVisibleNotes; do not re-derive geometry
+    in the renderer, or the two will drift
+  - route every edit through app::CommandRegistry. Use executeMerging for
+    continuous gestures (drag, resize) and execute for discrete ones.
+  - measure the frame time before optimising anything (docs/PERFORMANCE.md §4)
 
 Things to be careful about:
 

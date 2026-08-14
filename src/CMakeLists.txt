@@ -73,7 +73,10 @@ target_link_libraries(incdaw_project
 
 # ── app/ : command registry, undo, session ────────────────────────────────────
 add_library(incdaw_app STATIC
-    app/Version.cpp)
+    app/Version.cpp
+    app/CommandRegistry.cpp
+    app/PianoRollModel.cpp
+    app/commands/NoteCommands.cpp)
 target_include_directories(incdaw_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_app
     PUBLIC  incdaw_project

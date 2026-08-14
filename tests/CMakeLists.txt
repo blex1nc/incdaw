@@ -14,13 +14,17 @@ add_executable(incdaw_tests
     unit/TempoMapTests.cpp
     unit/TransportTests.cpp
     unit/ProjectFormatTests.cpp
-    unit/MidiTests.cpp)
+    unit/MidiTests.cpp
+    unit/CommandTests.cpp
+    unit/PianoRollTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.
+# incdaw_app pulls in project -> engine -> platform transitively; listing them
+# again here puts the same archive on the link line twice and ld warns about it.
 target_link_libraries(incdaw_tests
     PRIVATE doctest
-            incdaw_project
+            incdaw_app
             incdaw_plugins
             incdaw_warnings)
 
