@@ -8,6 +8,36 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 11a — Automation: the generic subsystem — 2026-08-15
+
+**Added**
+
+- `engine/automation/AutomationSequence` — sorted points, binary-search
+  evaluation: linear, hold, smoothstep, exponential, tension.
+- `engine/automation/AutomationNode` — evaluates every lane per block inside
+  the graph; dies with it, so appliers cannot dangle.
+- `project/ParameterRegistry` — key → normalised-value-to-strip mapping;
+  "volume" (through the fader's cubic law) and "pan" built in.
+- `app/commands/AutomationCommands` — lane add/remove, wholesale point edits
+  (points stay sorted), merged drags.
+- `tests/unit/AutomationTests.cpp` — 8 cases, including the exit criterion via
+  an unknown key, graph-driven volume/pan, realtime safety, command round trips.
+
+**Fixed**
+
+- System-wide crackle: CoreAudioDevice forced the shared device's buffer to 256
+  and never restored it (now recorded and restored in close; default request is
+  512), and the render graph was compiled for the current buffer size while a
+  shared device can deliver its maximum — AirPods report 15..960 — so oversized
+  blocks were truncated into a duty-cycled buzz (graphs now compile for
+  `maxServiceableBlockSize`).
+
+**Known gaps**
+
+- No automation UI, no automation clips, no recording modes (11b). Pattern
+  automation lanes still serialize without being evaluated. **Phase 11 is not
+  complete.**
+
 ### Phase 10 — Mixer, routing and delay compensation — 2026-08-14
 
 **Added**

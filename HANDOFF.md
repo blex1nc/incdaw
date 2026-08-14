@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.3
-Status: PHASES 0-10 COMPLETE (9b OUTSTANDING) / PHASE 11 NEXT
+Version: 1.4
+Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -129,7 +129,8 @@ PHASES 0-8 COMPLETE (2026-08-14)
 PHASE 9a (playlist: pattern arrangement) — COMPLETE
 PHASE 9b (playlist: audio clips) — NOT STARTED, needs a file reader
 PHASE 10 (mixer, routing, PDC) — COMPLETE
-PHASE 11 (automation) — NOT STARTED
+PHASE 11a (automation subsystem) — COMPLETE
+PHASE 11b (automation UI, clips, recording) — NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -141,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  287 test cases, 31,182 assertions, green in both Debug and Release.
+  295 test cases, 31,258 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -180,6 +181,32 @@ Phase 6 — COMPLETE. Done and tested:
   right edge to resize, right-click to delete, shift-drag to box select,
   Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
   scroll to pan, Cmd+scroll to zoom.
+
+Phase 11a — COMPLETE. Done and tested:
+
+  engine/automation/AutomationSequence  points, linear/hold/smooth/exponential,
+                                        tension; envelope semantics
+  engine/automation/AutomationNode      per-block evaluation inside the graph,
+                                        writes through the mixer's smoothed
+                                        setters, dies with the graph (D-022)
+  project/ParameterRegistry             key -> strip applier; "volume" (cubic
+                                        fader law) and "pan" built in. THE exit
+                                        criterion: registering a key is all a
+                                        parameter needs — tested with a key the
+                                        codebase has never heard of
+  app/commands/AutomationCommands       lane add/remove; point edits replace the
+                                        whole vector (sorted-order safety);
+                                        drags merge into one undo
+
+  Offline render equivalence is by construction: the evaluator is a node in the
+  same graph the offline path renders. Rendering allocates nothing (guarded).
+
+  ALSO: fixed the system-wide crackle. CoreAudioDevice forced the SHARED
+  device's buffer size to 256 and never restored it (Bluetooth cannot sustain
+  that; the setting outlived the app). And the graph was compiled for the
+  device's current buffer while a shared device delivers up to its maximum —
+  AirPods report 15..960 — so oversized callbacks were truncated into a
+  duty-cycled buzz. See "Things to be careful about".
 
 Phase 10 — COMPLETE. Done and tested:
 
@@ -317,10 +344,10 @@ Phase 7 — COMPLETE. Done and tested:
 
 WHAT THE APP STILL DOES NOT DO:
 
-  - no automation: AutomationLane serializes, nothing evaluates it. THIS IS
-    PHASE 11, and the mixer is now the obvious first customer — a fader move
-    already writes straight to the rendering strip, which is the same path an
-    automation curve will use.
+  - no automation UI: lanes evaluate and play (11a), but nothing lets the user
+    draw one — no lane editor, no automation clips, no write/touch/latch
+    recording. THIS IS PHASE 11b. Pattern::automationLanes still serializes
+    without being evaluated.
 
   - no audio clips at all: there is no WAV reader, no decoder and no disk
     streaming anywhere in the tree. Clip gain, normalize, fades, crossfades,
@@ -339,7 +366,7 @@ WHAT THE APP STILL DOES NOT DO:
 Not started:
 
   Phase 9b Audio clips (needs a reader)    Phase 15  Built-in DSP
-  Phase 11 Automation                      Phase 16  MIDI hardware
+  Phase 11b Automation UI/clips/recording  Phase 16  MIDI hardware
   Phase 10 Mixer/routing (model exists,    Phase 16  MIDI hardware
            no signal path)                 Phase 17  Render/export
   Phase 11 Automation (model exists,       Phase 18  Performance
@@ -975,24 +1002,21 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 11 (automation), with Phase 9b (audio clips) waiting on a file
-reader that belongs with Phase 12.
+Next step: Phase 12 (recording + the audio file subsystem), which also unlocks
+9b (audio clips) and 11b's automation recording. The WAV reader/writer and the
+disk streamer are the gate for all three.
 
-  Phase 11 is automation, and the seams it needs now exist:
+  Phase 12 is recording and the audio editor, and it is the gate for the two
+  outstanding halves (9b audio clips, 11b automation recording):
 
-    - AutomationLane already serializes and names its target by entity id plus
-      a parameter key; nothing evaluates it
-    - the mixer shows what the evaluation should drive: MixerView writes fader
-      and pan straight to the rendering MixerStripNode without recompiling, and
-      an automation curve is the same write on a schedule
-    - CLAUDE.md §10 is the constraint that matters: ONE generic subsystem, no
-      per-parameter code. That means a parameter registry — id + key -> setter —
-      rather than a switch over parameter names
-    - the exit criterion in docs/ROADMAP.md: any parameter registered in the
-      parameter system is automatable with no parameter-specific code
-
-  Phase 9b (audio clips) still needs a WAV reader and a disk streamer, which is
-  a subsystem rather than a feature and belongs with Phase 12's recording work.
+    - a WAV reader/writer and a disk streamer are the actual subsystem; the
+      AudioAsset model type has been waiting for them since Phase 4
+    - input capture goes through CoreAudioDevice, which only opens output today
+    - the roadmap's exit criterion is a measured loopback test: recorded audio
+      lands sample-accurately against the source, proving reported device
+      latency is correctly applied
+    - the UI story (waveform view, trim, fade, normalize) comes after audio
+      exists to look at
 
 Things to be careful about:
 

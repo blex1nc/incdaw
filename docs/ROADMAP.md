@@ -197,6 +197,19 @@ recording modes, copy/paste, scaling.
 **Exit criterion:** any parameter registered in the parameter system is
 automatable with no parameter-specific code.
 
+**11a — the subsystem: COMPLETE (2026-08-15).** `ParameterRegistry` +
+`AutomationSequence` + `AutomationNode` (D-022): points, linear/hold/smooth/
+exponential segments, tension, per-block evaluation through the mixer's
+smoothed setters, offline-render equivalence by construction. Exit criterion
+tested by registering an unknown key and automating it through the compiled
+graph. Commands: lane add/remove, wholesale point edits, merged drags.
+
+**11b — the UI and the rest: NOT STARTED.** Lane/clip editing surfaces,
+automation clips in the playlist, recording modes (write/touch/latch),
+copy/paste and scaling. `Pattern::automationLanes` still serializes without
+being evaluated — pattern-scoped automation joins the arrangement work in 11b.
+**Phase 11 is not complete.**
+
 ---
 
 ## Phase 12 — Recording and audio editor

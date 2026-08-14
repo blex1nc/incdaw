@@ -637,3 +637,41 @@ machinery to arrive with it rather than before it.
 **Date:** 2026-08-14
 **Status:** ACCEPTED
 
+---
+
+## D-022 — Automation is a registry plus a node, evaluated per block
+
+**Context:** CLAUDE.md §10 requires one generic automation subsystem; the
+roadmap's exit criterion is that a registered parameter is automatable with no
+parameter-specific code. Something has to know what "volume" means, and
+something has to run the envelopes.
+
+**Options:**
+- Evaluate on a UI timer, writing to the engine at 30 Hz
+- Evaluate on the audio thread from a node compiled into the graph
+- Give every parameter its own automation implementation as needed
+
+**Chosen:** A `ParameterRegistry` (key → how a normalised value lands on a
+strip) plus an `AutomationNode` compiled into the graph, evaluating every lane
+once per block and writing through the same smoothed atomic setters the mixer's
+fader uses.
+
+**Reason:** A UI timer stops automating when the window is busy and knows
+nothing of offline rendering; the node rides the graph's execution order, sees
+the same `playPosition` the instruments see, and therefore renders offline
+identically for free. Per-block resolution cannot click because every setter it
+reaches is smoothed. The registry is the one place parameter meaning lives —
+the exit-criterion test registers a key the codebase has never seen and
+automates it, which is what proves nothing else needed to know.
+
+**Tradeoffs:** Resolution is one value per block (~5 ms at 256/48k), which is
+inaudible through the smoothers but is not sample-accurate; if a curve ever
+needs audio-rate precision (an LFO-as-automation), that becomes a modulation
+source in the instrument framework (Phase 15), not a faster automation lane.
+Appliers are `std::function`s called on the audio thread — they must capture
+only pointers owned by the same graph, which the compiler guarantees and the
+header documents.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED
+
