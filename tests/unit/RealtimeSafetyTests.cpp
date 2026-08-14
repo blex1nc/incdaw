@@ -4,11 +4,24 @@
 #include "engine/core/LockFreeQueue.h"
 #include "engine/core/RealtimeGuard.h"
 
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <thread>
 #include <vector>
 
 using namespace incdaw::engine;
+
+namespace {
+
+/// Opaque to the optimiser, so the allocation below cannot be folded away.
+std::size_t allocationSize() noexcept
+{
+    static std::atomic<std::size_t> size{64};
+    return size.load(std::memory_order_relaxed);
+}
+
+} // namespace
 
 TEST_CASE("this build actually enforces realtime safety")
 {
@@ -27,8 +40,18 @@ TEST_CASE("the guard notices an allocation inside a realtime scope")
         CHECK(rt::isInsideRealtimeContext());
 
         // Deliberate violation — this is what the guard exists to catch.
-        volatile auto* leaked = new int(7);
-        delete leaked;
+        //
+        // Called through ::operator new rather than written as a new-expression
+        // on purpose. C++14 permits the compiler to elide the allocation in a
+        // new-expression, and at -O2 clang does exactly that, so the earlier
+        // form tested nothing in release builds. A direct ::operator new call is
+        // not elidable.
+        //
+        // (An elided allocation is not a realtime violation — it never
+        // happened. The guard's job is to catch the ones that do.)
+        void* memory = ::operator new(allocationSize());
+        CHECK(memory != nullptr);
+        ::operator delete(memory);
     }
 
     CHECK_FALSE(rt::isInsideRealtimeContext());
@@ -72,8 +95,8 @@ TEST_CASE("an exemption suspends the guard and restores it")
         {
             const rt::ScopedRealtimeExemption exemption{"test"};
             CHECK_FALSE(rt::isInsideRealtimeContext());
-            volatile auto* allocated = new int(1);
-            delete allocated;
+            void* memory = ::operator new(allocationSize());
+            ::operator delete(memory);
         }
         CHECK(rt::isInsideRealtimeContext());
     }

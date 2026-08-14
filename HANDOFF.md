@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 0.2
-Status: PHASE 0 COMPLETE / AWAITING PHASE 1 APPROVAL
+Version: 0.5
+Status: PHASES 0-4 COMPLETE / PHASE 5 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -125,55 +125,68 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 
 Current phase:
 
-PHASE 0 — COMPLETE (2026-08-14)
-PHASE 1 — NOT STARTED
+PHASES 0-4 COMPLETE (2026-08-14)
+PHASE 5 (MIDI engine) — NOT STARTED
 
-Phase 0 delivered discovery, architecture decisions, and the documentation set.
-No source code exists. See docs/ROADMAP.md for phase gates.
+The user authorised continuous execution through the phases, which supersedes
+the per-phase approval gate in CLAUDE.md for this run. Each phase is still
+gated on its own testable exit criterion (docs/ROADMAP.md) and committed
+separately.
 
-Implementation status:
+Build state:
 
-NOT STARTED
+  cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
+  ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-Production audio engine:
+  125 test cases, 29,609 assertions, green in both Debug and Release.
+  Zero compiler warnings (-Werror is on).
 
-NOT STARTED — designed in docs/AUDIO_ENGINE.md, target Phase 2
+Implemented:
 
-MIDI engine:
+  Phase 0  documentation + decisions D-001..D-010
+  Phase 1  CMake/Ninja, six layer libraries, doctest, layering test, DMG
+  Phase 2  CoreAudio device, realtime guard, lock-free queue, render graph,
+           AudioEngine with atomic graph swap, sine/gain nodes, profiler
+  Phase 3  TempoMap, Transport, block-split plan, MetronomeNode
+  Phase 4  Json (deterministic), full entity model, .incdaw v1.0, migration
+           hook, permanent v1.0 fixture
 
-NOT STARTED — target Phase 5
+Not started:
 
-Project format:
+  Phase 5  MIDI engine (CoreMIDI in/out, recording, quantize, MPE-ready)
+  Phase 6  Piano Roll (Metal)              Phase 13  Plugin hosting
+  Phase 7  Channels/instruments            Phase 14  Sampler
+  Phase 8  Patterns (model exists, no      Phase 15  Built-in DSP
+           playback)                       Phase 16  MIDI hardware
+  Phase 9  Playlist                        Phase 17  Render/export
+  Phase 10 Mixer/routing (model exists,    Phase 18  Performance
+           no signal path)                 Phase 19  QA
+  Phase 11 Automation (model exists,       Phase 20  Release
+           no evaluation)
+  Phase 12 Recording/audio editor
 
-NOT STARTED — v1.0 designed in docs/PROJECT_FORMAT.md, target Phase 4
-
-UI:
-
-NOT STARTED — target Phase 6
-
-Plugin host:
-
-NOT STARTED — designed in docs/PLUGIN_HOST.md, target Phase 13
-
-Testing:
-
-NOT STARTED — strategy in docs/TESTING.md, infrastructure lands in Phase 1
-
-Release system:
-
-NOT STARTED — DMG pipeline designed (D-009), scripted in Phase 1
-
-Version control:
-
-INITIALISED — git, branch `main` (D-010)
+Important: several Phase 4 model types (MixerNode, AutomationLane, Clip,
+Channel) currently SERIALIZE but are not yet WIRED INTO THE AUDIO GRAPH. They
+are data, not behaviour. Do not describe the mixer or automation as working.
 
 Environment (verified 2026-08-14):
 
-macOS 26.2 · Apple M5 arm64 · 10 cores · 16 GB RAM
-Apple clang 21.0.0 · macOS SDK 26.5 · Command Line Tools only (no Xcode.app)
-CoreAudio / CoreMIDI / AudioUnit / os_workgroup / Metal / Accelerate all present
-CMake and Ninja NOT INSTALLED — blocking for Phase 1
-No code-signing identity — DMG will be ad-hoc signed, not notarized (D-009)
+macOS 26.2 - Apple M5 arm64 - 10 cores (unknown P/E split at query time) - 16 GB
+Apple clang 21.0.0 - macOS SDK 26.5 - Command Line Tools only (no Xcode.app)
+CMake 4.4.2, Ninja 1.13.2 (installed during Phase 1)
+No code-signing identity: the DMG is ad-hoc signed, not notarized (D-009)
+
+Dependencies in tree:
+
+  third_party/doctest/doctest.h  2.4.11, MIT  (gitignored; re-fetch with
+  curl -sSL -o third_party/doctest/doctest.h \
+    https://raw.githubusercontent.com/doctest/doctest/v2.4.11/doctest/doctest.h)
+
+Graphify:
+
+  STALE. `graphify .` fails with "no LLM API key found". The graph in
+  graphify-out/ predates all source code. Export GEMINI_API_KEY,
+  ANTHROPIC_API_KEY or equivalent and re-run to refresh it.
 
 ---
 
@@ -757,27 +770,40 @@ All systems must share the same underlying transport, timing, project state and 
 
 # 22. CURRENT HANDOFF MESSAGE
 
-Phase 0 is complete and approved.
-
-The project has NOT been implemented. There is no source code and no build
-system. What exists is the architecture, the decision log, and the phase plan.
+Phases 0-4 are implemented, tested and committed. The engine makes sound, keeps
+sample-accurate time, and saves and loads a versioned project.
 
 Read first:
 
-1. docs/DECISIONS.md    — what was decided and why
+1. docs/DECISIONS.md    — what was decided and why (D-001..D-010)
 2. docs/ARCHITECTURE.md — layers, threading, data model, commands
 3. docs/ROADMAP.md      — phases and their exit criteria
+4. git log              — each phase is one commit with its rationale
 
-Next step: Phase 1 (foundation and build system).
+Verify the current state before continuing:
 
-Phase 1 is BLOCKED pending approval to install CMake and Ninja via Homebrew.
-Nothing else blocks it.
+  cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
+  ./build/incdaw-audiocheck --list
+  ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Phase 1 delivers: CMakeLists.txt, the src/ layer skeleton, the doctest runner,
-the layering test, and tools/make-dmg.sh. It delivers NO audio code — the audio
-engine is Phase 2.
+Next step: Phase 5, the MIDI engine.
 
-The approval rule still applies to every phase. Plan, show the plan, stop, wait.
+  - platform/macos/CoreMidiDevice behind a platform/MidiDevice.h interface,
+    mirroring how AudioDevice is structured
+  - timestamped input converted through the tempo map, not the block counter
+    (FL Studio 2026's release notes call out MIDI jitter and tempo-change
+    handling specifically — that is the bar)
+  - the MidiEvent type already exists in project/Model.h and already carries
+    the per-note property slot; do not introduce a second event type
+  - UMP/MIDI 2.0 is available in the SDK (MIDIMessages.h, MIDICIDevice.h)
+
+Two things to be careful about:
+
+  - The mixer, automation and clip types serialize but have no audio path.
+    Phase 10 and 11 must build that; nothing today evaluates them.
+  - The realtime guard cannot see allocations the optimiser elides. Tests that
+    deliberately allocate must call ::operator new directly, not use a
+    new-expression, or they silently pass in Release.
 
 ---
 
