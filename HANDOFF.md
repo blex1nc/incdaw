@@ -142,8 +142,14 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  366 test cases, 149,822 assertions, green in both Debug and Release.
+  371 test cases, 150,351 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
+
+  third_party/ is gitignored wholesale. A fresh clone refetches:
+    doctest.h  — see "Dependencies in tree"
+    clap 1.2.6 — git clone --depth 1 --branch 1.2.6 \
+                   https://github.com/free-audio/clap  (copy include/clap
+                   to third_party/clap/clap; LICENSE alongside; D-027)
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
   (command under "Dependencies in tree" below) before the first configure.
@@ -1138,10 +1144,20 @@ recording and the Audio Logger all work. What remains in it is polish):
       automation point-editing surface, touch/latch modes, latch-mode
       loop-aware automation overdub (D-026)
 
-  RECOMMENDED: start Phase 13 (plugin hosting, CLAP first per D-007) — the
-  plugin host is the long pole for the whole product and everything it
-  needs from the engine now exists. Vendoring the CLAP SDK headers needs
-  dependency approval (CLAUDE.md §41) before implementation can start.
+  PHASE 13 IS STARTED (user authorised continuous execution INCLUDING the
+  CLAP vendoring; D-027 records the dependency). Part 1 done: ClapLibrary,
+  ClapInstance, out-of-process scanner with crash classification, the test
+  suite's own well-behaved + hostile CLAP plugins, isolation proven in CI.
+
+  Phase 13 continues, in dependency order:
+    - PluginRegistry + blacklist persistence (scan cache keyed on path,
+      size, mtime; user-clearable; PLUGIN_HOST.md §3)
+    - PluginNode: a ClapInstance in the render graph, RT-safe, behind the
+      format-agnostic PluginInstance interface; insert chains on mixer
+      strips (the Phase 10 deferral)
+    - parameter discovery -> ParameterRegistry (generic automation, §5)
+    - state save/load into the project (§6), latency reporting -> PDC
+    - editor hosting (§7), then AU, then VST3 (D-007 order)
 
 Things to be careful about:
 

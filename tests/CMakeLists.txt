@@ -33,7 +33,8 @@ add_executable(incdaw_tests
     unit/AutomationClipTests.cpp
     unit/InputMonitorTests.cpp
     unit/LoopRecordingTests.cpp
-    unit/AudioLoggerTests.cpp)
+    unit/AudioLoggerTests.cpp
+    unit/PluginHostTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.
@@ -47,6 +48,24 @@ target_link_libraries(incdaw_tests
 
 target_compile_definitions(incdaw_tests PRIVATE
     INCDAW_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+
+# ── The test suite's own CLAP plugins ────────────────────────────────────────
+# The plugin host cannot be tested against third-party binaries and must not
+# be tested against nothing: one well-behaved plugin, one hostile one.
+add_library(incdaw-testgain MODULE plugins/TestGainPlugin.cpp)
+add_library(incdaw-testcrash MODULE plugins/TestCrashPlugin.cpp)
+
+foreach(testplugin incdaw-testgain incdaw-testcrash)
+    set_target_properties(${testplugin} PROPERTIES PREFIX "" SUFFIX ".clap")
+    target_include_directories(${testplugin} PRIVATE ${CMAKE_SOURCE_DIR}/third_party/clap)
+endforeach()
+
+add_dependencies(incdaw_tests incdaw-testgain incdaw-testcrash incdaw-pluginscan)
+
+target_compile_definitions(incdaw_tests PRIVATE
+    INCDAW_TESTGAIN_PLUGIN="$<TARGET_FILE:incdaw-testgain>"
+    INCDAW_TESTCRASH_PLUGIN="$<TARGET_FILE:incdaw-testcrash>"
+    INCDAW_PLUGINSCAN_BINARY="$<TARGET_FILE:incdaw-pluginscan>")
 
 add_test(NAME unit COMMAND incdaw_tests)
 

@@ -304,6 +304,15 @@ crash isolation.
 misbehaviour matrix passes — **a crashing plugin does not take down INCDAW and
 does not lose the project.**
 
+**STARTED (2026-08-15).** Part 1: the CLAP foundation — vendored CLAP 1.2.6
+(D-027), `SharedLibrary` behind the platform boundary, `ClapLibrary` /
+`ClapInstance` (load, enumerate, activate, process), the out-of-process
+`incdaw-pluginscan` with crash classification, and the test suite's own
+well-behaved and hostile CLAP plugins. The misbehaviour matrix's first row
+passes: a plugin that segfaults on load kills the scanner, and the host
+finishes the test. Outstanding: registry + blacklist persistence, the graph
+node, parameter/state/editor bridges, AU and VST3.
+
 ---
 
 ## Phase 14 — Sampler

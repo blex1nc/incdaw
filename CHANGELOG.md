@@ -8,6 +8,35 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 1) — CLAP hosting foundation — 2026-08-15
+
+**Added**
+
+- `third_party/clap` — the CLAP C ABI, pinned at 1.2.6, MIT (D-027);
+  gitignored with refetch instructions, like doctest.
+- `platform/SharedLibrary` — dlopen behind the platform boundary
+  (RTLD_LOCAL: one plugin's symbols must not collide with another's).
+- `plugins/clap/ClapLibrary` — entry resolution (bundle or flat dylib),
+  version check, factory enumeration with hostile-input scepticism, and
+  `ClapInstance`: create/init/activate/start, stereo processing with valid
+  empty event queues, ordered teardown.
+- `incdaw-pluginscan` + `plugins::scanOutOfProcess` — the disposable
+  scanner: fork/exec (an argv never meets a shell), descriptors parsed from
+  its report, and a died-of-signal child classified as `crashed` — the
+  outcome the mechanism exists for.
+- The test suite's own plugins: `incdaw-testgain.clap` (a real, minimal,
+  well-behaved CLAP gain) and `incdaw-testcrash.clap` (segfaults in entry
+  init). The host cannot be tested against third-party binaries and must
+  not be tested against nothing.
+- `tests/unit/PluginHostTests.cpp` — scan/load/process round trip through
+  the gain plugin, clean failure on unknown ids, out-of-process scanning,
+  and the exit-criterion seed: **a plugin that crashes on load kills the
+  scanner and the host finishes the test.**
+
+Next in Phase 13: the registry + blacklist persistence, the PluginInstance
+graph node (audio through the mixer), parameter discovery bridged to the
+generic automation subsystem, state save/load, and editor hosting.
+
 ### Phase 12 (part 8) — The Audio Logger — 2026-08-15
 
 **Added**

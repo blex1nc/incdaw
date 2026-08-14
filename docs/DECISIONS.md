@@ -836,3 +836,27 @@ point-editing surface.
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+---
+
+## D-027 — CLAP SDK vendored, pinned at 1.2.6
+
+**Context:** Phase 13 needs the CLAP C ABI headers. CLAUDE.md §41 requires a
+recorded rationale for every dependency; the user explicitly waived the
+pre-approval presentation and authorised continuous execution through the
+remaining phases, which covers this vendoring.
+
+**The dependency:** free-audio/clap, tag 1.2.6, header-only C ABI, MIT
+licensed (license copied alongside). Vendored under `third_party/clap/`,
+gitignored like doctest; a fresh clone refetches with
+`git clone --depth 1 --branch 1.2.6 https://github.com/free-audio/clap` and
+copies `include/clap`. Maintained by the CLAP consortium (Bitwig, u-he et
+al.); zero runtime cost — headers only; no security surface of its own (the
+plugins it loads are the surface, which is what the isolation strategy is
+for). Alternatives: none — this IS the format's canonical definition.
+
+**Chosen order stands (D-007):** CLAP first — cleanest ABI, no SDK build
+system, MIT; AU next (native, no vendoring needed); VST3 after.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

@@ -13,6 +13,7 @@
 # ── platform/ : the ONLY layer permitted to contain OS-specific code ──────────
 add_library(incdaw_platform STATIC
     platform/SystemInfo.cpp
+    platform/SharedLibrary.cpp
     platform/macos/CoreAudioDevice.cpp
     platform/macos/CoreMidiDevice.cpp
     platform/macos/HostTime.cpp)
@@ -68,8 +69,16 @@ endif()
 
 # ── plugins/ : plugin hosting (Phase 13) ──────────────────────────────────────
 add_library(incdaw_plugins STATIC
-    plugins/PluginIdentifier.cpp)
+    plugins/PluginIdentifier.cpp
+    plugins/PluginScan.cpp
+    plugins/clap/ClapLibrary.cpp)
 target_include_directories(incdaw_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# The CLAP C ABI (third_party/clap, MIT, D-027). PUBLIC because the host's
+# own headers carry clap types; the DISCIPLINE that nothing above plugins/
+# includes a clap header is a design rule, enforced by review, not by the
+# build — engine/ and project/ have no reason to and do not.
+target_include_directories(incdaw_plugins PUBLIC ${CMAKE_SOURCE_DIR}/third_party/clap)
 target_link_libraries(incdaw_plugins
     PUBLIC  incdaw_platform
     PRIVATE incdaw_warnings)
