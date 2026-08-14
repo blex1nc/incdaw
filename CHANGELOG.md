@@ -8,6 +8,39 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 12 (part 5) — The audio editor — 2026-08-15
+
+**Added**
+
+- `engine/audio/AudioEdits` — the editor's verbs as pure region operations:
+  gain, peak, normalize (refuses silence), reverse, silence, linear fades,
+  trim. Half-open regions, clamped, no I/O anywhere near the DSP.
+- `engine/audio/WaveformOverview` — min/max buckets built through the
+  streaming reader in chunks (or from memory after an edit): an hour-long
+  file yields its waveform without being resident.
+- `app/commands/AudioEditCommands` — destructive edits, undoably:
+  `EditAssetRegionCommand` snapshots the region before rewriting the file
+  (undo restores bit-exactly; redo writes the recorded result rather than
+  re-applying — gain would compound); `TrimAssetCommand` keeps the cut head
+  and tail and reassembles the original file, length and asset metadata
+  included. Edited audio renders as float32.
+- `ui/macos/AudioEditorView` — the editor pane: waveform per channel,
+  drag-select (double-click selects all), scroll pans, Cmd+scroll zooms
+  around the cursor. Fourth editor segment; ⌘6 in the View menu.
+- Playlist: double-clicking an audio clip opens its asset in the editor.
+- Audio menu: Trim to Selection, Normalize, Reverse, Silence, Fade In/Out,
+  Gain ±3 dB — each runs on the selection (or the whole file, the Edison
+  convention; trim requires a selection), then the waveform reloads and the
+  playback graph rebuilds so the edit is immediately audible. Undo/redo of
+  an audio edit is caught from housekeeping and refreshes both.
+- `tests/unit/AudioEditsTests.cpp` — region exactness, normalize/reverse
+  semantics, clamping, overview file-vs-memory equality, and bit-exact undo
+  of both command classes including trim's file-length round trip.
+
+Still to come in Phase 12: input monitoring, loop/punch recording, the
+pre-record buffer / Audio Logger, and editor polish (markers, regions,
+cut/copy/paste between files, spectral view).
+
 ### Phase 12 (part 4) — The disk streamer — 2026-08-15
 
 **Added**

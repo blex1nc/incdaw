@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.8
-Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12: RECORDING + STREAMING DONE, EDITOR OUTSTANDING
+Version: 1.9
+Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12: RECORDING, STREAMING AND THE EDITOR WORK
 Last updated: 2026-08-15
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  328 test cases, 122,061 assertions, green in both Debug and Release.
+  336 test cases, 145,702 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -275,11 +275,36 @@ Phase 12 — IN PROGRESS. Done and tested so far:
   compiled graph, with tiny segments forcing refills mid-play. Starvation
   and seek behaviour asserted; RT read path allocation-free under the guard.
 
+  Part 5 (2026-08-15) — the audio editor:
+
+  engine/audio/AudioEdits      pure region verbs: gain, peak, normalize
+                               (refuses silence), reverse, silence, linear
+                               fades, trim; clamped half-open regions
+  engine/audio/WaveformOverview min/max buckets via the streaming reader —
+                               an hour of audio never goes resident
+  app/commands/AudioEditCommands destructive edits with bit-exact undo:
+                               region snapshots; REDO WRITES THE RECORDED
+                               RESULT (re-applying gain would compound);
+                               trim keeps head+tail and reassembles on undo
+  ui/macos/AudioEditorView     waveform, drag-select, pan, Cmd+scroll zoom;
+                               4th editor segment (⌘6); opened by
+                               double-clicking an audio clip in the playlist
+  Audio menu                   Trim/Normalize/Reverse/Silence/Fades/±3 dB —
+                               selection or whole file (Edison convention);
+                               every edit reloads the waveform and rebuilds
+                               the graph, so it is immediately audible.
+                               Undo/redo staleness is caught in housekeeping
+                               via the registry's undoDepth.
+
+  Edits render as float32 whatever the source format was; the sample-rate
+  guard still applies. The editor holds no audio — only the overview.
+
   NOT started within Phase 12: input monitoring, loop/punch recording
   (per-segment anchoring, see D-024 tradeoffs), the pre-record buffer /
-  Audio Logger, and the audio editor. Audio-clip move/resize in the playlist
-  is 9b (the commands skip audio clips explicitly rather than corrupting
-  frame-anchored placement with tick math). The phase is NOT complete.
+  Audio Logger, and editor polish (markers, regions, cut/copy/paste,
+  spectral view). Audio-clip move/resize in the playlist is 9b (the commands
+  skip audio clips explicitly rather than corrupting frame-anchored
+  placement with tick math).
 
 Phase 11a — COMPLETE. Done and tested:
 
@@ -1101,26 +1126,20 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: finish Phase 12 — the audio editor is the big remaining piece.
+Next step: the remaining Phase 12 items are small next to what is done, and
+9b/11b are now unblocked. Recommended order:
 
-  What exists after part 4: the full recording loop (R records, the take
-  lands sample-accurately as an audible clip, one undo removes it) and
-  streamed playback for long assets, proven bit-identical to preloading.
-
-  What remains, in dependency order:
-
-    - the audio editor UI (waveform view, trim, fade, normalize, gain,
-      reverse, silence, markers, regions) — audio exists in the timeline to
-      look at, and WavStreamReader can feed a waveform overview without
-      loading whole files
+    - 9b playlist polish: move/resize audio clips (frame-anchored moves with
+      tempo-aware deltas — the D-013 accessor is the seam), waveform in the
+      clip body (WaveformOverview is ready for it). This completes Phase 9.
+    - 11b automation UI/clips/recording — automation recording rides the
+      TimelineAnchor unchanged. This completes Phase 11.
     - input monitoring (input -> a strip, with the usual latency caveats)
     - loop/punch recording: per-segment anchoring (D-024 records why the
       current linear map cannot survive a seek or wrap mid-take)
     - the pre-record buffer / Audio Logger (a capture-side ring that is
       always running; the recorder's machinery already fits it)
-    - 9b playlist polish: move/resize audio clips (frame-anchored moves with
-      tempo-aware deltas), waveform rendering in the clip body
-    - 11b (automation recording) rides the same anchor machinery unchanged
+    - editor polish: markers, regions, cut/copy/paste between files
 
 Things to be careful about:
 

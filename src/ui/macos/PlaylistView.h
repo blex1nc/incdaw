@@ -35,4 +35,8 @@ namespace incdaw::app     { class CommandRegistry; }
 /// Called when the user asks to start or stop playback (space bar).
 @property (nonatomic, copy) void (^onTransportToggle)(void);
 
+/// Called when the user double-clicks an audio clip, with the clip's asset
+/// id — the host opens it in the audio editor.
+@property (nonatomic, copy) void (^onOpenAudioAsset)(unsigned long long);
+
 @end

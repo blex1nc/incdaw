@@ -24,6 +24,8 @@
 #include "project/PatternCompiler.h"
 #include "project/ProjectGraphCompiler.h"
 #include "project/RecordingSession.h"
+#include "app/commands/AudioEditCommands.h"
+#include "ui/macos/AudioEditorView.h"
 #include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
@@ -31,6 +33,7 @@
 #include "ui/macos/PlaylistView.h"
 
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -67,6 +70,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 @property (strong) INCDAWPianoRollView*     pianoRoll;
 @property (strong) INCDAWPlaylistView*      playlist;
 @property (strong) INCDAWMixerView*         mixer;
+@property (strong) INCDAWAudioEditorView*   audioEditor;
 @property (strong) NSSegmentedControl*      editorSelector;
 @property (strong) NSSegmentedControl*      transportModeSelector;
 @property (strong) INCDAWChannelRackView*   channelRack;
@@ -101,6 +105,11 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     /// Keeps streamed audio clips' windows filled. Graphs hold the streams;
     /// this only services them, so destruction order does not matter.
     std::unique_ptr<engine::DiskStreamer> _diskStreamer;
+
+    /// Undo/redo of an audio edit rewrites a file behind the editor's back;
+    /// watching the undo stack's depth from housekeeping catches it without
+    /// the registry having to know views exist.
+    std::size_t _undoDepthSeen;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -208,16 +217,29 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     self.mixer.selectedChannelIdValue = channelId.value();
     self.mixer.hidden                 = YES;
 
+    self.audioEditor = [[INCDAWAudioEditorView alloc]
+        initWithFrame:editorFrame
+              project:_project.get()
+             registry:_registry.get()];
+    self.audioEditor.hidden = YES;
+
+    __weak INCDAWAppDelegate* weakSelfForEditor = self;
+    self.playlist.onOpenAudioAsset = ^(unsigned long long assetId) {
+        [weakSelfForEditor openAudioAssetInEditor:assetId];
+    };
+
     // The editors share one region and are swapped rather than tiled: each
     // wants the whole window, and a DAW that shows half a Piano Roll above half
     // a playlist shows neither.
     NSView* editorContainer = [[NSView alloc] initWithFrame:editorFrame];
-    self.pianoRoll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    self.playlist.autoresizingMask  = NSViewWidthSizable | NSViewHeightSizable;
-    self.mixer.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    self.pianoRoll.autoresizingMask   = NSViewWidthSizable | NSViewHeightSizable;
+    self.playlist.autoresizingMask    = NSViewWidthSizable | NSViewHeightSizable;
+    self.mixer.autoresizingMask       = NSViewWidthSizable | NSViewHeightSizable;
+    self.audioEditor.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [editorContainer addSubview:self.pianoRoll];
     [editorContainer addSubview:self.playlist];
     [editorContainer addSubview:self.mixer];
+    [editorContainer addSubview:self.audioEditor];
 
     NSSplitView* editors = [[NSSplitView alloc]
         initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, body.size.height)];
@@ -249,12 +271,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     [editors adjustSubviews];
 
     self.editorSelector = [NSSegmentedControl
-        segmentedControlWithLabels:@[@"Piano Roll", @"Playlist", @"Mixer"]
+        segmentedControlWithLabels:@[@"Piano Roll", @"Playlist", @"Mixer", @"Editor"]
                       trackingMode:NSSegmentSwitchTrackingSelectOne
                             target:self
                             action:@selector(editorChanged:)];
     self.editorSelector.selectedSegment = 0;
-    self.editorSelector.frame = NSMakeRect(10, frame.size.height - toolbarHeight + 3, 250, 24);
+    self.editorSelector.frame = NSMakeRect(10, frame.size.height - toolbarHeight + 3, 320, 24);
 
     self.transportModeSelector = [NSSegmentedControl
         segmentedControlWithLabels:@[@"Pattern", @"Song"]
@@ -262,7 +284,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                             target:self
                             action:@selector(transportModeChanged:)];
     self.transportModeSelector.selectedSegment = 0;
-    self.transportModeSelector.frame = NSMakeRect(270, frame.size.height - toolbarHeight + 3, 150, 24);
+    self.transportModeSelector.frame = NSMakeRect(340, frame.size.height - toolbarHeight + 3, 150, 24);
 
     self.editorSelector.autoresizingMask        = NSViewMinYMargin;
     self.transportModeSelector.autoresizingMask = NSViewMinYMargin;
@@ -418,21 +440,98 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
 - (void)showEditorAtSegment:(NSInteger)segment
 {
-    self.pianoRoll.hidden = segment != 0;
-    self.playlist.hidden  = segment != 1;
-    self.mixer.hidden     = segment != 2;
+    self.pianoRoll.hidden   = segment != 0;
+    self.playlist.hidden    = segment != 1;
+    self.mixer.hidden       = segment != 2;
+    self.audioEditor.hidden = segment != 3;
 
     NSView* focused = self.pianoRoll;
     if (segment == 1)
         focused = self.playlist;
     else if (segment == 2)
         focused = self.mixer;
+    else if (segment == 3)
+        focused = self.audioEditor;
 
     [self.window makeFirstResponder:focused];
 
     [self.playlist setNeedsDisplay:YES];
     [self.mixer setNeedsDisplay:YES];
+    [self.audioEditor setNeedsDisplay:YES];
     [self.pianoRoll requestRedraw];
+}
+
+- (void)showAudioEditor:(id)sender
+{
+    (void)sender;
+    self.editorSelector.selectedSegment = 3;
+    [self showEditorAtSegment:3];
+}
+
+- (void)openAudioAssetInEditor:(unsigned long long)assetId
+{
+    self.audioEditor.assetIdValue = assetId;
+    [self.audioEditor reloadWaveform];
+    [self showAudioEditor:nil];
+}
+
+/// Runs one destructive edit on the editor's selection (or the whole file
+/// when nothing is selected — the Edison convention), then refreshes
+/// everything the file feeds: the waveform, the playback graph, the playlist.
+- (void)applyAudioEdit:(app::AudioEditOp)op factor:(engine::Sample)factor
+{
+    if (self.audioEditor.assetIdValue == 0)
+        return;
+
+    const project::EntityId asset{self.audioEditor.assetIdValue};
+
+    engine::edits::Region region;
+    if (self.audioEditor.hasSelection) {
+        region.from = self.audioEditor.selectionFrom;
+        region.to   = self.audioEditor.selectionTo;
+    } else {
+        region.from = 0;
+        region.to   = std::numeric_limits<engine::FrameCount>::max();   // clamped by the command
+    }
+
+    (void)_registry->execute(
+        std::make_unique<app::EditAssetRegionCommand>(asset, region, op, factor));
+
+    [self audioAssetChanged];
+}
+
+- (void)audioAssetChanged
+{
+    [self.audioEditor reloadWaveform];
+    [self rebuildGraph];
+    [self.playlist setNeedsDisplay:YES];
+    [self refreshStatus];
+}
+
+- (void)editNormalize:(id)sender { (void)sender; [self applyAudioEdit:app::AudioEditOp::normalize factor:1.0f]; }
+- (void)editReverse:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::reverse factor:1.0f]; }
+- (void)editSilence:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::silence factor:1.0f]; }
+- (void)editFadeIn:(id)sender    { (void)sender; [self applyAudioEdit:app::AudioEditOp::fadeIn factor:1.0f]; }
+- (void)editFadeOut:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::fadeOut factor:1.0f]; }
+- (void)editGainUp:(id)sender    { (void)sender; [self applyAudioEdit:app::AudioEditOp::gain factor:1.412538f]; }   // +3 dB
+- (void)editGainDown:(id)sender  { (void)sender; [self applyAudioEdit:app::AudioEditOp::gain factor:0.707946f]; }   // -3 dB
+
+- (void)editTrim:(id)sender
+{
+    (void)sender;
+
+    // Trim is the one verb that requires a selection: "trim to everything"
+    // is not an edit, and the command would refuse it anyway.
+    if (self.audioEditor.assetIdValue == 0 || !self.audioEditor.hasSelection)
+        return;
+
+    const project::EntityId asset{self.audioEditor.assetIdValue};
+
+    (void)_registry->execute(std::make_unique<app::TrimAssetCommand>(
+        asset, engine::edits::Region{self.audioEditor.selectionFrom,
+                                     self.audioEditor.selectionTo}));
+
+    [self audioAssetChanged];
 }
 
 /// The strip currently rendering a mixer node, or nullptr. Valid only until the
@@ -711,6 +810,16 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     _audio->collectRetiredGraphs();
 
+    // An undo or redo may have rewritten the file the editor is showing.
+    if (_registry->undoDepth() != _undoDepthSeen) {
+        _undoDepthSeen = _registry->undoDepth();
+
+        if (!self.audioEditor.hidden && self.audioEditor.assetIdValue != 0) {
+            [self.audioEditor reloadWaveform];
+            [self rebuildGraph];
+        }
+    }
+
     const auto position = _audio->transport().position();
     const long long tick = _audio->transport().isPlaying()
                                ? _audio->transport().tempoMap().tickForFrame(position)
@@ -808,6 +917,11 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                                          keyEquivalent:@"3"];
     mixerItem.target = self;
 
+    NSMenuItem* audioEditorItem = [viewMenu addItemWithTitle:@"Audio Editor"
+                                                      action:@selector(showAudioEditor:)
+                                               keyEquivalent:@"6"];
+    audioEditorItem.target = self;
+
     [viewMenu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* patternModeItem = [viewMenu addItemWithTitle:@"Pattern Mode"
@@ -853,6 +967,34 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     [editMenu addItem:[NSMenuItem separatorItem]];
     [editMenu addItemWithTitle:@"Select All" action:nil keyEquivalent:@"a"];
     editItem.submenu = editMenu;
+
+    // The audio editor's verbs. Menu-only for now: bare keys belong to the
+    // transport and Cmd-keys to project edits, and the command-registry
+    // shortcut work (CLAUDE.md §26) is where these get keys properly.
+    NSMenuItem* audioItem = [[NSMenuItem alloc] init];
+    [menuBar addItem:audioItem];
+
+    NSMenu* audioMenu = [[NSMenu alloc] initWithTitle:@"Audio"];
+
+    const struct { NSString* title; SEL action; } verbs[] = {
+        {@"Trim to Selection", @selector(editTrim:)},
+        {@"Normalize",         @selector(editNormalize:)},
+        {@"Reverse",           @selector(editReverse:)},
+        {@"Silence",           @selector(editSilence:)},
+        {@"Fade In",           @selector(editFadeIn:)},
+        {@"Fade Out",          @selector(editFadeOut:)},
+        {@"Gain +3 dB",        @selector(editGainUp:)},
+        {@"Gain -3 dB",        @selector(editGainDown:)},
+    };
+
+    for (const auto& verb : verbs) {
+        NSMenuItem* item = [audioMenu addItemWithTitle:verb.title
+                                                action:verb.action
+                                         keyEquivalent:@""];
+        item.target = self;
+    }
+
+    audioItem.submenu = audioMenu;
 
     NSApp.mainMenu = menuBar;
 }

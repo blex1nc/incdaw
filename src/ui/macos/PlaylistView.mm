@@ -352,7 +352,16 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         return;
     }
 
-    const project::EntityId clipId = _project->clips()[index].id;
+    const project::Clip&    clicked = _project->clips()[index];
+    const project::EntityId clipId  = clicked.id;
+
+    // Double-clicking an audio clip opens its asset in the audio editor —
+    // the clip is the handle, the recording is the thing being edited.
+    if (event.clickCount == 2 && clicked.type == project::ClipType::audio) {
+        if (self.onOpenAudioAsset != nil)
+            self.onOpenAudioAsset(clicked.source.value());
+        return;
+    }
 
     if ((event.modifierFlags & NSEventModifierFlagShift) != 0)
         _model->toggleSelection(clipId);

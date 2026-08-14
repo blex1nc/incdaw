@@ -120,7 +120,8 @@ if(APPLE)
         ui/macos/ChannelRackView.mm
         ui/macos/PatternListView.mm
         ui/macos/PlaylistView.mm
-        ui/macos/MixerView.mm)
+        ui/macos/MixerView.mm
+        ui/macos/AudioEditorView.mm)
     target_link_libraries(INCDAW
         PRIVATE incdaw_app incdaw_warnings
                 "-framework Cocoa"

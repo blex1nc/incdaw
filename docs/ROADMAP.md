@@ -249,9 +249,17 @@ threshold stream, one window per clip, prefilled at compile time; streamed
 playback is proven bit-identical to preloaded playback through the compiled
 graph.
 
+Part 5: the audio editor. Pure region operations (`AudioEdits`), waveform
+overviews through the streaming reader (`WaveformOverview`), destructive
+edits that undo bit-exactly (`AudioEditCommands` — snapshots, and redo
+writes the recorded result), and the editor pane itself: waveform,
+selection, zoom; opened by double-clicking an audio clip; verbs in the
+Audio menu; every edit immediately audible via a graph rebuild.
+
 Outstanding within this phase: input monitoring, loop/punch recording
-(per-segment anchoring), the pre-record buffer / Audio Logger, and the audio
-editor. Audio-clip move/resize in the playlist is 9b.
+(per-segment anchoring), the pre-record buffer / Audio Logger, and editor
+polish (markers, regions, cut/copy/paste). Audio-clip move/resize in the
+playlist is 9b.
 
 ---
 
