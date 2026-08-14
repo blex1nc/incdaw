@@ -15,6 +15,8 @@
 
 namespace incdaw::engine {
 
+class AudioCaptureSink;
+
 /// Connects an audio device to a render graph.
 ///
 /// Owns the realtime boundary: everything below it is realtime-safe, everything
@@ -54,6 +56,21 @@ public:
 
     [[nodiscard]] std::size_t retiredGraphCount() const;
 
+    /// Installs (or clears, with nullptr) the destination for captured audio.
+    /// Same single-atomic-store pattern as setGraph. The sink must stay alive
+    /// until after the device has stopped or a subsequent clear has had one
+    /// block's grace — in practice the recorder outlives the session, and its
+    /// own state machine makes calls after stop() harmless no-ops.
+    void setCaptureSink(AudioCaptureSink* sink) noexcept
+    {
+        captureSink_.store(sink, std::memory_order_release);
+    }
+
+    [[nodiscard]] AudioCaptureSink* captureSink() const noexcept
+    {
+        return captureSink_.load(std::memory_order_acquire);
+    }
+
     /// The single time authority. Nodes read position from the block plan this
     /// produces; nothing else in the engine keeps its own clock.
     /// MIDI input, timestamp-aligned to the audio blocks this engine renders.
@@ -77,7 +94,9 @@ public:
     /// buffers must be sized for. See AudioDevice::maxServiceableBlockSize.
     [[nodiscard]] std::int64_t maxServiceableBlockSize() const noexcept;
     [[nodiscard]] std::size_t  outputChannels() const noexcept;
+    [[nodiscard]] std::size_t  inputChannels() const noexcept;
     [[nodiscard]] std::int64_t totalOutputLatencyFrames() const noexcept;
+    [[nodiscard]] std::int64_t totalInputLatencyFrames() const noexcept;
     [[nodiscard]] std::string  deviceName() const;
 
     /// Blocks the audio thread has completed since the engine started.
@@ -94,6 +113,9 @@ private:
     void renderAudioBlock(float* const* outputChannels, std::size_t channelCount,
                           std::int64_t frameCount, std::uint64_t blockHostTimeNanos) noexcept override;
 
+    void captureAudioBlock(const float* const* inputChannels, std::size_t channelCount,
+                           std::int64_t frameCount, std::uint64_t blockHostTimeNanos) noexcept override;
+
     void audioDeviceAboutToStart(double sampleRate, std::int64_t bufferSize) override;
     void audioDeviceStopped() override;
 
@@ -109,6 +131,7 @@ private:
     MidiBuffer                             segmentMidi_;
 
     std::atomic<CompiledGraph*>                active_{nullptr};
+    std::atomic<AudioCaptureSink*>             captureSink_{nullptr};
     std::unique_ptr<CompiledGraph>             owned_;      ///< the installed graph
     std::vector<RetiredGraph>                  retired_;
     mutable std::mutex                         retiredMutex_;

@@ -26,13 +26,22 @@ struct AudioDeviceConfig {
     ///
     /// Not a convenience: assuming one duplex device is wrong on any rig with a
     /// separate interface and monitor path, and it is a limitation FL Studio
-    /// removed on macOS in 2026 for the same reason.
+    /// removed on macOS in 2026 for the same reason. On Macs it is the common
+    /// case: the built-in microphone and the built-in speakers are separate
+    /// HAL devices.
     std::string outputDeviceIdentifier;   ///< empty selects the system default
-    std::string inputDeviceIdentifier;    ///< empty means no input
+    std::string inputDeviceIdentifier;    ///< empty means no input; see below
+
+    /// `inputDeviceIdentifier` sentinel that selects the system default input.
+    /// Empty cannot mean "default" here the way it does for output: most
+    /// sessions record nothing, and opening the microphone unasked is both a
+    /// permission prompt and a privacy problem.
+    static constexpr const char* defaultInput = "default";
 
     double      sampleRate     = 48000.0;
     std::int64_t bufferSize    = 128;
     std::size_t outputChannels = 2;
+    std::size_t inputChannels  = 2;       ///< capped to what the device offers
 };
 
 /// Implemented by the engine. Called on the device's realtime thread.
@@ -54,6 +63,28 @@ public:
                                   std::size_t   channelCount,
                                   std::int64_t  frameCount,
                                   std::uint64_t blockHostTimeNanos) noexcept = 0;
+
+    /// Delivers one captured block. Planar, like `renderAudioBlock`.
+    ///
+    /// Called on the INPUT device's realtime thread, which on a two-device rig
+    /// is not the thread `renderAudioBlock` runs on — the two devices tick on
+    /// independent clocks. Implementations must be safe against the two
+    /// arriving concurrently, and everything reachable from here is bound by
+    /// the same prime directive as rendering.
+    ///
+    /// `blockHostTimeNanos` is when the first frame of this block was captured
+    /// at the device, on the shared host clock. Reported input latency is NOT
+    /// yet subtracted; whoever places this audio on a timeline must do that,
+    /// and the loopback test proves it happened.
+    ///
+    /// Default is a no-op so output-only callers never see input plumbing.
+    virtual void captureAudioBlock(const float* const* inputChannels,
+                                   std::size_t         channelCount,
+                                   std::int64_t        frameCount,
+                                   std::uint64_t       blockHostTimeNanos) noexcept
+    {
+        (void)inputChannels; (void)channelCount; (void)frameCount; (void)blockHostTimeNanos;
+    }
 
     /// Called off the realtime thread before the device starts, and again if the
     /// format changes. May allocate.
@@ -96,6 +127,9 @@ public:
     [[nodiscard]] virtual std::int64_t maxServiceableBlockSize() const noexcept = 0;
     [[nodiscard]] virtual std::size_t  actualOutputChannels() const noexcept = 0;
 
+    /// Zero when no input was requested or the input device failed to open.
+    [[nodiscard]] virtual std::size_t  actualInputChannels() const noexcept = 0;
+
     /// Latency in frames, as reported by the device.
     ///
     /// Real round-trip latency is larger than the buffer size: the safety
@@ -108,6 +142,11 @@ public:
 
     /// Total output latency: buffer + safety offset + stream latency.
     [[nodiscard]] virtual std::int64_t totalOutputLatencyFrames() const noexcept = 0;
+
+    /// Total input latency: input buffer + input safety offset + input stream
+    /// latency. The number recording must subtract to place captured audio
+    /// where it actually happened; see docs/AUDIO_ENGINE.md §2.
+    [[nodiscard]] virtual std::int64_t totalInputLatencyFrames() const noexcept = 0;
 
     [[nodiscard]] virtual std::string deviceName() const = 0;
 };

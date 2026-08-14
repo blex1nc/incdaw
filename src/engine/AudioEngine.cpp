@@ -1,5 +1,6 @@
 #include "engine/AudioEngine.h"
 
+#include "engine/audio/AudioCaptureSink.h"
 #include "engine/core/Denormals.h"
 #include "engine/core/RealtimeGuard.h"
 
@@ -122,9 +123,19 @@ std::size_t AudioEngine::outputChannels() const noexcept
     return device_ != nullptr ? device_->actualOutputChannels() : 0;
 }
 
+std::size_t AudioEngine::inputChannels() const noexcept
+{
+    return device_ != nullptr ? device_->actualInputChannels() : 0;
+}
+
 std::int64_t AudioEngine::totalOutputLatencyFrames() const noexcept
 {
     return device_ != nullptr ? device_->totalOutputLatencyFrames() : 0;
+}
+
+std::int64_t AudioEngine::totalInputLatencyFrames() const noexcept
+{
+    return device_ != nullptr ? device_->totalInputLatencyFrames() : 0;
 }
 
 std::string AudioEngine::deviceName() const
@@ -200,6 +211,18 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
                      device_ != nullptr ? device_->actualSampleRate() : 0.0);
 
     blockCounter_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+void AudioEngine::captureAudioBlock(const float* const* inputChannels, std::size_t channelCount,
+                                    std::int64_t frameCount, std::uint64_t blockHostTimeNanos) noexcept
+{
+    // On a two-device rig this runs on the INPUT device's realtime thread,
+    // concurrently with renderAudioBlock. It shares nothing with rendering
+    // except the sink pointer, which is a single atomic.
+    const rt::ScopedRealtimeContext realtimeScope;
+
+    if (AudioCaptureSink* sink = captureSink_.load(std::memory_order_acquire))
+        sink->captureAudioBlock(inputChannels, channelCount, frameCount, blockHostTimeNanos);
 }
 
 } // namespace incdaw::engine

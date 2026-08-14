@@ -9,9 +9,16 @@
 //
 //   incdaw-audiocheck [--seconds N] [--buffer N] [--rate N] [--freq HZ]
 //                     [--amplitude A] [--silent] [--list] [--device UID] [--midi]
-//                     [--play]
+//                     [--play] [--record] [--input UID] [--take PATH]
+//
+// --record opens the input device ("default" unless --input names one) and
+// records through the same AudioRecorder the application uses, reporting the
+// take, its latency-compensated start, and any dropped frames. This verifies
+// the capture path on real hardware; the sample-accuracy exit criterion is
+// asserted deterministically in tests/unit/AudioRecorderTests.cpp.
 
 #include "engine/AudioEngine.h"
+#include "engine/audio/AudioRecorder.h"
 #include "engine/core/RealtimeGuard.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/SineOscillatorNode.h"
@@ -43,6 +50,9 @@ struct Options {
     std::string device;      ///< output device uid; empty selects the default
     bool        midi = false;///< also open MIDI input and report what arrives
     bool        play = false;///< play a phrase through the instrument instead of a tone
+    bool        record = false;   ///< capture input to a WAV while running
+    std::string input = "default";///< input device uid for --record
+    std::string take  = "/tmp/incdaw-take.wav";
 };
 
 Options parseArguments(int argc, char** argv)
@@ -63,6 +73,9 @@ Options parseArguments(int argc, char** argv)
         else if (argument == "--device")    options.device    = next();
         else if (argument == "--midi")      options.midi      = true;
         else if (argument == "--play")      options.play      = true;
+        else if (argument == "--record")    options.record    = true;
+        else if (argument == "--input")     options.input     = next();
+        else if (argument == "--take")      options.take      = next();
     }
 
     return options;
@@ -136,6 +149,9 @@ int main(int argc, char** argv)
     config.bufferSize     = options.buffer;
     config.outputChannels = 2;
 
+    if (options.record)
+        config.inputDeviceIdentifier = options.input;
+
     std::string error;
     if (!audioEngine.start(config, error)) {
         std::cerr << "error: could not start audio: " << error << "\n";
@@ -207,6 +223,26 @@ int main(int argc, char** argv)
 
     const double rate = audioEngine.sampleRate();
 
+    // The recorder is armed after the device is running, wired through the
+    // same capture-sink pointer the application will use.
+    engine::AudioRecorder recorder;
+
+    if (options.record) {
+        engine::AudioRecorder::Options recorderOptions;
+        recorderOptions.sampleRate    = rate;
+        recorderOptions.channelCount  = audioEngine.inputChannels();
+        recorderOptions.maxBlockSize  = audioEngine.maxServiceableBlockSize();
+        recorderOptions.latencyFrames = audioEngine.totalInputLatencyFrames();
+
+        if (const auto started = recorder.start(options.take, recorderOptions); !started) {
+            std::cerr << "error: could not start recording: " << started.error << "\n";
+            audioEngine.stop();
+            return 1;
+        }
+
+        audioEngine.setCaptureSink(&recorder);
+    }
+
     std::cout << "Device      : " << audioEngine.deviceName() << "\n"
               << "Sample rate : " << rate << " Hz\n"
               << "Block size  : " << audioEngine.bufferSize() << " frames ("
@@ -217,6 +253,11 @@ int main(int argc, char** argv)
               << "Out latency : " << audioEngine.totalOutputLatencyFrames() << " frames ("
               << (rate > 0.0 ? static_cast<double>(audioEngine.totalOutputLatencyFrames()) / rate * 1000.0 : 0.0)
               << " ms)\n"
+              << (options.record
+                      ? "In latency  : " + std::to_string(audioEngine.totalInputLatencyFrames())
+                        + " frames, " + std::to_string(audioEngine.inputChannels())
+                        + " channel(s) -> " + options.take + "\n"
+                      : "")
               << "Graph delay : " << graphLatency << " frames\n"
               << "Signal      : " << (options.play
                      ? std::string("sequenced arpeggio through the reference synth")
@@ -241,6 +282,13 @@ int main(int argc, char** argv)
 
     if (midiDevice != nullptr)
         midiDevice->close();
+
+    engine::AudioRecorder::Take take;
+
+    if (options.record) {
+        audioEngine.setCaptureSink(nullptr);
+        take = recorder.stop();
+    }
 
     audioEngine.stop();
 
@@ -278,8 +326,19 @@ int main(int argc, char** argv)
                   << "  midi late        : " << midiInput.lateCount() << "\n";
     }
 
+    if (options.record) {
+        const double expectedFrames = elapsed * rate;
+
+        std::cout << "  recorded frames  : " << take.frameCount
+                  << "  (expected ~" << static_cast<std::uint64_t>(expectedFrames) << ")\n"
+                  << "  dropped frames   : " << take.droppedFrames << "\n"
+                  << "  take             : " << (take.succeeded ? take.path.string() : take.error) << "\n";
+    }
+
     const bool clean = blocks > 0 && overruns == 0 && allocated == 0 && freed == 0 && nonFinite == 0
-                    && (!options.midi || audioEngine.midiInput().droppedCount() == 0);
+                    && (!options.midi || audioEngine.midiInput().droppedCount() == 0)
+                    && (!options.record || (take.succeeded && take.droppedFrames == 0
+                                            && take.frameCount > 0));
 
     std::cout << "\n" << (clean ? "PASS" : "FAIL") << "\n";
     return clean ? 0 : 1;

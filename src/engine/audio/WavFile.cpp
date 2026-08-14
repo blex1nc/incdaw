@@ -1,5 +1,7 @@
 #include "engine/audio/WavFile.h"
 
+#include "engine/audio/WavBytes.h"
+
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -7,39 +9,16 @@
 namespace incdaw::engine {
 namespace {
 
-// RIFF is little-endian by definition, and every platform INCDAW targets is
-// little-endian; the byte-level helpers below still avoid type-punning, which
-// is undefined behaviour regardless of endianness.
+// Byte-level helpers live in WavBytes.h, shared with WavStreamWriter so the
+// one-shot and streaming writers cannot encode differently.
 
-std::uint32_t readU32(const std::uint8_t* bytes) noexcept
-{
-    return static_cast<std::uint32_t>(bytes[0]) | (static_cast<std::uint32_t>(bytes[1]) << 8)
-         | (static_cast<std::uint32_t>(bytes[2]) << 16) | (static_cast<std::uint32_t>(bytes[3]) << 24);
-}
-
-std::uint16_t readU16(const std::uint8_t* bytes) noexcept
-{
-    return static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[0])
-                                      | (static_cast<std::uint16_t>(bytes[1]) << 8));
-}
-
-void writeU32(std::vector<std::uint8_t>& out, std::uint32_t value)
-{
-    out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
-    out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
-    out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFFu));
-    out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFFu));
-}
-
-void writeU16(std::vector<std::uint8_t>& out, std::uint16_t value)
-{
-    out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
-    out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
-}
-
-constexpr std::uint16_t formatPcm   = 1;
-constexpr std::uint16_t formatFloat = 3;
-constexpr std::uint16_t formatExtensible = 0xFFFE;
+using wav::readU16;
+using wav::readU32;
+using wav::writeU16;
+using wav::writeU32;
+using wav::formatExtensible;
+using wav::formatFloat;
+using wav::formatPcm;
 
 struct ParsedHeader {
     std::uint16_t format        = 0;
@@ -225,34 +204,14 @@ WavFile::Result WavFile::write(const std::filesystem::path& path, const AudioFil
         return result;
     }
 
-    const std::uint16_t bits = format == Format::pcm16 ? 16
-                             : format == Format::pcm24 ? 24 : 32;
-    const std::uint16_t code = format == Format::float32 ? formatFloat : formatPcm;
-
-    const std::size_t bytesPerSample = bits / 8u;
+    const std::size_t bytesPerSample = wav::bitsFor(format) / 8u;
     const std::size_t frameBytes     = bytesPerSample * data.channelCount;
     const std::size_t dataBytes      = frameBytes * static_cast<std::size_t>(data.frameCount);
 
     std::vector<std::uint8_t> bytes;
-    bytes.reserve(44 + dataBytes);
+    bytes.reserve(wav::headerBytes + dataBytes);
 
-    const auto append = [&bytes](const char* text) {
-        bytes.insert(bytes.end(), text, text + 4);
-    };
-
-    append("RIFF");
-    writeU32(bytes, static_cast<std::uint32_t>(36 + dataBytes));
-    append("WAVE");
-    append("fmt ");
-    writeU32(bytes, 16);
-    writeU16(bytes, code);
-    writeU16(bytes, static_cast<std::uint16_t>(data.channelCount));
-    writeU32(bytes, static_cast<std::uint32_t>(data.sampleRate));
-    writeU32(bytes, static_cast<std::uint32_t>(data.sampleRate * static_cast<double>(frameBytes)));
-    writeU16(bytes, static_cast<std::uint16_t>(frameBytes));
-    writeU16(bytes, bits);
-    append("data");
-    writeU32(bytes, static_cast<std::uint32_t>(dataBytes));
+    wav::appendCanonicalHeader(bytes, format, data.channelCount, data.sampleRate, dataBytes);
 
     for (FrameCount frame = 0; frame < data.frameCount; ++frame) {
         for (std::size_t channel = 0; channel < data.channelCount; ++channel) {
@@ -260,21 +219,7 @@ WavFile::Result WavFile::write(const std::filesystem::path& path, const AudioFil
             const Sample value = index < data.channels[channel].size()
                                      ? data.channels[channel][index] : 0.0f;
 
-            if (format == Format::float32) {
-                std::uint32_t raw = 0;
-                std::memcpy(&raw, &value, sizeof(raw));
-                writeU32(bytes, raw);
-            } else if (format == Format::pcm16) {
-                const float clamped = std::clamp(value, -1.0f, 1.0f);
-                const auto quantised = static_cast<std::int16_t>(std::lround(clamped * 32767.0f));
-                writeU16(bytes, static_cast<std::uint16_t>(quantised));
-            } else {   // pcm24
-                const float clamped = std::clamp(value, -1.0f, 1.0f);
-                const auto quantised = static_cast<std::int32_t>(std::lround(clamped * 8388607.0f));
-                bytes.push_back(static_cast<std::uint8_t>(quantised & 0xFF));
-                bytes.push_back(static_cast<std::uint8_t>((quantised >> 8) & 0xFF));
-                bytes.push_back(static_cast<std::uint8_t>((quantised >> 16) & 0xFF));
-            }
+            wav::encodeSample(bytes, value, format);
         }
     }
 

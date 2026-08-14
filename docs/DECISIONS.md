@@ -675,3 +675,50 @@ header documents.
 **Date:** 2026-08-15
 **Status:** ACCEPTED
 
+
+---
+
+## D-023 — Capture is a second clock domain, reconciled by timestamps
+
+**Context:** Phase 12 needs audio input. On Macs the microphone and the
+speakers are separate HAL devices (AirPods split further: the mic is its own
+device at its own rate), so "the device's input" does not exist in the common
+case. Captured audio must land on the timeline where it actually happened,
+which is the roadmap's loopback exit criterion.
+
+**Options:**
+- Require an aggregate device so input and output share one callback
+- Open the input device separately, with its own IOProc, and reconcile by
+  host-clock timestamps
+- Resample capture against the output clock from day one
+
+**Chosen:** A second IOProc on the input device (none when the user picks a
+true duplex interface — then the main proc's input arguments are used). Blocks
+cross the realtime boundary carrying the HAL's input timestamp; the recorder
+subtracts the device's reported total input latency (buffer + safety offset +
+stream latency) when reporting where the take starts. The capture path is an
+atomic sink pointer on the engine (`AudioCaptureSink`), a lock-free sample
+ring, and a polling writer thread draining to `WavStreamWriter`. A nominal
+rate mismatch that the input device refuses to fix is a hard, explained
+failure — not silent resampling.
+
+**Reason:** Aggregates hide the clock problem without solving it and force
+device setup on the user. Timestamps are the one currency every device already
+pays in, and they are what MIDI input already uses, so capture aligns by the
+same mechanism the rest of the engine trusts. The compensation is applied at
+one edge and proven by the loopback tests, which also assert that removing it
+misaligns by exactly the reported latency — the compensated pass cannot be
+passing by accident.
+
+**Tradeoffs:** Two devices genuinely drift (measured in samples per minutes);
+within one take this is second-order and unhandled — drift correction (slow
+resampling against the output clock) is future work, recorded here so nobody
+mistakes its absence for a bug elsewhere. Capture-side sample-rate conversion
+is refused rather than implemented, which surfaced immediately on hardware:
+an AirPods mic in HFP mode offers 24 kHz and is rejected with an error naming
+both rates. The writer thread polls (2 ms) rather than being signalled, which
+costs nothing measurable and keeps even a wait-free syscall off the capture
+callback.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

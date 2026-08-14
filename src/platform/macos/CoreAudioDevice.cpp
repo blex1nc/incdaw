@@ -169,6 +169,7 @@ public:
     [[nodiscard]] std::int64_t actualBufferSize()     const noexcept override { return bufferSize_; }
     [[nodiscard]] std::int64_t maxServiceableBlockSize() const noexcept override { return scratchCapacity_; }
     [[nodiscard]] std::size_t  actualOutputChannels() const noexcept override { return outputChannels_; }
+    [[nodiscard]] std::size_t  actualInputChannels()  const noexcept override { return inputChannels_; }
 
     [[nodiscard]] std::int64_t outputLatencyFrames() const noexcept override { return outputLatency_; }
     [[nodiscard]] std::int64_t inputLatencyFrames()  const noexcept override { return inputLatency_; }
@@ -177,6 +178,13 @@ public:
     [[nodiscard]] std::int64_t totalOutputLatencyFrames() const noexcept override
     {
         return bufferSize_ + safetyOffset_ + outputLatency_;
+    }
+
+    [[nodiscard]] std::int64_t totalInputLatencyFrames() const noexcept override
+    {
+        return inputDeviceID_ != kAudioObjectUnknown
+                   ? inputBufferSize_ + inputSafetyOffset_ + inputLatency_
+                   : 0;
     }
 
     [[nodiscard]] std::string deviceName() const override { return name_; }
@@ -190,12 +198,31 @@ private:
                                      const AudioTimeStamp*    outputTime,
                                      void*                    clientData) noexcept;
 
+    static OSStatus inputProcTrampoline(AudioObjectID            device,
+                                        const AudioTimeStamp*    now,
+                                        const AudioBufferList*   inputData,
+                                        const AudioTimeStamp*    inputTime,
+                                        AudioBufferList*         outputData,
+                                        const AudioTimeStamp*    outputTime,
+                                        void*                    clientData) noexcept;
+
     void renderInto(AudioBufferList& outputData, std::uint64_t hostTimeNanos) noexcept;
+    void captureFrom(const AudioBufferList& inputData, std::uint64_t hostTimeNanos) noexcept;
+
+    [[nodiscard]] bool openInput(const AudioDeviceConfig& config, std::string& error);
 
     AudioObjectID    deviceID_  = kAudioObjectUnknown;
     AudioDeviceIOProcID procID_ = nullptr;
     AudioIOCallback* callback_  = nullptr;
     std::atomic<bool> running_{false};
+
+    /// The input side. On Macs the microphone is a separate HAL device from
+    /// the speakers, so input generally means a second device with its own
+    /// IOProc on its own realtime thread and its own clock. When the user
+    /// picks a true duplex interface (inputDeviceID_ == deviceID_) the main
+    /// IOProc's input arguments are used instead and no second proc exists.
+    AudioObjectID       inputDeviceID_ = kAudioObjectUnknown;
+    AudioDeviceIOProcID inputProcID_   = nullptr;
 
     std::string  name_;
     double       sampleRate_     = 0.0;
@@ -204,6 +231,10 @@ private:
     std::int64_t outputLatency_  = 0;
     std::int64_t inputLatency_   = 0;
     std::int64_t safetyOffset_   = 0;
+
+    std::size_t  inputChannels_       = 0;
+    std::int64_t inputBufferSize_     = 0;
+    std::int64_t inputSafetyOffset_   = 0;
 
     /// Planar scratch the engine renders into, allocated in `open`.
     ///
@@ -219,8 +250,15 @@ private:
     /// is servicing, which is not always what our property query reported.
     std::int64_t        scratchCapacity_ = 0;
 
+    /// Planar scratch the input side deinterleaves into. Same reasoning and
+    /// same max-range sizing as the output scratch, on the input device.
+    std::vector<float>        inputScratch_;
+    std::vector<const float*> inputScratchChannels_;
+    std::int64_t              inputScratchCapacity_ = 0;
+
     /// The shared device's buffer size before we changed it; restored in close.
     UInt32              bufferSizeToRestore_ = 0;
+    UInt32              inputBufferSizeToRestore_ = 0;
 };
 
 std::vector<AudioDeviceInfo> CoreAudioDevice::enumerateDevices() const
@@ -335,10 +373,12 @@ bool CoreAudioDevice::open(const AudioDeviceConfig& config, std::string& error)
 
     outputLatency_ = latencyFrames(deviceID_, kAudioObjectPropertyScopeOutput);
 
-    if (!config.inputDeviceIdentifier.empty()) {
-        const AudioObjectID input = findDeviceByUID(config.inputDeviceIdentifier);
-        if (input != kAudioObjectUnknown)
-            inputLatency_ = latencyFrames(input, kAudioObjectPropertyScopeInput);
+    if (!config.inputDeviceIdentifier.empty() && !openInput(config, error)) {
+        // Failing loudly rather than continuing without input: a DAW that
+        // silently records nothing is worse than one that refuses to open.
+        // The caller can retry with input disabled and tell the user why.
+        deviceID_ = kAudioObjectUnknown;
+        return false;
     }
 
     // Planar scratch, allocated once here so the callback never has to.
@@ -371,6 +411,99 @@ bool CoreAudioDevice::open(const AudioDeviceConfig& config, std::string& error)
     return true;
 }
 
+bool CoreAudioDevice::openInput(const AudioDeviceConfig& config, std::string& error)
+{
+    inputDeviceID_ = config.inputDeviceIdentifier == AudioDeviceConfig::defaultInput
+                         ? defaultDevice(true)
+                         : findDeviceByUID(config.inputDeviceIdentifier);
+
+    if (inputDeviceID_ == kAudioObjectUnknown) {
+        error = "input device not found: " + config.inputDeviceIdentifier;
+        return false;
+    }
+
+    const std::size_t available = channelCount(inputDeviceID_, kAudioObjectPropertyScopeInput);
+    if (available == 0) {
+        error = "input device '" + getStringProperty(inputDeviceID_, kAudioObjectPropertyName)
+              + "' has no input channels";
+        inputDeviceID_ = kAudioObjectUnknown;
+        return false;
+    }
+
+    inputChannels_ = config.inputChannels < available ? config.inputChannels : available;
+
+    // The input device must run at the output's granted rate. They are
+    // separate clock domains either way — that residual drift is documented in
+    // docs/DECISIONS.md D-023 — but a different NOMINAL rate is not drift, it
+    // is audio at the wrong speed, and no downstream math can repair it.
+    Float64 inputRate = 0.0;
+    getProperty(inputDeviceID_, address(kAudioDevicePropertyNominalSampleRate), inputRate);
+
+    if (inputRate != static_cast<Float64>(sampleRate_)) {
+        setProperty(inputDeviceID_, address(kAudioDevicePropertyNominalSampleRate),
+                    static_cast<Float64>(sampleRate_));
+        getProperty(inputDeviceID_, address(kAudioDevicePropertyNominalSampleRate), inputRate);
+
+        if (inputRate != static_cast<Float64>(sampleRate_)) {
+            error = "input device cannot run at " + std::to_string(sampleRate_)
+                  + " Hz (offers " + std::to_string(inputRate) + " Hz); sample-rate "
+                  + "conversion on capture is not implemented";
+            inputDeviceID_ = kAudioObjectUnknown;
+            return false;
+        }
+    }
+
+    // Same record-and-restore contract as the output side: the buffer size is
+    // a property of the shared device, and leaving ours behind breaks other
+    // applications' capture.
+    if (config.bufferSize > 0 && inputDeviceID_ != deviceID_) {
+        UInt32 before = 0;
+        if (getProperty(inputDeviceID_, address(kAudioDevicePropertyBufferFrameSize,
+                                                kAudioObjectPropertyScopeInput), before))
+            inputBufferSizeToRestore_ = before;
+
+        setProperty(inputDeviceID_, address(kAudioDevicePropertyBufferFrameSize,
+                                            kAudioObjectPropertyScopeInput),
+                    static_cast<UInt32>(config.bufferSize));
+    }
+
+    UInt32 grantedBuffer = 0;
+    getProperty(inputDeviceID_, address(kAudioDevicePropertyBufferFrameSize,
+                                        kAudioObjectPropertyScopeInput), grantedBuffer);
+    inputBufferSize_ = grantedBuffer > 0 ? static_cast<std::int64_t>(grantedBuffer) : bufferSize_;
+
+    UInt32 safety = 0;
+    getProperty(inputDeviceID_, address(kAudioDevicePropertySafetyOffset,
+                                        kAudioObjectPropertyScopeInput), safety);
+    inputSafetyOffset_ = static_cast<std::int64_t>(safety);
+
+    inputLatency_ = latencyFrames(inputDeviceID_, kAudioObjectPropertyScopeInput);
+
+    // Input scratch, sized from the input device's own maximum for the same
+    // reason as the output scratch: a shared device delivers what it is
+    // already servicing.
+    AudioValueRange sizeRange{};
+    inputScratchCapacity_ = inputBufferSize_;
+
+    if (getProperty(inputDeviceID_, address(kAudioDevicePropertyBufferFrameSizeRange,
+                                            kAudioObjectPropertyScopeInput), sizeRange)
+        && sizeRange.mMaximum > static_cast<Float64>(inputScratchCapacity_))
+        inputScratchCapacity_ = static_cast<std::int64_t>(sizeRange.mMaximum);
+
+    if (inputScratchCapacity_ < inputBufferSize_ * 4)
+        inputScratchCapacity_ = inputBufferSize_ * 4;
+
+    const auto capacity = static_cast<std::size_t>(inputScratchCapacity_);
+
+    inputScratch_.assign(inputChannels_ * capacity, 0.0f);
+    inputScratchChannels_.resize(inputChannels_);
+
+    for (std::size_t channel = 0; channel < inputChannels_; ++channel)
+        inputScratchChannels_[channel] = inputScratch_.data() + channel * capacity;
+
+    return true;
+}
+
 void CoreAudioDevice::close()
 {
     stop();
@@ -378,6 +511,11 @@ void CoreAudioDevice::close()
     if (procID_ != nullptr && deviceID_ != kAudioObjectUnknown) {
         AudioDeviceDestroyIOProcID(deviceID_, procID_);
         procID_ = nullptr;
+    }
+
+    if (inputProcID_ != nullptr && inputDeviceID_ != kAudioObjectUnknown) {
+        AudioDeviceDestroyIOProcID(inputDeviceID_, inputProcID_);
+        inputProcID_ = nullptr;
     }
 
     // Put the shared device's buffer size back the way it was found. Leaving
@@ -388,12 +526,28 @@ void CoreAudioDevice::close()
                     bufferSizeToRestore_);
     }
 
-    bufferSizeToRestore_ = 0;
-    deviceID_ = kAudioObjectUnknown;
+    if (inputBufferSizeToRestore_ != 0 && inputDeviceID_ != kAudioObjectUnknown
+        && inputBufferSizeToRestore_ != static_cast<UInt32>(inputBufferSize_)) {
+        setProperty(inputDeviceID_, address(kAudioDevicePropertyBufferFrameSize,
+                                            kAudioObjectPropertyScopeInput),
+                    inputBufferSizeToRestore_);
+    }
+
+    bufferSizeToRestore_      = 0;
+    inputBufferSizeToRestore_ = 0;
+    deviceID_      = kAudioObjectUnknown;
+    inputDeviceID_ = kAudioObjectUnknown;
     callback_ = nullptr;
     scratch_.clear();
     scratchChannels_.clear();
     scratchCapacity_ = 0;
+    inputScratch_.clear();
+    inputScratchChannels_.clear();
+    inputScratchCapacity_ = 0;
+    inputChannels_        = 0;
+    inputBufferSize_      = 0;
+    inputSafetyOffset_    = 0;
+    inputLatency_         = 0;
 }
 
 bool CoreAudioDevice::start(AudioIOCallback& callback, std::string& error)
@@ -419,11 +573,34 @@ bool CoreAudioDevice::start(AudioIOCallback& callback, std::string& error)
         }
     }
 
+    // A separate input device needs its own IOProc; a duplex device delivers
+    // input through the main proc's input arguments and must not get two.
+    if (inputDeviceID_ != kAudioObjectUnknown && inputDeviceID_ != deviceID_
+        && inputProcID_ == nullptr) {
+        const OSStatus status = AudioDeviceCreateIOProcID(
+            inputDeviceID_, &CoreAudioDevice::inputProcTrampoline, this, &inputProcID_);
+        if (status != noErr || inputProcID_ == nullptr) {
+            error = "AudioDeviceCreateIOProcID (input) failed (" + std::to_string(status) + ")";
+            callback_ = nullptr;
+            return false;
+        }
+    }
+
     const OSStatus status = AudioDeviceStart(deviceID_, procID_);
     if (status != noErr) {
         error = "AudioDeviceStart failed (" + std::to_string(status) + ")";
         callback_ = nullptr;
         return false;
+    }
+
+    if (inputProcID_ != nullptr) {
+        const OSStatus inputStatus = AudioDeviceStart(inputDeviceID_, inputProcID_);
+        if (inputStatus != noErr) {
+            AudioDeviceStop(deviceID_, procID_);
+            error = "AudioDeviceStart (input) failed (" + std::to_string(inputStatus) + ")";
+            callback_ = nullptr;
+            return false;
+        }
     }
 
     running_.store(true, std::memory_order_release);
@@ -438,16 +615,40 @@ void CoreAudioDevice::stop()
     if (deviceID_ != kAudioObjectUnknown && procID_ != nullptr)
         AudioDeviceStop(deviceID_, procID_);
 
+    if (inputDeviceID_ != kAudioObjectUnknown && inputProcID_ != nullptr)
+        AudioDeviceStop(inputDeviceID_, inputProcID_);
+
     if (callback_ != nullptr)
         callback_->audioDeviceStopped();
 }
 
 OSStatus CoreAudioDevice::ioProcTrampoline(AudioObjectID, const AudioTimeStamp* now,
-                                           const AudioBufferList*, const AudioTimeStamp*,
+                                           const AudioBufferList* inputData,
+                                           const AudioTimeStamp* inputTime,
                                            AudioBufferList* outputData, const AudioTimeStamp* outputTime,
                                            void* clientData) noexcept
 {
-    if (outputData == nullptr || clientData == nullptr)
+    if (clientData == nullptr)
+        return noErr;
+
+    auto* self = static_cast<CoreAudioDevice*>(clientData);
+
+    // A duplex device (input selected on the same AudioObjectID) delivers its
+    // input here; a separate input device has its own proc below.
+    if (self->inputDeviceID_ == self->deviceID_ && inputData != nullptr
+        && inputData->mNumberBuffers > 0) {
+        std::uint64_t captureTime = 0;
+
+        if (inputTime != nullptr && (inputTime->mFlags & kAudioTimeStampHostTimeValid) != 0)
+            captureTime = inputTime->mHostTime;
+        else if (now != nullptr && (now->mFlags & kAudioTimeStampHostTimeValid) != 0)
+            captureTime = now->mHostTime;
+
+        self->captureFrom(*inputData,
+                          captureTime != 0 ? hostTimeToNanos(captureTime) : hostTimeNowNanos());
+    }
+
+    if (outputData == nullptr)
         return noErr;
 
     // The OUTPUT timestamp, not `now`: it says when this block will actually be
@@ -460,10 +661,89 @@ OSStatus CoreAudioDevice::ioProcTrampoline(AudioObjectID, const AudioTimeStamp* 
     else if (now != nullptr && (now->mFlags & kAudioTimeStampHostTimeValid) != 0)
         hostTime = now->mHostTime;
 
-    static_cast<CoreAudioDevice*>(clientData)->renderInto(
-        *outputData, hostTime != 0 ? hostTimeToNanos(hostTime) : hostTimeNowNanos());
+    self->renderInto(*outputData, hostTime != 0 ? hostTimeToNanos(hostTime) : hostTimeNowNanos());
 
     return noErr;
+}
+
+OSStatus CoreAudioDevice::inputProcTrampoline(AudioObjectID, const AudioTimeStamp* now,
+                                              const AudioBufferList* inputData,
+                                              const AudioTimeStamp* inputTime,
+                                              AudioBufferList*, const AudioTimeStamp*,
+                                              void* clientData) noexcept
+{
+    if (inputData == nullptr || clientData == nullptr)
+        return noErr;
+
+    // The INPUT timestamp: when the first frame of this block was captured at
+    // the device. The symmetric twin of the output-time rule above — using
+    // `now` would bake the delivery delay into every recorded position.
+    std::uint64_t hostTime = 0;
+
+    if (inputTime != nullptr && (inputTime->mFlags & kAudioTimeStampHostTimeValid) != 0)
+        hostTime = inputTime->mHostTime;
+    else if (now != nullptr && (now->mFlags & kAudioTimeStampHostTimeValid) != 0)
+        hostTime = now->mHostTime;
+
+    static_cast<CoreAudioDevice*>(clientData)->captureFrom(
+        *inputData, hostTime != 0 ? hostTimeToNanos(hostTime) : hostTimeNowNanos());
+
+    return noErr;
+}
+
+void CoreAudioDevice::captureFrom(const AudioBufferList& inputData, std::uint64_t hostTimeNanos) noexcept
+{
+    // Runs on the INPUT device's realtime thread — on a two-device rig this is
+    // concurrent with renderInto. They share no mutable state: input has its
+    // own scratch, and the callback is set before start and cleared after stop.
+
+    if (!running_.load(std::memory_order_acquire) || callback_ == nullptr
+        || inputData.mNumberBuffers == 0 || inputChannels_ == 0)
+        return;
+
+    const bool interleaved = inputData.mNumberBuffers == 1 && inputData.mBuffers[0].mNumberChannels > 1;
+
+    const auto deviceChannels = static_cast<std::size_t>(
+        interleaved ? inputData.mBuffers[0].mNumberChannels : inputData.mNumberBuffers);
+
+    auto frames = static_cast<std::int64_t>(
+        inputData.mBuffers[0].mDataByteSize
+        / (sizeof(float) * (interleaved ? inputData.mBuffers[0].mNumberChannels : 1)));
+
+    if (frames <= 0)
+        return;
+
+    if (frames > inputScratchCapacity_)
+        frames = inputScratchCapacity_;
+
+    const auto capacity = static_cast<std::size_t>(inputScratchCapacity_);
+
+    for (std::size_t channel = 0; channel < inputChannels_; ++channel) {
+        float* destination = inputScratch_.data() + channel * capacity;
+
+        if (interleaved) {
+            const auto* source = static_cast<const float*>(inputData.mBuffers[0].mData);
+            if (source == nullptr)
+                return;
+
+            if (channel < deviceChannels)
+                for (std::int64_t frame = 0; frame < frames; ++frame)
+                    destination[frame] = source[static_cast<std::size_t>(frame) * deviceChannels + channel];
+            else
+                std::memset(destination, 0, static_cast<std::size_t>(frames) * sizeof(float));
+        } else {
+            const auto* source = channel < inputData.mNumberBuffers
+                                     ? static_cast<const float*>(inputData.mBuffers[channel].mData)
+                                     : nullptr;
+
+            if (source != nullptr)
+                std::memcpy(destination, source, static_cast<std::size_t>(frames) * sizeof(float));
+            else
+                std::memset(destination, 0, static_cast<std::size_t>(frames) * sizeof(float));
+        }
+    }
+
+    callback_->captureAudioBlock(inputScratchChannels_.data(), inputChannels_, frames, hostTimeNanos);
 }
 
 void CoreAudioDevice::renderInto(AudioBufferList& outputData, std::uint64_t hostTimeNanos) noexcept

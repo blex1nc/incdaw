@@ -8,6 +8,45 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 12 (part 2) — Input capture and recording — 2026-08-15
+
+**Added**
+
+- `platform/AudioDevice` — input capture. `AudioIOCallback::captureAudioBlock`
+  (default no-op), separate input device selection (`"default"` sentinel — an
+  empty identifier still means "never open the microphone unasked"), input
+  latency/safety-offset/channel reporting, `totalInputLatencyFrames`.
+- `platform/macos/CoreAudioDevice` — a second IOProc on the input device (on
+  Macs the microphone is a separate HAL device); duplex devices use the main
+  proc's input arguments. Input scratch sized from the input device's own
+  maximum; record-and-restore of the input device's buffer size; a nominal
+  rate the input cannot match is a hard, explained failure (D-023).
+- `engine/audio/WavStreamWriter` — incremental WAV writing for takes: streams
+  blocks as they arrive, patches the RIFF sizes on finalize, byte-identical to
+  `WavFile::write` (both share `WavBytes.h`). An unfinalized file probes as an
+  empty take, not garbage.
+- `engine/core/SampleRingBuffer` — SPSC bulk sample ring, runtime capacity,
+  two memcpys and one release store per call.
+- `engine/audio/AudioRecorder` — realtime-safe capture to WAV: wait-free
+  interleave into the ring on the capture thread, polling writer thread
+  draining to disk, whole-frame drops counted and reported, take start
+  reported with the device's input latency subtracted.
+- `engine/AudioEngine` — `setCaptureSink` (atomic, same pattern as the graph
+  swap), input passthroughs, capture forwarding under the realtime guard.
+- `incdaw-audiocheck --record [--input UID] [--take PATH]` — hardware
+  verification of the capture path.
+- `tests/unit/WavStreamWriterTests.cpp`, `tests/unit/AudioRecorderTests.cpp` —
+  including the Phase 12 exit criterion: a simulated loopback whose recorded
+  audio lands sample-accurately with compensation applied, and exactly
+  `latency` frames late with it removed.
+
+Verified on hardware (AirPods output + MacBook microphone — two devices, two
+clocks): 2 s take, 0 dropped frames, 0 overruns, 0 realtime allocations. The
+AirPods HFP microphone (24 kHz) is correctly refused with both rates named.
+
+Still to come in Phase 12: the disk-streaming reader, recording into the
+timeline (a take becoming an audio clip), monitoring, and the audio editor.
+
 ### Phase 12 (part 1) — WAV codec — 2026-08-15
 
 **Added**

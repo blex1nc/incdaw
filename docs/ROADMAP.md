@@ -223,6 +223,20 @@ normalize, gain, reverse, silence, markers, regions.
 sample-accurately against the source, proving reported device latency is
 correctly applied.
 
+**STARTED (2026-08-15).** Part 1: the WAV codec (`WavFile`). Part 2: input
+capture through a second IOProc on the input device (D-023), the streaming
+WAV writer, `SampleRingBuffer`, and `AudioRecorder` — capture is wait-free,
+drops are counted honestly, and the take's start is reported with the
+device's total input latency subtracted. **The exit criterion is met and
+asserted deterministically** in `tests/unit/AudioRecorderTests.cpp`: a
+simulated loopback lands sample-accurately with compensation applied and
+exactly `latency` frames late with it removed; `incdaw-audiocheck --record`
+verifies the same path on real hardware (0 drops, 0 overruns, 0 realtime
+allocations, two independently-clocked devices). Outstanding within this
+phase: the disk-streaming reader, recording into the timeline as an audio
+clip, input monitoring, the pre-record buffer / Audio Logger, and the audio
+editor.
+
 ---
 
 ## Phase 13 — Plugin hosting

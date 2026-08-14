@@ -1,8 +1,8 @@
 # INCDAW — HANDOFF
 
-Version: 1.5
-Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12 STARTED
-Last updated: 2026-08-14
+Version: 1.6
+Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12: CAPTURE + RECORDER DONE, EXIT CRITERION MET
+Last updated: 2026-08-15
 Project: INCDAW
 Reference DAW: FL Studio 2026
 Primary coding agent: Claude Code
@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  300 test cases, 41,841 assertions, green in both Debug and Release.
+  313 test cases, 65,493 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -182,7 +182,7 @@ Phase 6 — COMPLETE. Done and tested:
   Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
   scroll to pan, Cmd+scroll to zoom.
 
-Phase 12 — STARTED. Done and tested so far:
+Phase 12 — IN PROGRESS. Done and tested so far:
 
   engine/audio/WavFile   RIFF/WAVE read/probe/write: PCM 16/24/32 + float32,
                          EXTENSIBLE unwrapped, chunk walking with pad bytes,
@@ -190,9 +190,43 @@ Phase 12 — STARTED. Done and tested so far:
                          within one step (PCM). This is the gate 9b, 11b and
                          the editor were waiting on.
 
-  NOT started within Phase 12: input capture (CoreAudioDevice opens output
-  only), the disk streamer, recording into the timeline, the measured loopback
-  exit criterion, and the audio editor. The phase is NOT complete.
+  Part 2 (2026-08-15) — input capture and the recorder:
+
+  platform/AudioDevice        captureAudioBlock (default no-op), separate input
+                              device selection ("default" sentinel; empty still
+                              means "never open the microphone unasked"),
+                              totalInputLatencyFrames, input channel reporting
+  CoreAudioDevice             second IOProc on the input device (Macs: the mic
+                              is its own HAL device); duplex devices reuse the
+                              main proc's input arguments; input buffer size
+                              record-and-restore; rate mismatch = hard failure
+                              with both rates named (D-023)
+  engine/audio/WavBytes.h     one encoder shared by both WAV writers
+  engine/audio/WavStreamWriter incremental writing, sizes patched on finalize;
+                              byte-identical to WavFile::write (asserted);
+                              unfinalized file probes as an empty take
+  engine/core/SampleRingBuffer SPSC bulk sample ring, runtime capacity
+  engine/audio/AudioRecorder  wait-free capture -> ring -> polling writer
+                              thread -> disk; whole-frame drops counted and
+                              reported in the Take; take start reported with
+                              total input latency subtracted
+  engine/AudioEngine          setCaptureSink (atomic, the capture twin of the
+                              graph swap), input passthroughs
+  audiocheck --record         hardware verification (--input UID, --take PATH)
+
+  THE PHASE 12 EXIT CRITERION IS MET AND ASSERTED IN CI:
+  tests/unit/AudioRecorderTests.cpp runs a simulated loopback — recorded audio
+  lands sample-accurately with the reported latency applied, and exactly
+  `latency` frames late with compensation removed (the PDC-test pattern: the
+  pass is proven to depend on the mechanism). Verified on hardware with two
+  independently-clocked devices (AirPods out + MacBook mic): 2 s take,
+  0 dropped frames, 0 overruns, 0 realtime allocations. The AirPods HFP mic
+  (24 kHz nominal) is correctly refused.
+
+  NOT started within Phase 12: the disk-streaming READER, recording into the
+  timeline (take -> AudioAsset -> audio clip), input monitoring, the
+  pre-record buffer / Audio Logger, and the audio editor. The phase is NOT
+  complete.
 
 Phase 11a — COMPLETE. Done and tested:
 
@@ -1014,21 +1048,24 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 12 (recording + the audio file subsystem), which also unlocks
-9b (audio clips) and 11b's automation recording. The WAV reader/writer and the
-disk streamer are the gate for all three.
+Next step: finish Phase 12 — recording into the timeline, then the editor.
 
-  Phase 12 is recording and the audio editor, and it is the gate for the two
-  outstanding halves (9b audio clips, 11b automation recording):
+  What exists after part 2: WAV read/probe/write, streaming WAV writing,
+  device input capture with correct latency accounting (proven by the
+  loopback tests), and a realtime-safe recorder producing takes on disk.
 
-    - a WAV reader/writer and a disk streamer are the actual subsystem; the
-      AudioAsset model type has been waiting for them since Phase 4
-    - input capture goes through CoreAudioDevice, which only opens output today
-    - the roadmap's exit criterion is a measured loopback test: recorded audio
-      lands sample-accurately against the source, proving reported device
-      latency is correctly applied
-    - the UI story (waveform view, trim, fade, normalize) comes after audio
-      exists to look at
+  What remains, in dependency order:
+
+    - take -> project: a stopped Take must become an AudioAsset + audio clip
+      on a track at its latency-compensated position (the Take already
+      reports startHostTimeNanos; the transport knows host time -> timeline).
+      This is "recording into the playlist" and unlocks 9b's audio clips.
+    - the disk-streaming READER (playback side of streaming): audio clips
+      longer than memory, and the pre-record buffer / Audio Logger
+    - input monitoring (input -> a strip, with the usual latency caveats)
+    - the audio editor UI (waveform view, trim, fade, normalize) — after
+      audio exists in the timeline to look at
+    - 11b (automation recording) rides the same capture-timestamp machinery
 
 Things to be careful about:
 
@@ -1061,7 +1098,21 @@ Things to be careful about:
   - The buffer size is a property of the SHARED output device. CoreAudioDevice
     now records the value it found and restores it in close(); never remove
     that, or quitting INCDAW leaves every other application's audio broken.
-    The default request is 512 because Bluetooth cannot sustain less.
+    The default request is 512 because Bluetooth cannot sustain less. The same
+    record-and-restore contract now applies to the input device's buffer size.
+  - Capture is a second clock domain (D-023). Input timestamps are the HAL's,
+    with reported input latency subtracted only at the reporting edge (the
+    recorder's Take). Do not subtract it anywhere else, or it will be applied
+    twice. Two-device drift within a take is real, second-order, and
+    deliberately unhandled for now — it is written down in D-023.
+  - There is NO sample-rate conversion on capture. An input that cannot run at
+    the output's granted rate is refused with both rates named. This is hit in
+    practice by Bluetooth HFP microphones (AirPods mic: 24 kHz); users must
+    pick a real microphone, and the UI will eventually need to say so.
+  - An unfinalized take (crash mid-recording) probes as ZERO frames by design:
+    the header is written with zero sizes and patched on finalize. A recovery
+    pass that reconstructs the length from the file size is possible future
+    work; do not "fix" the zero header into a lie instead.
 
 ---
 

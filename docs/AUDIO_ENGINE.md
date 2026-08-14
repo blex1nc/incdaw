@@ -48,6 +48,17 @@ Reported latency is what makes recorded audio land in the right place. Getting
 it wrong is silent and only discovered much later, so Phase 12 includes a
 measured loopback alignment test rather than trusting the arithmetic.
 
+**Capture (Phase 12):** input is its own clock domain. The input device gets
+its own IOProc (a duplex device reuses the main proc's input arguments), and
+each captured block crosses the realtime boundary through
+`AudioIOCallback::captureAudioBlock` carrying the HAL's input timestamp. The
+engine forwards it through one atomic sink pointer (`AudioCaptureSink`) — the
+capture twin of the graph swap. Whoever places the audio subtracts
+`totalInputLatencyFrames`; the loopback tests in
+`tests/unit/AudioRecorderTests.cpp` prove the subtraction is real by asserting
+its absence misaligns by exactly the reported latency. Rationale and
+tradeoffs: docs/DECISIONS.md D-023.
+
 ---
 
 ## 3. Realtime thread scheduling
