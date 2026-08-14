@@ -8,6 +8,22 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 12 (part 1) — WAV codec — 2026-08-15
+
+**Added**
+
+- `engine/audio/WavFile` — RIFF/WAVE read, probe and write. PCM 16/24/32 and
+  IEEE float 32; WAVE_FORMAT_EXTENSIBLE unwrapped; chunk walking that survives
+  LIST/bext/junk chunks and honours the pad byte on odd sizes; sign-correct
+  24-bit decode. `probe` fills metadata without decoding — what the browser and
+  the relinker need.
+- `tests/unit/WavFileTests.cpp` — bit-exact float round trip, PCM round trips
+  within one quantisation step, probe, spliced-chunk survival, garbage refusal.
+
+The gate for Phase 9b (audio clips), 11b (automation recording) and the audio
+editor. Still to come in Phase 12: input capture, the disk streamer, recording
+into the timeline, the measured loopback exit criterion, and the editor.
+
 ### Phase 11a — Automation: the generic subsystem — 2026-08-15
 
 **Added**

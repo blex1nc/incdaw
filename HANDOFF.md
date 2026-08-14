@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.4
-Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12 NEXT
+Version: 1.5
+Status: PHASES 0-11a COMPLETE (9b, 11b OUTSTANDING) / PHASE 12 STARTED
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  295 test cases, 31,258 assertions, green in both Debug and Release.
+  300 test cases, 41,841 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -181,6 +181,18 @@ Phase 6 — COMPLETE. Done and tested:
   right edge to resize, right-click to delete, shift-drag to box select,
   Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
   scroll to pan, Cmd+scroll to zoom.
+
+Phase 12 — STARTED. Done and tested so far:
+
+  engine/audio/WavFile   RIFF/WAVE read/probe/write: PCM 16/24/32 + float32,
+                         EXTENSIBLE unwrapped, chunk walking with pad bytes,
+                         sign-correct 24-bit. Round trips bit-exact (float) /
+                         within one step (PCM). This is the gate 9b, 11b and
+                         the editor were waiting on.
+
+  NOT started within Phase 12: input capture (CoreAudioDevice opens output
+  only), the disk streamer, recording into the timeline, the measured loopback
+  exit criterion, and the audio editor. The phase is NOT complete.
 
 Phase 11a — COMPLETE. Done and tested:
 
