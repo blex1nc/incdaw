@@ -71,6 +71,7 @@ endif()
 add_library(incdaw_plugins STATIC
     plugins/PluginIdentifier.cpp
     plugins/PluginScan.cpp
+    plugins/PluginRegistry.cpp
     plugins/clap/ClapLibrary.cpp)
 target_include_directories(incdaw_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

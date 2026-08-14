@@ -8,6 +8,21 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 2) — The registry and its blacklist — 2026-08-15
+
+**Added**
+
+- `plugins/PluginRegistry` — the persisted catalogue: startup loads it and
+  touches no plugin binary at all. Scanning goes through the out-of-process
+  scanner; the cache key is (size, mtime), so an unchanged library —
+  including a blacklisted one — never spawns another child. A crashed or
+  failed library is blacklisted WITH its reason and skipped until the user
+  clears it; clearing erases the entry so the next scan genuinely retries.
+  Versioned TSV persistence; an unknown version is refused, not guessed at.
+- `tests/unit/PluginRegistryTests.cpp` — cataloguing + blacklisting, the
+  zero-rescan cache guarantee, mtime-triggered rescan, blacklist retry,
+  file round trip, version refusal.
+
 ### Phase 13 (part 1) — CLAP hosting foundation — 2026-08-15
 
 **Added**
