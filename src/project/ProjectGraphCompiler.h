@@ -2,6 +2,7 @@
 
 #include "engine/graph/RenderGraph.h"
 #include "engine/instrument/Instrument.h"
+#include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/InstrumentNode.h"
 #include "engine/transport/TempoMap.h"
 #include "project/Model.h"
@@ -22,9 +23,13 @@ namespace incdaw::project {
 /// pattern, which meant every new subsystem would have had to be threaded
 /// through the UI as well.
 ///
-/// The mixer is deliberately absent. Channel volume is applied, pan is not:
-/// a pan law belongs to the mixer (Phase 10), and an approximation here would
-/// have to be unpicked later. The signal path is channel -> master.
+/// The signal path is:
+///
+///     instrument -> channel strip -> mixer track -> [sends/buses] -> master
+///
+/// Every one of those is a MixerStripNode, so channel volume, channel pan,
+/// mixer volume, pan, mute and polarity are all the same well-tested arithmetic
+/// rather than four approximations of it.
 
 enum class PlaybackSource : std::uint8_t {
     /// One pattern on loop — what the Piano Roll edits.
@@ -50,8 +55,9 @@ struct GraphCompileOptions {
     engine::FrameCount maxBlockSize = 512;
     std::size_t        channelCount = 2;
 
-    /// Applied at the master node. A placeholder for the master mixer track
-    /// until Phase 10 builds one.
+    /// Applied at the master strip, on top of the master mixer node's own
+    /// volume. Headroom for a project that has not been mixed yet, not a
+    /// substitute for the master fader.
     engine::Sample     masterGain   = engine::Sample{0.8f};
 
     PlaybackSource     source       = PlaybackSource::pattern;
@@ -77,12 +83,28 @@ struct CompiledProjectGraph {
     std::vector<EntityId>                channels;
     std::vector<engine::InstrumentNode*> instruments;
 
+    /// Mixer nodes that made it into the graph, and their strips. The UI reads
+    /// meters through these, and writes fader, pan and mute moves straight to
+    /// them: a parameter change does not alter the topology, so recompiling for
+    /// one would be waste — and would reset every meter on the way past.
+    std::vector<EntityId>                    mixerNodes;
+    std::vector<engine::dsp::MixerStripNode*> strips;
+
+    /// Channel strips, in the same order as `channels`.
+    std::vector<engine::dsp::MixerStripNode*> channelStrips;
+
     std::string error;
 
     [[nodiscard]] explicit operator bool() const noexcept { return graph != nullptr; }
 
     /// Instrument node for a channel, or nullptr if it is not in the graph.
     [[nodiscard]] engine::InstrumentNode* instrumentFor(EntityId channel) const noexcept;
+
+    /// Strip for a mixer node, or nullptr if it is not in the graph.
+    [[nodiscard]] engine::dsp::MixerStripNode* stripFor(EntityId mixerNode) const noexcept;
+
+    /// Strip for a channel, or nullptr if the channel is silent.
+    [[nodiscard]] engine::dsp::MixerStripNode* channelStripFor(EntityId channel) const noexcept;
 };
 
 /// Compiles `project` against `tempoMap`, which must outlive the returned graph

@@ -349,8 +349,10 @@ public:
     /// than out of bounds.
     Channel& insertChannel(std::size_t index, Channel channel);
     Pattern& insertPattern(std::size_t index, Pattern pattern);
-    Track&   insertTrack(std::size_t index, Track track);
-    Clip&    insertClip(std::size_t index, Clip clip);
+    Track&     insertTrack(std::size_t index, Track track);
+    Clip&      insertClip(std::size_t index, Clip clip);
+    MixerNode& insertMixerNode(std::size_t index, MixerNode node);
+    RoutingConnection& insertRouting(std::size_t index, RoutingConnection connection);
 
     /// Removes an entity by id. False when there is nothing to remove.
     ///
@@ -361,6 +363,8 @@ public:
     bool removePattern(EntityId id) noexcept;
     bool removeTrack(EntityId id) noexcept;
     bool removeClip(EntityId id) noexcept;
+    bool removeMixerNode(EntityId id) noexcept;
+    bool removeRouting(EntityId id) noexcept;
 
     static constexpr std::size_t notFound = static_cast<std::size_t>(-1);
 
@@ -368,6 +372,8 @@ public:
     [[nodiscard]] std::size_t indexOfPattern(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfTrack(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfClip(EntityId id) const noexcept;
+    [[nodiscard]] std::size_t indexOfMixerNode(EntityId id) const noexcept;
+    [[nodiscard]] std::size_t indexOfRouting(EntityId id) const noexcept;
 
     [[nodiscard]] std::vector<Track>&             tracks()      noexcept { return tracks_; }
     [[nodiscard]] std::vector<Channel>&           channels()    noexcept { return channels_; }
@@ -398,6 +404,9 @@ public:
     [[nodiscard]] const Pattern*   findPattern(EntityId id) const noexcept;
     [[nodiscard]] Pattern*         findPattern(EntityId id) noexcept;
     [[nodiscard]] const MixerNode* findMixerNode(EntityId id) const noexcept;
+    [[nodiscard]] MixerNode*       findMixerNode(EntityId id) noexcept;
+    [[nodiscard]] const RoutingConnection* findRouting(EntityId id) const noexcept;
+    [[nodiscard]] RoutingConnection*       findRouting(EntityId id) noexcept;
 
     /// Assets whose file cannot be found. A project with missing media still
     /// opens (docs/PROJECT_FORMAT.md §4); this is what the relink dialog lists.

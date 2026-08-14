@@ -91,7 +91,8 @@ add_library(incdaw_app STATIC
     app/commands/PatternCommands.cpp
     app/commands/StepCommands.cpp
     app/commands/TrackCommands.cpp
-    app/commands/ClipCommands.cpp)
+    app/commands/ClipCommands.cpp
+    app/commands/MixerCommands.cpp)
 target_include_directories(incdaw_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_app
     PUBLIC  incdaw_project
@@ -105,7 +106,8 @@ if(APPLE)
         ui/macos/PianoRollRenderer.mm
         ui/macos/ChannelRackView.mm
         ui/macos/PatternListView.mm
-        ui/macos/PlaylistView.mm)
+        ui/macos/PlaylistView.mm
+        ui/macos/MixerView.mm)
     target_link_libraries(INCDAW
         PRIVATE incdaw_app incdaw_warnings
                 "-framework Cocoa"

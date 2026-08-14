@@ -493,3 +493,283 @@ TEST_CASE("a mixer-sized graph renders far inside its block budget")
     MESSAGE("64-strip mixer: " << perBlock << " ms per 256-frame block");
     CHECK(perBlock < 5.33);
 }
+
+// ── The project's mixer, compiled ─────────────────────────────────────────────
+
+#include "app/CommandRegistry.h"
+#include "app/commands/MixerCommands.h"
+#include "engine/transport/TempoMap.h"
+#include "project/ProjectGraphCompiler.h"
+
+namespace {
+
+using incdaw::project::EntityId;
+
+/// A project with one audible channel and one pattern, so that compiling it
+/// produces a real signal path to inspect.
+struct MixerFixture {
+    incdaw::project::Project project;
+    EntityId                 channel;
+    EntityId                 pattern;
+    incdaw::engine::TempoMap tempo;
+
+    MixerFixture()
+    {
+        channel = project.addChannel("Channel 1").id;
+        pattern = project.addPattern("Pattern 1").id;
+
+        incdaw::project::MidiEvent note;
+        note.type     = incdaw::project::MidiEventType::note;
+        note.duration = 240;
+        note.key      = 60;
+        project.findPattern(pattern)->contentFor(channel).events.push_back(note);
+
+        tempo.setSampleRate(48000.0);
+    }
+
+    [[nodiscard]] incdaw::project::CompiledProjectGraph compile()
+    {
+        incdaw::project::GraphCompileOptions options;
+        options.pattern = pattern;
+        return incdaw::project::compileProjectGraph(project, tempo, options);
+    }
+};
+
+} // namespace
+
+TEST_CASE("channels reach the master through their mixer track")
+{
+    MixerFixture fixture;
+    incdaw::app::CommandRegistry registry{fixture.project};
+
+    auto add = std::make_unique<incdaw::app::AddMixerNodeCommand>(
+        incdaw::project::MixerNodeType::track, "Drums");
+    incdaw::app::AddMixerNodeCommand* raw = add.get();
+    REQUIRE(registry.execute(std::move(add)));
+
+    const EntityId track = raw->mixerNodeId();
+
+    REQUIRE(registry.execute(
+        std::make_unique<incdaw::app::ConnectMixerCommand>(track, fixture.project.masterMixerNode())));
+    REQUIRE(registry.execute(
+        std::make_unique<incdaw::app::SetChannelOutputCommand>(fixture.channel, track)));
+
+    const auto compiled = fixture.compile();
+    REQUIRE(compiled);
+
+    // The strip exists, carries the node's parameters, and can be driven
+    // directly — which is how a fader move avoids recompiling the graph.
+    incdaw::engine::dsp::MixerStripNode* strip = compiled.stripFor(track);
+    REQUIRE(strip != nullptr);
+    REQUIRE(compiled.stripFor(fixture.project.masterMixerNode()) != nullptr);
+    REQUIRE(compiled.channelStripFor(fixture.channel) != nullptr);
+
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::SetMixerVolumeCommand>(track, 0.5)));
+
+    const auto recompiled = fixture.compile();
+    REQUIRE(recompiled);
+    CHECK(recompiled.stripFor(track)->gain() == doctest::Approx(0.5));
+}
+
+TEST_CASE("a mixer routing cycle is refused, not silently broken")
+{
+    MixerFixture fixture;
+    incdaw::app::CommandRegistry registry{fixture.project};
+
+    auto first = std::make_unique<incdaw::app::AddMixerNodeCommand>(
+        incdaw::project::MixerNodeType::bus, "A");
+    incdaw::app::AddMixerNodeCommand* rawFirst = first.get();
+    REQUIRE(registry.execute(std::move(first)));
+
+    auto second = std::make_unique<incdaw::app::AddMixerNodeCommand>(
+        incdaw::project::MixerNodeType::bus, "B");
+    incdaw::app::AddMixerNodeCommand* rawSecond = second.get();
+    REQUIRE(registry.execute(std::move(second)));
+
+    const EntityId a = rawFirst->mixerNodeId();
+    const EntityId b = rawSecond->mixerNodeId();
+
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::ConnectMixerCommand>(a, b)));
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::ConnectMixerCommand>(b, a)));
+
+    const auto compiled = fixture.compile();
+    CHECK_FALSE(compiled);
+    CHECK(compiled.error.find("cycle") != std::string::npos);
+
+    // A node cannot be routed into itself either.
+    CHECK_FALSE(registry.execute(std::make_unique<incdaw::app::ConnectMixerCommand>(a, a)));
+}
+
+TEST_CASE("a send is a second edge with its own gain")
+{
+    MixerFixture fixture;
+    incdaw::app::CommandRegistry registry{fixture.project};
+
+    auto add = std::make_unique<incdaw::app::AddMixerNodeCommand>(
+        incdaw::project::MixerNodeType::bus, "Reverb");
+    incdaw::app::AddMixerNodeCommand* raw = add.get();
+    REQUIRE(registry.execute(std::move(add)));
+
+    const EntityId bus    = raw->mixerNodeId();
+    const EntityId master = fixture.project.masterMixerNode();
+
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::ConnectMixerCommand>(bus, master)));
+
+    const auto before = fixture.compile();
+    REQUIRE(before);
+    const std::size_t withoutSend = before.graph->nodeCount();
+
+    auto send = std::make_unique<incdaw::app::ConnectMixerCommand>(master, bus, true, 0.25);
+    incdaw::app::ConnectMixerCommand* rawSend = send.get();
+
+    // master -> bus -> master would be a cycle; the send therefore runs from a
+    // track, which is what a send always does in practice.
+    (void)rawSend;
+    CHECK(registry.execute(std::move(send)));
+
+    const auto cyclic = fixture.compile();
+    CHECK_FALSE(cyclic);
+
+    REQUIRE(registry.undo());
+
+    auto trackAdd = std::make_unique<incdaw::app::AddMixerNodeCommand>(
+        incdaw::project::MixerNodeType::track, "Drums");
+    incdaw::app::AddMixerNodeCommand* rawTrack = trackAdd.get();
+    REQUIRE(registry.execute(std::move(trackAdd)));
+
+    const EntityId track = rawTrack->mixerNodeId();
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::ConnectMixerCommand>(track, master)));
+
+    auto realSend = std::make_unique<incdaw::app::ConnectMixerCommand>(track, bus, true, 0.25);
+    incdaw::app::ConnectMixerCommand* rawRealSend = realSend.get();
+    REQUIRE(registry.execute(std::move(realSend)));
+
+    const auto after = fixture.compile();
+    REQUIRE(after);
+
+    // The send added its own gain node plus the routing; the graph grew.
+    CHECK(after.graph->nodeCount() > withoutSend);
+
+    REQUIRE(registry.execute(
+        std::make_unique<incdaw::app::SetSendGainCommand>(rawRealSend->connectionId(), 0.5)));
+    CHECK(fixture.project.findRouting(rawRealSend->connectionId())->gain == doctest::Approx(0.5));
+}
+
+TEST_CASE("mixer mute and solo silence the right strips, and never the master")
+{
+    MixerFixture fixture;
+    incdaw::app::CommandRegistry registry{fixture.project};
+
+    auto addFirst = std::make_unique<incdaw::app::AddMixerNodeCommand>(
+        incdaw::project::MixerNodeType::track, "A");
+    incdaw::app::AddMixerNodeCommand* rawFirst = addFirst.get();
+    REQUIRE(registry.execute(std::move(addFirst)));
+
+    auto addSecond = std::make_unique<incdaw::app::AddMixerNodeCommand>(
+        incdaw::project::MixerNodeType::track, "B");
+    incdaw::app::AddMixerNodeCommand* rawSecond = addSecond.get();
+    REQUIRE(registry.execute(std::move(addSecond)));
+
+    const EntityId a      = rawFirst->mixerNodeId();
+    const EntityId b      = rawSecond->mixerNodeId();
+    const EntityId master = fixture.project.masterMixerNode();
+
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::ConnectMixerCommand>(a, master)));
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::ConnectMixerCommand>(b, master)));
+
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::SetMixerMutedCommand>(a, true)));
+
+    auto muted = fixture.compile();
+    REQUIRE(muted);
+    CHECK(muted.stripFor(a)->isMuted());
+    CHECK_FALSE(muted.stripFor(b)->isMuted());
+    CHECK_FALSE(muted.stripFor(master)->isMuted());
+
+    REQUIRE(registry.undo());
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::SetMixerSoloedCommand>(a, true)));
+
+    auto soloed = fixture.compile();
+    REQUIRE(soloed);
+    CHECK_FALSE(soloed.stripFor(a)->isMuted());
+    CHECK(soloed.stripFor(b)->isMuted());
+
+    // Soloing a track must not silence the output everything reaches.
+    CHECK_FALSE(soloed.stripFor(master)->isMuted());
+}
+
+TEST_CASE("channel pan reaches the graph")
+{
+    MixerFixture fixture;
+
+    fixture.project.findChannel(fixture.channel)->pan = -1.0;
+
+    const auto compiled = fixture.compile();
+    REQUIRE(compiled);
+
+    incdaw::engine::dsp::MixerStripNode* strip = compiled.channelStripFor(fixture.channel);
+    REQUIRE(strip != nullptr);
+    CHECK(strip->pan() == doctest::Approx(-1.0));
+}
+
+TEST_CASE("mixer commands round trip, and removing a track takes its routing with it")
+{
+    MixerFixture fixture;
+    incdaw::app::CommandRegistry registry{fixture.project};
+
+    const incdaw::project::Project original = fixture.project;
+
+    auto add = std::make_unique<incdaw::app::AddMixerNodeCommand>(
+        incdaw::project::MixerNodeType::track, "Drums");
+    incdaw::app::AddMixerNodeCommand* raw = add.get();
+    REQUIRE(registry.execute(std::move(add)));
+
+    const EntityId track = raw->mixerNodeId();
+
+    REQUIRE(registry.execute(
+        std::make_unique<incdaw::app::ConnectMixerCommand>(track, fixture.project.masterMixerNode())));
+    REQUIRE(registry.execute(
+        std::make_unique<incdaw::app::SetChannelOutputCommand>(fixture.channel, track)));
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::RenameMixerNodeCommand>(track, "Kit")));
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::SetMixerVolumeCommand>(track, 0.75)));
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::SetMixerPanCommand>(track, 0.4)));
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::SetMixerPolarityCommand>(track, true)));
+
+    const incdaw::project::Project before = fixture.project;
+
+    REQUIRE(registry.execute(std::make_unique<incdaw::app::RemoveMixerNodeCommand>(track)));
+
+    CHECK(fixture.project.findMixerNode(track) == nullptr);
+    CHECK(fixture.project.routing().empty());
+    CHECK(fixture.project.findChannel(fixture.channel)->outputMixerNode
+          == fixture.project.masterMixerNode());
+
+    REQUIRE(registry.undo());
+    CHECK(fixture.project == before);
+
+    // The master is not removable: everything reaches it.
+    CHECK_FALSE(registry.execute(
+        std::make_unique<incdaw::app::RemoveMixerNodeCommand>(fixture.project.masterMixerNode())));
+
+    while (registry.canUndo())
+        REQUIRE(registry.undo());
+
+    CHECK(fixture.project == original);
+}
+
+TEST_CASE("dragging a mixer fader is one undo")
+{
+    MixerFixture fixture;
+    incdaw::app::CommandRegistry registry{fixture.project};
+
+    const EntityId master = fixture.project.masterMixerNode();
+
+    for (const double volume : {0.9, 0.8, 0.7, 0.6})
+        REQUIRE(registry.executeMerging(
+            std::make_unique<incdaw::app::SetMixerVolumeCommand>(master, volume)));
+
+    CHECK(registry.undoDepth() == 1);
+    CHECK(fixture.project.findMixerNode(master)->volume == doctest::Approx(0.6));
+
+    REQUIRE(registry.undo());
+    CHECK(fixture.project.findMixerNode(master)->volume == doctest::Approx(1.0));
+}

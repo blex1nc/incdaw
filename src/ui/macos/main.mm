@@ -25,6 +25,7 @@
 #include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
+#include "ui/macos/MixerView.h"
 #include "ui/macos/PlaylistView.h"
 
 #include <memory>
@@ -62,6 +63,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 @property (strong) NSWindow*                window;
 @property (strong) INCDAWPianoRollView*     pianoRoll;
 @property (strong) INCDAWPlaylistView*      playlist;
+@property (strong) INCDAWMixerView*         mixer;
 @property (strong) NSSegmentedControl*      editorSelector;
 @property (strong) NSSegmentedControl*      transportModeSelector;
 @property (strong) INCDAWChannelRackView*   channelRack;
@@ -77,10 +79,17 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     NSTimer* _housekeeping;
     BOOL     _audioReady;
 
+    /// Handles into the graph that is rendering right now. The nodes are owned
+    /// by the engine; this is refreshed on every rebuild and is what lets the
+    /// mixer read meters and write fader moves without recompiling.
+    project::CompiledProjectGraph _live;
+
     /// Song mode plays the arrangement; pattern mode loops the selected
     /// pattern. FL calls these the same two things, and they are the same two
     /// things everywhere: what the transport is looking at, not a UI filter.
     BOOL     _songMode;
+
+    NSString* _lastGraphError;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -179,14 +188,24 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     self.playlist.patternIdValue = patternId.value();
     self.playlist.hidden         = YES;
 
-    // The two editors share one region and are swapped rather than tiled: both
-    // want the whole window, and a DAW that shows half a Piano Roll above half a
-    // playlist shows neither.
+    self.mixer = [[INCDAWMixerView alloc]
+        initWithFrame:editorFrame
+              project:_project.get()
+             registry:_registry.get()];
+
+    self.mixer.selectedChannelIdValue = channelId.value();
+    self.mixer.hidden                 = YES;
+
+    // The editors share one region and are swapped rather than tiled: each
+    // wants the whole window, and a DAW that shows half a Piano Roll above half
+    // a playlist shows neither.
     NSView* editorContainer = [[NSView alloc] initWithFrame:editorFrame];
     self.pianoRoll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     self.playlist.autoresizingMask  = NSViewWidthSizable | NSViewHeightSizable;
+    self.mixer.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [editorContainer addSubview:self.pianoRoll];
     [editorContainer addSubview:self.playlist];
+    [editorContainer addSubview:self.mixer];
 
     NSSplitView* editors = [[NSSplitView alloc]
         initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, body.size.height)];
@@ -218,12 +237,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     [editors adjustSubviews];
 
     self.editorSelector = [NSSegmentedControl
-        segmentedControlWithLabels:@[@"Piano Roll", @"Playlist"]
+        segmentedControlWithLabels:@[@"Piano Roll", @"Playlist", @"Mixer"]
                       trackingMode:NSSegmentSwitchTrackingSelectOne
                             target:self
                             action:@selector(editorChanged:)];
     self.editorSelector.selectedSegment = 0;
-    self.editorSelector.frame = NSMakeRect(10, frame.size.height - toolbarHeight + 3, 180, 24);
+    self.editorSelector.frame = NSMakeRect(10, frame.size.height - toolbarHeight + 3, 250, 24);
 
     self.transportModeSelector = [NSSegmentedControl
         segmentedControlWithLabels:@[@"Pattern", @"Song"]
@@ -231,7 +250,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                             target:self
                             action:@selector(transportModeChanged:)];
     self.transportModeSelector.selectedSegment = 0;
-    self.transportModeSelector.frame = NSMakeRect(200, frame.size.height - toolbarHeight + 3, 150, 24);
+    self.transportModeSelector.frame = NSMakeRect(270, frame.size.height - toolbarHeight + 3, 150, 24);
 
     self.editorSelector.autoresizingMask        = NSViewMinYMargin;
     self.transportModeSelector.autoresizingMask = NSViewMinYMargin;
@@ -259,6 +278,17 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     self.channelRack.onChange = changed;
     self.patternList.onChange = changed;
     self.playlist.onChange    = changed;
+    self.mixer.onChange       = changed;
+
+    // A fader move is not a graph change: the value has already reached the
+    // strip that is rendering, so recompiling would only reset every meter.
+    self.mixer.onParameterChange = ^{
+        [weakSelf refreshStatus];
+    };
+
+    self.mixer.stripLookup = ^engine::dsp::MixerStripNode*(unsigned long long nodeId) {
+        return [weakSelf stripForMixerNode:nodeId];
+    };
 
     self.channelRack.onSelectChannel = ^(unsigned long long selected) {
         [weakSelf selectChannel:selected];
@@ -275,6 +305,7 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     self.channelRack.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
     self.patternList.onTransportToggle = ^{ [weakAudioSelf toggleTransport]; };
     self.playlist.onTransportToggle    = ^{ [weakAudioSelf toggleTransport]; };
+    self.mixer.onTransportToggle       = ^{ [weakAudioSelf toggleTransport]; };
 
     self.playlist.onSeekTick = ^(long long tick) { [weakAudioSelf seekToTick:tick]; };
 
@@ -300,8 +331,9 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 /// Roll owns what it edits, and neither knows about the other.
 - (void)selectChannel:(unsigned long long)channelId
 {
-    self.pianoRoll.channelIdValue          = channelId;
+    self.pianoRoll.channelIdValue           = channelId;
     self.channelRack.selectedChannelIdValue = channelId;
+    self.mixer.selectedChannelIdValue       = channelId;
 
     [self.pianoRoll requestRedraw];
     [self refreshStatus];
@@ -340,6 +372,19 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     [self showEditorAtSegment:1];
 }
 
+- (void)togglePlayback:(id)sender
+{
+    (void)sender;
+    [self toggleTransport];
+}
+
+- (void)showMixer:(id)sender
+{
+    (void)sender;
+    self.editorSelector.selectedSegment = 2;
+    [self showEditorAtSegment:2];
+}
+
 - (void)usePatternMode:(id)sender
 {
     (void)sender;
@@ -361,15 +406,28 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
 - (void)showEditorAtSegment:(NSInteger)segment
 {
-    const BOOL playlistVisible = segment == 1;
+    self.pianoRoll.hidden = segment != 0;
+    self.playlist.hidden  = segment != 1;
+    self.mixer.hidden     = segment != 2;
 
-    self.pianoRoll.hidden = playlistVisible;
-    self.playlist.hidden  = !playlistVisible;
+    NSView* focused = self.pianoRoll;
+    if (segment == 1)
+        focused = self.playlist;
+    else if (segment == 2)
+        focused = self.mixer;
 
-    [self.window makeFirstResponder:playlistVisible ? (NSView*)self.playlist
-                                                    : (NSView*)self.pianoRoll];
+    [self.window makeFirstResponder:focused];
+
     [self.playlist setNeedsDisplay:YES];
+    [self.mixer setNeedsDisplay:YES];
     [self.pianoRoll requestRedraw];
+}
+
+/// The strip currently rendering a mixer node, or nullptr. Valid only until the
+/// next rebuild, which is why the mixer asks each time rather than caching.
+- (engine::dsp::MixerStripNode*)stripForMixerNode:(unsigned long long)nodeId
+{
+    return _live.stripFor(project::EntityId{nodeId});
 }
 
 /// Pattern mode loops the selected pattern; song mode plays the arrangement.
@@ -454,11 +512,21 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     auto compiled = project::compileProjectGraph(*_project, _audio->transport().tempoMap(), options);
     if (!compiled) {
+        // A routing cycle lands here. Reported rather than swallowed: the
+        // previous graph keeps playing, and the user is told why their edit did
+        // not take effect.
         NSLog(@"INCDAW: graph rebuild failed: %s", compiled.error.c_str());
+        _lastGraphError = @(compiled.error.c_str());
         return;
     }
 
+    _lastGraphError = nil;
+
     _audio->setGraph(std::move(compiled.graph));
+
+    // The handles outlive the unique_ptr that was moved out: the nodes belong
+    // to the graph the engine now owns.
+    _live = std::move(compiled);
 }
 
 /// Loops whatever pattern is selected, so playback repeats rather than running
@@ -527,6 +595,12 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     self.playlist.playheadTick    = tick;
 
     [self.pianoRoll requestRedraw];
+
+    // Meters move whether or not anything was edited, so the mixer redraws with
+    // the playhead rather than only on change.
+    if (!self.mixer.hidden)
+        [self.mixer setNeedsDisplay:YES];
+
     [self refreshStatus];
 }
 
@@ -541,8 +615,10 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                          ? [NSString stringWithFormat:@"undo: %s", _registry->undoName().c_str()]
                          : @"undo: —";
 
-    NSString* audio = @"audio: unavailable";
-    if (_audioReady) {
+    NSString* audio = _lastGraphError != nil
+                          ? [NSString stringWithFormat:@"⚠ %@", _lastGraphError]
+                          : @"audio: unavailable";
+    if (_audioReady && _lastGraphError == nil) {
         const bool playing = _audio->transport().isPlaying();
         audio = [NSString stringWithFormat:@"%@ · %.0f%% cpu",
                  playing ? @"▶ playing" : @"■ stopped",
@@ -592,17 +668,32 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
                                             keyEquivalent:@"2"];
     playlistItem.target = self;
 
+    NSMenuItem* mixerItem = [viewMenu addItemWithTitle:@"Mixer"
+                                                action:@selector(showMixer:)
+                                         keyEquivalent:@"3"];
+    mixerItem.target = self;
+
     [viewMenu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* patternModeItem = [viewMenu addItemWithTitle:@"Pattern Mode"
                                                       action:@selector(usePatternMode:)
-                                               keyEquivalent:@"3"];
+                                               keyEquivalent:@"4"];
     patternModeItem.target = self;
 
     NSMenuItem* songModeItem = [viewMenu addItemWithTitle:@"Song Mode"
                                                    action:@selector(useSongMode:)
-                                            keyEquivalent:@"4"];
+                                            keyEquivalent:@"5"];
     songModeItem.target = self;
+
+    [viewMenu addItem:[NSMenuItem separatorItem]];
+
+    // Space toggles the transport from every pane, but a menu entry is what
+    // makes it discoverable — and what lets anything driving the app through
+    // the accessibility API start playback.
+    NSMenuItem* playItem = [viewMenu addItemWithTitle:@"Play / Stop"
+                                               action:@selector(togglePlayback:)
+                                        keyEquivalent:@""];
+    playItem.target = self;
 
     viewItem.submenu = viewMenu;
 

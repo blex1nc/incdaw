@@ -1,10 +1,12 @@
 #include "project/ProjectGraphCompiler.h"
 
 #include "engine/dsp/GainNode.h"
+#include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/SimpleSynth.h"
 #include "project/PatternCompiler.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace incdaw::project {
 namespace {
@@ -40,6 +42,24 @@ engine::InstrumentNode* CompiledProjectGraph::instrumentFor(EntityId channel) co
     return nullptr;
 }
 
+engine::dsp::MixerStripNode* CompiledProjectGraph::stripFor(EntityId mixerNode) const noexcept
+{
+    for (std::size_t index = 0; index < mixerNodes.size(); ++index)
+        if (mixerNodes[index] == mixerNode)
+            return strips[index];
+
+    return nullptr;
+}
+
+engine::dsp::MixerStripNode* CompiledProjectGraph::channelStripFor(EntityId channel) const noexcept
+{
+    for (std::size_t index = 0; index < channels.size(); ++index)
+        if (channels[index] == channel)
+            return channelStrips[index];
+
+    return nullptr;
+}
+
 CompiledProjectGraph compileProjectGraph(const Project& project, const engine::TempoMap& tempoMap,
                                          const GraphCompileOptions& options)
 {
@@ -57,15 +77,91 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     const bool anySoloed = std::any_of(project.channels().begin(), project.channels().end(),
                                        [](const Channel& channel) { return channel.soloed; });
 
+    const bool anyMixerSoloed = std::any_of(project.mixerNodes().begin(), project.mixerNodes().end(),
+                                            [&project](const MixerNode& node) {
+                                                return node.soloed && node.id != project.masterMixerNode();
+                                            });
+
     engine::GraphBuilder builder;
 
-    // The master exists even with no audible channel. A graph without one would
-    // fail to compile, and the user would get silence plus an error for the
-    // entirely ordinary act of muting everything.
-    const auto master = builder.addNode(std::make_unique<engine::dsp::GainNode>(options.masterGain));
+    // ── Mixer nodes ──────────────────────────────────────────────────────────
+    // Every mixer node becomes a strip, whether or not anything reaches it: a
+    // strip the user can see in the mixer but that vanishes from the graph
+    // would meter nothing and accept no fader move.
+    std::unordered_map<EntityId, engine::NodeIndex> stripIndices;
+    std::vector<EntityId>                           mixerIds;
+    std::vector<engine::dsp::MixerStripNode*>       stripNodes;
 
-    std::vector<engine::InstrumentNode*> instrumentNodes;
-    std::vector<EntityId>                channelIds;
+    engine::NodeIndex master = engine::invalidNode;
+
+    for (const MixerNode& node : project.mixerNodes()) {
+        auto strip  = std::make_unique<engine::dsp::MixerStripNode>();
+        auto* handle = strip.get();
+
+        const bool isMaster = node.id == project.masterMixerNode();
+
+        // Solo is exclusive across the mixer, and the master is exempt: soloing
+        // a track must not silence the output everything reaches.
+        const bool silenced = node.muted || (anyMixerSoloed && !node.soloed && !isMaster);
+
+        handle->setGain(static_cast<engine::Sample>(node.volume)
+                        * (isMaster ? options.masterGain : engine::Sample{1}));
+        handle->setPan(node.pan);
+        handle->setMuted(silenced);
+        handle->setPolarityInverted(node.polarityFlip);
+
+        const auto index = builder.addNode(std::move(strip));
+        stripIndices.emplace(node.id, index);
+
+        mixerIds.push_back(node.id);
+        stripNodes.push_back(handle);
+
+        if (isMaster)
+            master = index;
+    }
+
+    if (master == engine::invalidNode) {
+        // A project without a master still has to make a graph: the master
+        // exists from the moment a project does, but a corrupted file might not
+        // have one, and silence with an error beats a crash.
+        auto strip = std::make_unique<engine::dsp::MixerStripNode>();
+        strip->setGain(options.masterGain);
+
+        master = builder.addNode(std::move(strip));
+        stripNodes.push_back(nullptr);
+        mixerIds.push_back(EntityId{});
+        stripNodes.back() = nullptr;
+    }
+
+    // ── Routing between mixer nodes ─────────────────────────────────────────
+    for (const RoutingConnection& connection : project.routing()) {
+        const auto source      = stripIndices.find(connection.source);
+        const auto destination = stripIndices.find(connection.destination);
+
+        if (source == stripIndices.end() || destination == stripIndices.end())
+            continue;   // an edge naming something that is not a mixer node
+
+        if (connection.sidechain)
+            continue;   // sidechain has no meaning until a plugin can receive it
+
+        if (!connection.isSend) {
+            builder.connect(source->second, destination->second);
+            continue;
+        }
+
+        // A send is a second edge with its own gain, so it needs a node to
+        // carry that gain.
+        const auto send = builder.addNode(std::make_unique<engine::dsp::GainNode>(
+            static_cast<engine::Sample>(connection.gain)));
+
+        builder.connect(source->second, send);
+        builder.connect(send, destination->second);
+    }
+
+    // ── Channels ────────────────────────────────────────────────────────────
+    std::vector<engine::InstrumentNode*>      instrumentNodes;
+    std::vector<EntityId>                     channelIds;
+    std::vector<engine::dsp::MixerStripNode*> channelStripNodes;
 
     for (const Channel& channel : project.channels()) {
         if (!isAudible(channel, anySoloed))
@@ -85,18 +181,23 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
         const auto source = builder.addNode(std::move(node));
 
-        // Channel volume gets its own node rather than being folded into the
-        // instrument: it is a mixer-side property, it has to be automatable
-        // (Phase 11), and GainNode already smooths changes so a volume move
-        // does not click.
-        const auto gain = builder.addNode(std::make_unique<engine::dsp::GainNode>(
-            static_cast<engine::Sample>(channel.volume)));
+        // The channel's own strip: volume and pan belong to the channel, not to
+        // the mixer track it feeds, which may be shared by several channels.
+        auto channelStrip = std::make_unique<engine::dsp::MixerStripNode>();
+        auto* channelHandle = channelStrip.get();
+        channelHandle->setGain(static_cast<engine::Sample>(channel.volume));
+        channelHandle->setPan(channel.pan);
 
-        builder.connect(source, gain);
-        builder.connect(gain, master);
+        const auto strip = builder.addNode(std::move(channelStrip));
+
+        const auto destination = stripIndices.find(channel.outputMixerNode);
+
+        builder.connect(source, strip);
+        builder.connect(strip, destination != stripIndices.end() ? destination->second : master);
 
         channelIds.push_back(channel.id);
         instrumentNodes.push_back(handle);
+        channelStripNodes.push_back(channelHandle);
     }
 
     builder.setMaster(master);
@@ -107,8 +208,11 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         return compiled;
     }
 
-    compiled.channels    = std::move(channelIds);
-    compiled.instruments = std::move(instrumentNodes);
+    compiled.channels      = std::move(channelIds);
+    compiled.instruments   = std::move(instrumentNodes);
+    compiled.channelStrips = std::move(channelStripNodes);
+    compiled.mixerNodes    = std::move(mixerIds);
+    compiled.strips        = std::move(stripNodes);
     return compiled;
 }
 

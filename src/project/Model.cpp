@@ -75,6 +75,23 @@ Clip& Project::insertClip(std::size_t index, Clip clip)
     return *clips_.insert(clips_.begin() + static_cast<std::ptrdiff_t>(position), std::move(clip));
 }
 
+MixerNode& Project::insertMixerNode(std::size_t index, MixerNode node)
+{
+    ids_.observe(node.id);
+
+    const std::size_t position = std::min(index, mixerNodes_.size());
+    return *mixerNodes_.insert(mixerNodes_.begin() + static_cast<std::ptrdiff_t>(position),
+                               std::move(node));
+}
+
+RoutingConnection& Project::insertRouting(std::size_t index, RoutingConnection connection)
+{
+    ids_.observe(connection.id);
+
+    const std::size_t position = std::min(index, routing_.size());
+    return *routing_.insert(routing_.begin() + static_cast<std::ptrdiff_t>(position), connection);
+}
+
 bool Project::removeChannel(EntityId id) noexcept
 {
     const std::size_t index = indexOfChannel(id);
@@ -115,6 +132,31 @@ bool Project::removeClip(EntityId id) noexcept
     return true;
 }
 
+bool Project::removeMixerNode(EntityId id) noexcept
+{
+    // The master is what everything reaches; a project without one cannot be
+    // compiled into a graph at all.
+    if (id == master_)
+        return false;
+
+    const std::size_t index = indexOfMixerNode(id);
+    if (index == notFound)
+        return false;
+
+    mixerNodes_.erase(mixerNodes_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
+bool Project::removeRouting(EntityId id) noexcept
+{
+    const std::size_t index = indexOfRouting(id);
+    if (index == notFound)
+        return false;
+
+    routing_.erase(routing_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
 std::size_t Project::indexOfChannel(EntityId id) const noexcept
 {
     for (std::size_t index = 0; index < channels_.size(); ++index)
@@ -146,6 +188,24 @@ std::size_t Project::indexOfClip(EntityId id) const noexcept
 {
     for (std::size_t index = 0; index < clips_.size(); ++index)
         if (clips_[index].id == id)
+            return index;
+
+    return notFound;
+}
+
+std::size_t Project::indexOfMixerNode(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < mixerNodes_.size(); ++index)
+        if (mixerNodes_[index].id == id)
+            return index;
+
+    return notFound;
+}
+
+std::size_t Project::indexOfRouting(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < routing_.size(); ++index)
+        if (routing_[index].id == id)
             return index;
 
     return notFound;
@@ -329,6 +389,25 @@ const MixerNode* Project::findMixerNode(EntityId id) const noexcept
             return &node;
 
     return nullptr;
+}
+
+MixerNode* Project::findMixerNode(EntityId id) noexcept
+{
+    return const_cast<MixerNode*>(std::as_const(*this).findMixerNode(id));
+}
+
+const RoutingConnection* Project::findRouting(EntityId id) const noexcept
+{
+    for (const RoutingConnection& connection : routing_)
+        if (connection.id == id)
+            return &connection;
+
+    return nullptr;
+}
+
+RoutingConnection* Project::findRouting(EntityId id) noexcept
+{
+    return const_cast<RoutingConnection*>(std::as_const(*this).findRouting(id));
 }
 
 std::vector<EntityId> Project::missingAssets() const
