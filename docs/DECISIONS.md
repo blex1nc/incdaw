@@ -548,3 +548,92 @@ end of the song.
 **Date:** 2026-08-14
 **Status:** ACCEPTED
 
+---
+
+## D-019 — Delay compensation lives in the graph compiler
+
+**Context:** Phase 10 must align parallel paths whose latencies differ. The
+compensation could sit in `project/`, where the mixer is assembled, or in
+`engine/`, where the graph is compiled.
+
+**Options:**
+- Compensate in `project::compileProjectGraph`, which knows what a mixer is
+- Compensate in `engine::GraphBuilder::compile`, which knows the topology
+- Compensate at runtime, reading each node's reported latency per block
+
+**Chosen:** `GraphBuilder::compile`, which already computed the longest path to
+every node in order to report total latency. It now acts on that analysis and
+inserts `DelayLineNode`s on the short edges into any node that sums.
+
+**Reason:** Alignment is a property of the graph, not of the mixer. Doing it in
+the engine means playback, offline render, freeze, and every future plugin chain
+get it without asking, and none of them can forget. Runtime compensation would
+put a variable delay on the audio thread and make the correction depend on when
+it was measured.
+
+**Tradeoffs:** The compiler mutates the graph it was handed, which makes
+`compile` less of a pure function; it is done once, before any rendering, and
+`setDelayCompensationEnabled(false)` exists so the compensation can be tested
+against its own absence. Delay lines cost memory proportional to the latency
+being compensated, allocated in `prepare`.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-020 — A mixer strip is one node
+
+**Context:** A strip sums its inputs and applies polarity, pan, volume, mute and
+metering. Each of those could be a node in the graph.
+
+**Options:**
+- A chain of small nodes per strip, composable and individually testable
+- One `MixerStripNode` doing all of it in a single pass
+- Fold the strip into the mixer compiler as inline arithmetic
+
+**Chosen:** One node.
+
+**Reason:** A chain costs a buffer and an indirection per stage per block for
+arithmetic that fits in one pass over the samples, and none of the stages is
+independently useful — nobody wants a pan without a fader. Insert effects, which
+*are* independently useful, chain in front of a strip rather than inside it,
+which is what keeps them orderable and bypassable when Phase 13 and Phase 15
+arrive.
+
+**Tradeoffs:** The node has four parameters instead of one, and a future
+surround pan law will land inside it rather than replacing a node. Measured: a
+64-strip mixer costs 0.042 ms per 256-frame block, against a 5.33 ms budget.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+
+---
+
+## D-021 — Pan is constant power, centre is -3 dB
+
+**Context:** Panning has to decide what "centre" means. A linear law keeps the
+sum of the gains constant; a constant-power law keeps the sum of their squares
+constant.
+
+**Options:**
+- Linear: centre at unity on both sides
+- Constant power: centre at -3 dB on both sides
+- Selectable per project
+
+**Chosen:** Constant power, `cos`/`sin` of one angle, centre at 0.7071.
+
+**Reason:** Power, not amplitude, is what the ear tracks for a source moving
+across the image; a linear law makes a sound audibly louder in the middle of a
+sweep. It is also what every console and every DAW's default does, so an
+imported arrangement pans the way its author heard it.
+
+**Tradeoffs:** Summing a hard-panned pair back to mono gives -3 dB rather than
+unity, which surprises people who expect a balance control. Selectable laws are
+a real feature (FL offers them), but a project-wide switch changes the meaning
+of every existing pan value, so it needs the automation and project-migration
+machinery to arrive with it rather than before it.
+
+**Date:** 2026-08-14
+**Status:** ACCEPTED
+

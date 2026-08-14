@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 1.2
-Status: PHASES 0-8 COMPLETE, PHASE 9a COMPLETE / PHASE 9b AND 10 NEXT
+Version: 1.3
+Status: PHASES 0-10 COMPLETE (9b OUTSTANDING) / PHASE 11 NEXT
 Last updated: 2026-08-14
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -128,7 +128,8 @@ Current phase:
 PHASES 0-8 COMPLETE (2026-08-14)
 PHASE 9a (playlist: pattern arrangement) — COMPLETE
 PHASE 9b (playlist: audio clips) — NOT STARTED, needs a file reader
-PHASE 10 (mixer) — NOT STARTED
+PHASE 10 (mixer, routing, PDC) — COMPLETE
+PHASE 11 (automation) — NOT STARTED
 
 The user authorised continuous execution through the phases, which supersedes
 the per-phase approval gate in CLAUDE.md for this run. Each phase is still
@@ -140,7 +141,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  268 test cases, 31,031 assertions, green in both Debug and Release.
+  287 test cases, 31,182 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/doctest/doctest.h is gitignored. A fresh clone must re-fetch it
@@ -179,6 +180,40 @@ Phase 6 — COMPLETE. Done and tested:
   right edge to resize, right-click to delete, shift-drag to box select,
   Q to quantize, Cmd+Z/Cmd+Shift+Z to undo/redo, Cmd+A to select all,
   scroll to pan, Cmd+scroll to zoom.
+
+Phase 10 — COMPLETE. Done and tested:
+
+  engine/graph/RenderGraph      delay compensation: delay lines inserted on the
+                                short edges into any summing node (D-019).
+                                setDelayCompensationEnabled(false) exists so the
+                                PDC test can assert its own absence fails
+  engine/dsp/DelayLineNode      fixed whole-sample delay, allocation-free
+  engine/dsp/MixerStripNode     summing, polarity, constant-power pan, fader,
+                                mute, metering — one node, one pass (D-020)
+  engine/core/Smoother          the click-free ramp, out of GainNode
+  engine/core/LevelMeter        peak + RMS over 300 ms, atomic publish
+  project/ProjectGraphCompiler  mixer nodes -> strips, routing -> edges, sends
+                                -> gain-carrying edges, channels -> their own
+                                strip. Channel pan finally applied
+  app/commands/MixerCommands    nodes, volume, pan, mute, solo, polarity,
+                                channel routing, connect/disconnect, send level
+  ui/macos/MixerView            strips, cubic fader law, live meters. Fader and
+                                pan write straight to the rendering strip rather
+                                than recompiling — the path automation will use
+
+  Exit criterion: "a latent path stays phase-aligned with an uncompensated
+  parallel path" in tests/unit/MixerTests.cpp. The same test rebuilds with
+  compensation off and asserts the impulse smears into two.
+
+  Measured (Release): 64-strip mixer 0.042 ms per 256-frame block, against a
+  5.33 ms budget. Rendering allocates nothing.
+
+  Verified on the running app: the mixer meters a playing pattern, RMS body and
+  peak line both moving.
+
+  Deliberately outstanding inside Phase 10: insert chains are empty (nothing to
+  insert until Phase 13/15), sidechain edges compile to nothing, pre-fader sends
+  behave as post-fader, LUFS is ready architecturally but not implemented.
 
 Phase 9a — COMPLETE. Done and tested:
 
@@ -282,6 +317,11 @@ Phase 7 — COMPLETE. Done and tested:
 
 WHAT THE APP STILL DOES NOT DO:
 
+  - no automation: AutomationLane serializes, nothing evaluates it. THIS IS
+    PHASE 11, and the mixer is now the obvious first customer — a fader move
+    already writes straight to the rendering strip, which is the same path an
+    automation curve will use.
+
   - no audio clips at all: there is no WAV reader, no decoder and no disk
     streaming anywhere in the tree. Clip gain, normalize, fades, crossfades,
     stretch and reverse are audio-clip properties and are therefore all
@@ -291,9 +331,6 @@ WHAT THE APP STILL DOES NOT DO:
   - drag-painting steps leaves one undo entry per cell, not one per stroke.
   - channel colour and step key have commands but nothing in the UI reaches
     them; a drum channel has to be given its key in code.
-  - no mixer: the signal path is instrument -> master gain -> device. The
-    MixerNode/RoutingConnection types serialize but nothing evaluates them.
-  - no automation: AutomationLane serializes, nothing reads it.
   - no playlist/arrangement: one pattern, looped. Clip types serialize only.
   - no audio clips, no recording into the timeline, no plugins, no sampler.
   - the project is never saved from the UI: ProjectFile works and is tested,
@@ -302,6 +339,7 @@ WHAT THE APP STILL DOES NOT DO:
 Not started:
 
   Phase 9b Audio clips (needs a reader)    Phase 15  Built-in DSP
+  Phase 11 Automation                      Phase 16  MIDI hardware
   Phase 10 Mixer/routing (model exists,    Phase 16  MIDI hardware
            no signal path)                 Phase 17  Render/export
   Phase 11 Automation (model exists,       Phase 18  Performance
@@ -937,24 +975,24 @@ Verify the current state before continuing:
   ./build/incdaw-audiocheck --list
   ./build/incdaw-audiocheck --seconds 3 --amplitude 0.05
 
-Next step: Phase 10 (the mixer), with Phase 9b (audio clips) waiting on a file
+Next step: Phase 11 (automation), with Phase 9b (audio clips) waiting on a file
 reader that belongs with Phase 12.
 
-  Phase 10 is the mixer, and it is the last structural gap: MixerNode and
-  RoutingConnection serialize but nothing evaluates them, and the signal path is
-  still instrument -> channel gain -> master gain. What it needs:
+  Phase 11 is automation, and the seams it needs now exist:
 
-    - compile MixerNode and RoutingConnection into the render graph, with cycle
-      detection, and route channels to mixer tracks instead of to the master
-    - inserts, sends, buses, and plugin delay compensation
-    - the exit criterion in docs/ROADMAP.md is the PDC test: a chain with
-      artificial latency stays phase-aligned with an uncompensated parallel path
-    - channel pan belongs here, not in ProjectGraphCompiler, which deliberately
-      does not apply it
+    - AutomationLane already serializes and names its target by entity id plus
+      a parameter key; nothing evaluates it
+    - the mixer shows what the evaluation should drive: MixerView writes fader
+      and pan straight to the rendering MixerStripNode without recompiling, and
+      an automation curve is the same write on a schedule
+    - CLAUDE.md §10 is the constraint that matters: ONE generic subsystem, no
+      per-parameter code. That means a parameter registry — id + key -> setter —
+      rather than a switch over parameter names
+    - the exit criterion in docs/ROADMAP.md: any parameter registered in the
+      parameter system is automatable with no parameter-specific code
 
-  Phase 9b (audio clips) needs a WAV reader and a disk streamer, which is a
-  subsystem rather than a feature; it is the natural neighbour of Phase 12's
-  recording work, and clip gain and normalize come with it.
+  Phase 9b (audio clips) still needs a WAV reader and a disk streamer, which is
+  a subsystem rather than a feature and belongs with Phase 12's recording work.
 
 Things to be careful about:
 

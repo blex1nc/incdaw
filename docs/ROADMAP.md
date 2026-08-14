@@ -171,6 +171,21 @@ with cycle detection; sidechain routing; metering (peak, RMS, LUFS-ready);
 **Exit criterion:** PDC test — a chain with artificial latency stays
 phase-aligned with an uncompensated parallel path.
 
+**COMPLETE (2026-08-14).** Delay compensation in `GraphBuilder` (D-019), mixer
+strips with fader, constant-power pan, mute, solo, polarity and metering (D-020,
+D-021), channels routed to mixer nodes, sends as gain-carrying edges, buses,
+cycle detection, and a mixer pane whose meters read the live graph. Exit
+criterion in `tests/unit/MixerTests.cpp`, which also asserts that the same test
+fails with compensation disabled.
+
+Outstanding within this phase's scope, and deliberately so: **insert chains** are
+empty because there is nothing to insert until Phase 13 (plugins) and Phase 15
+(built-in DSP); **sidechain** edges serialize and compile to nothing, because a
+sidechain has no destination until a plugin can receive one; **pre-fader sends**
+are recorded in the model and currently behave as post-fader. LUFS metering is
+architecturally ready (`LevelMeter` integrates over a window) but not
+implemented — that is Phase 15's loudness meter.
+
 ---
 
 ## Phase 11 — Automation

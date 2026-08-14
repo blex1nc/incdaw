@@ -142,13 +142,22 @@ mechanism, not by special cases.
 
 ## 7. Plugin delay compensation
 
-Latency is accumulated at graph-compile time, not at runtime:
+Latency is accumulated at graph-compile time, not at runtime. **Implemented in
+Phase 10** (`engine::GraphBuilder::compile`, D-019):
 
 1. Each node reports its latency in frames.
-2. The compiler computes, for every path to the master output, the total latency.
-3. Delay lines are inserted on shorter paths so that all paths reach the master
-   with equal delay.
-4. The total reported latency is exposed to the UI and to the recording path.
+2. The compiler computes the longest path to every node.
+3. For each node that sums several sources, `DelayLineNode`s are inserted on the
+   edges that would arrive early, sized to the difference. The delay lines
+   report their own latency, so one pass is enough: the recomputed arrival times
+   are equal by construction.
+4. The total is exposed as `CompiledGraph::latencyFrames()`, for the UI and for
+   the recording path.
+
+Compensation can be switched off with `setDelayCompensationEnabled(false)`. That
+exists for the test in `tests/unit/MixerTests.cpp`, which asserts both that a
+latent path aligns *and* that it smears into two impulses when compensation is
+disabled — a PDC test that passes either way is testing nothing.
 
 Plugins may change their reported latency while loaded. That triggers a graph
 recompile on a background thread and an atomic swap — never an in-place edit of

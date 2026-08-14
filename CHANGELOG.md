@@ -8,6 +8,44 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 10 — Mixer, routing and delay compensation — 2026-08-14
+
+**Added**
+
+- `engine::GraphBuilder` delay compensation: delay lines inserted on short paths
+  into any summing node (D-019). `setDelayCompensationEnabled` exists so the
+  compensation can be tested against its own absence.
+- `engine/dsp/DelayLineNode` — fixed whole-sample delay, allocation-free while
+  rendering.
+- `engine/dsp/MixerStripNode` — summing, polarity, constant-power pan, fader,
+  mute and metering in one pass (D-020, D-021).
+- `engine/core/Smoother` — the click-free ramp, lifted out of `GainNode`.
+- `engine/core/LevelMeter` — peak and RMS over a 300 ms window, published with a
+  relaxed atomic store.
+- `app/commands/MixerCommands` — add/remove/rename mixer nodes, volume, pan,
+  mute, solo, polarity, channel routing, connect/disconnect, send level.
+- `ui/macos/MixerView` — strips, cubic fader law, pan, M/S/Ø, live meters.
+- A Mixer pane (⌘3) and a Play/Stop menu item.
+- `tests/unit/MixerTests.cpp` — 19 cases: the PDC exit criterion, non-aligned
+  latencies, compensation through a chain, the delay line, the pan law, strip
+  behaviour, metering, realtime safety, a 64-strip performance measurement, plus
+  routing, sends, solo/mute and command round trips.
+- `Project::insertMixerNode` / `insertRouting` / `removeMixerNode` /
+  `removeRouting` / `indexOf*` / `findRouting`.
+
+**Changed**
+
+- The signal path is now instrument → channel strip → mixer track → sends/buses
+  → master. Channel pan is applied for the first time.
+- A routing cycle is reported in the status line and leaves the previous graph
+  playing, rather than failing silently.
+
+**Known gaps**
+
+- Insert chains are empty (Phase 13, Phase 15), sidechain edges compile to
+  nothing, pre-fader sends behave as post-fader.
+- LUFS is architecturally ready but not implemented.
+
 ### Phase 9a — Playlist: the pattern arrangement — 2026-08-14
 
 **Added**

@@ -233,8 +233,12 @@ user heard. The instrument itself is supplied by an injected
 `InstrumentFactory`, so plugin hosting (Phase 13) becomes a different factory
 rather than a change to the compiler.
 
-Channel **pan** is deliberately not applied at this stage. A pan law belongs to
-the mixer (Phase 10), and an approximation here would have to be unpicked.
+Since Phase 10 the compiler also builds the mixer: every `MixerNode` becomes a
+`MixerStripNode`, `RoutingConnection`s become edges (a send is an edge carrying
+its own gain node), and each channel gets its own strip so that channel volume
+and pan use the same arithmetic the mixer does. The signal path is
+instrument → channel strip → mixer track → sends/buses → master, and a routing
+cycle is refused by the graph builder rather than broken arbitrarily.
 
 ### The editors above it
 
