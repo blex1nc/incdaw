@@ -2,6 +2,7 @@
 
 #include "engine/graph/Node.h"
 #include "plugins/PluginIdentifier.h"
+#include "plugins/PluginParameterInfo.h"
 #include "plugins/PluginRegistry.h"
 #include "plugins/clap/ClapLibrary.h"
 
@@ -10,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace incdaw::plugins {
 
@@ -47,6 +49,14 @@ public:
                                                              std::uint32_t           maxFrames,
                                                              std::string&            error);
 
+    /// Parameters of `uid` as discovered by its first instantiation, or
+    /// nullptr before one has succeeded. Discovery is per plugin TYPE —
+    /// instances of one plugin share the list ("discovered once and cached",
+    /// docs/PLUGIN_HOST.md §5). The pointer stays valid for the manager's
+    /// lifetime: entries are never erased.
+    [[nodiscard]] const std::vector<PluginParameterInfo>* parametersFor(
+        const std::string& uid) const;
+
     /// Libraries opened so far. The caching assertion in the tests.
     [[nodiscard]] std::size_t loadedLibraryCount() const;
 
@@ -56,8 +66,9 @@ private:
 
     const PluginRegistry* registry_ = nullptr;
 
-    std::unordered_map<std::string, std::unique_ptr<ClapLibrary>> libraries_;
-    mutable std::mutex                                            mutex_;
+    std::unordered_map<std::string, std::unique_ptr<ClapLibrary>>     libraries_;
+    std::unordered_map<std::string, std::vector<PluginParameterInfo>> parameters_;
+    mutable std::mutex                                                mutex_;
 };
 
 } // namespace incdaw::plugins

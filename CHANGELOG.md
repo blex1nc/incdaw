@@ -8,6 +8,52 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 5) — Plugin parameters: discovery and the event queue — 2026-08-15
+
+**Added**
+
+- `engine::ParameterSink` — a pure interface for parameter targets that are
+  not mixer strips, with an optional `Node::parameterSink()` accessor so the
+  graph compiler can bind automation onto a node it only knows as
+  `engine::Node` (docs/DECISIONS.md D-029).
+- `ParameterRegistry::Entry::apply` is now a variant: `StripApplier`
+  (unchanged) or `SinkApplier`. `registerPluginParameters` turns a discovered
+  parameter list into generic normalised-to-plain appliers, keyed
+  `plugin:<uid>:<param-id>`; the lane's `targetEntity` (the insert slot id)
+  picks the instance, so two instances of one plugin share entries.
+- `ClapInstance` discovers `CLAP_EXT_PARAMS` at creation into format-agnostic
+  `plugins::PluginParameterInfo` (skipping non-automatable and malformed
+  parameters as hostile input), and implements `ParameterSink` with a
+  preallocated lock-free queue drained into the block's
+  `clap_event_param_value` input list — a value never reaches the plugin
+  through a call, which is what the CLAP concurrency contract demands.
+- `PluginInstanceManager::parametersFor` — discovery cached per plugin type.
+- The shell owns a `ParameterRegistry` and registers discovered parameters in
+  the insert factory, between instance creation and lane binding in the same
+  compile.
+- The test gain plugin's gain is now a real CLAP parameter (plain 0..2,
+  default 0.5 keeps the -6 dB the earlier tests assert).
+
+**Behaviour**
+
+- Delivery is per-block (`time = 0`), matching the AutomationNode's grain.
+  The host does not smooth plugin parameters: that is the plugin's job, and
+  host-side smoothing would break stepped parameters.
+- A full event queue drops values; automation writes every block, so the
+  loss heals one block later.
+- `params->flush()` is not yet called while the engine is idle (lands with
+  the editor bridge, PLUGIN_HOST §7).
+
+**Tests**
+
+- 7 new cases (393 total, 162,525 assertions, green in Debug and Release):
+  registry generalisation and stepped mapping against a recording sink;
+  discovery in plain terms; per-type discovery caching; event delivery and
+  last-value-wins ordering through a real process call; the exit criterion —
+  an automation lane drives a hosted plugin's parameter to unity gain through
+  the generic subsystem, rendered under the realtime guard with zero
+  allocation violations; mismatched key/target pairs skipped as data.
+
 ### Phase 13 (part 4) — Inserts in the compiled graph — 2026-08-15
 
 **Added**

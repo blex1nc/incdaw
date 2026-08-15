@@ -1,6 +1,9 @@
 #pragma once
 
+#include "engine/core/LockFreeQueue.h"
+#include "engine/graph/ParameterSink.h"
 #include "platform/SharedLibrary.h"
+#include "plugins/PluginParameterInfo.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -60,16 +63,36 @@ private:
 };
 
 /// One activated plugin. Destruction stops, deactivates and destroys it.
-class ClapInstance {
+///
+/// As an engine::ParameterSink it accepts parameter values on the audio
+/// thread and delivers them to the plugin as clap_event_param_value events in
+/// its next process() call — never through a direct call into the plugin,
+/// which the CLAP params contract forbids while processing (clap/ext/params.h:
+/// flush must not run concurrently with process).
+class ClapInstance final : public engine::ParameterSink {
 public:
-    ~ClapInstance();
+    ~ClapInstance() override;
 
     ClapInstance(const ClapInstance&)            = delete;
     ClapInstance& operator=(const ClapInstance&) = delete;
 
     /// Processes one stereo block in place through the plugin. Buffers are
     /// the host's; the plugin sees them as one input and one output port.
+    /// Parameter values queued since the previous call are delivered first,
+    /// in the block's input event list.
     [[nodiscard]] bool process(float* left, float* right, std::uint32_t frames) noexcept;
+
+    /// Queues one PLAIN value for delivery in the next process() block.
+    /// Realtime-safe: a lock-free push, no allocation. A full queue drops the
+    /// value — automation writes every block, so the next block heals it.
+    void setParameter(std::uint32_t parameterId, double plainValue) noexcept override;
+
+    /// The automatable parameters discovered at creation (CLAP_EXT_PARAMS),
+    /// in plain terms. Empty for a plugin without the extension.
+    [[nodiscard]] const std::vector<PluginParameterInfo>& parameters() const noexcept
+    {
+        return parameters_;
+    }
 
     [[nodiscard]] const clap_plugin_t* raw() const noexcept { return plugin_; }
 
@@ -77,10 +100,21 @@ private:
     friend class ClapLibrary;
     ClapInstance() = default;
 
+    struct ParamEvent {
+        std::uint32_t id    = 0;
+        double        value = 0.0;
+    };
+
     const clap_plugin_t* plugin_ = nullptr;
     clap_host_t          host_{};
     bool                 processing_ = false;
     std::int64_t         steadyTime_ = 0;
+
+    /// 256 slots is every automatable parameter of a large plugin changing in
+    /// one block — sized for the worst block, not the common one. Preallocated
+    /// with the instance; the audio thread only pushes and pops.
+    engine::LockFreeQueue<ParamEvent, 256>  paramEvents_;
+    std::vector<PluginParameterInfo>        parameters_;
 };
 
 } // namespace incdaw::plugins

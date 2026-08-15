@@ -55,6 +55,13 @@ public:
 
     [[nodiscard]] const char* name() const noexcept override { return "Plugin"; }
 
+    /// Automation reaches the hosted plugin through here: the instance is the
+    /// sink, turning values into CLAP events for its next process call.
+    [[nodiscard]] engine::ParameterSink* parameterSink() noexcept override
+    {
+        return instance_.get();
+    }
+
 private:
     std::unique_ptr<ClapInstance> instance_;
 };

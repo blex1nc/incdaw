@@ -907,3 +907,60 @@ a non-linear insert, and the test fails if the chain is wired after the strip.
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+## D-029 — Plugin parameters automate through a sink target and an event queue
+
+**Context:** the ParameterRegistry's entries bound a normalised value onto a
+`MixerStripNode&`, which was the only automatable target that existed. A
+hosted plugin's parameter has a different target — a live instance — and a
+different delivery contract: CLAP forbids calling into the plugin while it is
+processing, so parameter changes travel as `clap_event_param_value` events in
+the process call's input list (or through `params->flush()` when idle), never
+through a setter. The roadmap's Phase 11 exit criterion — a registered
+parameter is automatable with no parameter-specific code anywhere else — must
+survive both facts.
+
+**Options:**
+
+1. A second, plugin-specific automation path beside the registry. Forbidden
+   outright by CLAUDE.md §10, and it would fork every downstream feature
+   (recording, MIDI learn) into two implementations.
+2. Make the registry's applier target a base class both strips and plugins
+   implement. Uniform, but it forces MixerStripNode to speak a generic
+   parameter-id protocol it does not have, and renumbering strip setters into
+   ids would trade compile-time safety for none.
+3. Generalise the ENTRY: `Entry::apply` becomes a variant of two applier
+   kinds — `StripApplier` (unchanged) and `SinkApplier` over a new pure
+   interface `engine::ParameterSink`. Which alternative an entry holds tells
+   the compiler what to resolve the lane's target to: the strip rendering the
+   entity, or the sink of the insert slot the entity names. `ClapInstance`
+   implements the sink by pushing onto a preallocated lock-free queue that
+   its own `process()` drains into the block's CLAP input event list.
+
+**Chosen:** option 3.
+
+**Reason:** the registry stays the single place where per-parameter knowledge
+lives, and the AutomationNode still knows nothing about what it automates.
+The sink interface carries PLAIN values (the parameter's own range) because
+that is what CLAP events carry; the normalised-to-plain mapping is applier
+code, generated generically from discovery (`registerPluginParameters`).
+Registry keys are scoped per plugin TYPE (`plugin:<uid>:<param-id>`); which
+INSTANCE a lane drives is its `targetEntity` — the insert slot id — so two
+instances of one plugin share entries. Node exposes an optional
+`parameterSink()` accessor, so the compiler binds sinks without the insert
+factory's signature changing and without knowing what a CLAP is (D-028
+holds).
+
+**Tradeoffs:** delivery is per-block (`time = 0`), because the AutomationNode
+evaluates once per block — a plugin that does not smooth its own parameters
+can zipper under fast automation; sample-accurate splitting can arrive later
+without changing the architecture. The host does not smooth plugin
+parameters (unlike strip setters): smoothing plain values in the host would
+double-smooth well-behaved plugins and misbehave on stepped parameters. A
+full queue drops values, healed one block later because automation writes
+every block. `params->flush()` is NOT yet called when the engine is idle —
+a UI-originated change while no audio device runs will sit queued until
+processing resumes; that lands with the editor/UI bridge (PLUGIN_HOST §7).
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

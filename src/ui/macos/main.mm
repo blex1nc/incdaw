@@ -147,6 +147,11 @@ std::filesystem::path incdawSupportDirectory()
     /// from disk at launch and never scans on the startup path.
     plugins::PluginRegistry                        _pluginRegistry;
     std::unique_ptr<plugins::PluginInstanceManager> _pluginInstances;
+
+    /// The application's parameter system: the strip built-ins plus every
+    /// plugin parameter discovered so far. Graphs compile against it, so it
+    /// outlives them all here.
+    project::ParameterRegistry _parameters;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -165,6 +170,7 @@ std::filesystem::path incdawSupportDirectory()
         (void)_pluginRegistry.load(support / "plugins.tsv");
 
     _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
+    _parameters      = project::ParameterRegistry::withBuiltins();
 
     const project::EntityId channelId = _project->addChannel("Channel 1").id;
     const project::EntityId patternId = _project->addPattern("Pattern 1").id;
@@ -824,10 +830,12 @@ std::filesystem::path incdawSupportDirectory()
     // `project/` compiles the topology without knowing what a CLAP is
     // (docs/DECISIONS.md D-028). The manager outlives every graph it feeds.
     plugins::PluginInstanceManager* instances  = _pluginInstances.get();
+    project::ParameterRegistry*     parameters = &_parameters;
     const double                    sampleRate = _audio->sampleRate();
     const auto maxFrames = static_cast<std::uint32_t>(_audio->maxServiceableBlockSize());
 
-    options.insertFactory = [instances, sampleRate, maxFrames](
+    options.parameters    = parameters;
+    options.insertFactory = [instances, parameters, sampleRate, maxFrames](
                                 const project::PluginSlot& slot,
                                 std::string& error) -> std::unique_ptr<engine::Node> {
         if (instances == nullptr) {
@@ -835,7 +843,18 @@ std::filesystem::path incdawSupportDirectory()
             return nullptr;
         }
 
-        return instances->createInsert(slot.plugin, sampleRate, maxFrames, error);
+        auto node = instances->createInsert(slot.plugin, sampleRate, maxFrames, error);
+
+        // Discovery lands in the registry HERE — between the instance being
+        // created and automation lanes binding later in the same compile.
+        // Registration is all it takes to make the plugin's parameters
+        // automatable (docs/PLUGIN_HOST.md §5), and re-registering on every
+        // rebuild is idempotent by the registry's replace-on-same-key rule.
+        if (node != nullptr)
+            if (const auto* discovered = instances->parametersFor(slot.plugin.uid))
+                parameters->registerPluginParameters(slot.plugin.uid, *discovered);
+
+        return node;
     };
 
     auto compiled = project::compileProjectGraph(*_project, _audio->transport().tempoMap(), options);

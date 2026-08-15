@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  377 test cases, 154,475 assertions, green in both Debug and Release.
+  393 test cases, 162,525 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1169,31 +1169,39 @@ recording and the Audio Logger all work. What remains in it is polish):
   named warning. 9 tests, including one that fails if the chain is wired
   after the fader.
 
+  Phase 13 part 5 is DONE: parameter discovery -> ParameterRegistry, and
+  plugin parameters automate through the generic subsystem (D-029). The two
+  design gates recorded here after part 4 were resolved exactly as written:
+    (a) Entry::apply is now a variant — StripApplier or SinkApplier over the
+        new pure interface engine::ParameterSink; which alternative an entry
+        holds tells the compiler what the lane's target resolves to (the
+        strip rendering the entity, or the sink of the insert slot the
+        entity names, via Node::parameterSink()). Keys are scoped per plugin
+        TYPE ("plugin:<uid>:<param-id>"); the lane's targetEntity picks the
+        instance. The Phase 11 exit criterion held: registration is still
+        all a parameter needs, and the exit-criterion test drives a hosted
+        plugin's gain to unity through an automation lane with no
+        parameter-specific code outside the registry.
+    (b) ClapInstance carries the event queue: setParameter (audio thread,
+        lock-free, preallocated) -> drained by its own process() into the
+        block's clap_event_param_value input list at time 0. No setter ever
+        calls into the plugin. Discovery snapshots CLAP_EXT_PARAMS at create
+        time into format-agnostic PluginParameterInfo, cached per uid by
+        PluginInstanceManager; the shell's insert factory registers the
+        list into the app-owned ParameterRegistry during the same compile
+        the lanes bind in.
+
   Phase 13 continues, in dependency order:
-    - parameter discovery -> ParameterRegistry (generic automation, §5).
-      Two things were established while wiring part 4 and are worth not
-      rediscovering:
-        (a) ParameterRegistry::StripApplier binds a normalised value onto a
-            MixerStripNode&. A plugin parameter has a DIFFERENT target — a
-            hosted instance, not a strip — so the registry's Entry has to
-            generalise (a target variant, or a second applier kind) before
-            plugin parameters can be automated. This is the design decision
-            that gates the rest; the roadmap's Phase 11 exit criterion
-            ("no parameter-specific code anywhere else") is the constraint
-            it must not break.
-        (b) CLAP parameter changes are DELIVERED AS EVENTS, not setters:
-            clap_event_param_value in the process input event list, or
-            params->flush() when not processing. ClapInstance::process
-            currently passes no event lists at all — it takes (left, right,
-            frames). Automating a plugin parameter therefore needs
-            ClapInstance to carry an input event queue, filled off the audio
-            thread and drained sample-accurately inside process. Do not add
-            a setter that calls into the plugin directly; that is the
-            concurrency bug the extension is designed to prevent
-            (params.h: flush must not run concurrently with process).
     - state save/load into the project (§6), latency reporting -> PDC
-    - editor hosting (§7), then AU, then VST3 (D-007 order)
-    - the browser/UI story: pick a plugin from the registry onto a strip
+    - editor hosting (§7), then AU, then VST3 (D-007 order). The editor
+      bridge is also where params->flush() lands: today a value queued
+      while the engine is idle waits for the next process call (D-029
+      records this), and where plugin-originated changes (out_events) flow
+      back to become recordable automation.
+    - the browser/UI story: pick a plugin from the registry onto a strip;
+      a generic parameter surface over discovered PluginParameterInfo
+    - sample-accurate event splitting inside the block, once the
+      AutomationNode itself evaluates finer than per-block
 
 Things to be careful about:
 

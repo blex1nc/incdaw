@@ -53,7 +53,20 @@ std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(const PluginId
     if (instance == nullptr)
         return nullptr;
 
+    // Cache the discovered parameters on the first successful instance: the
+    // list describes the plugin TYPE, so later instances reuse it.
+    parameters_.try_emplace(identifier.uid, instance->parameters());
+
     return std::make_unique<PluginNode>(std::move(instance));
+}
+
+const std::vector<PluginParameterInfo>* PluginInstanceManager::parametersFor(
+    const std::string& uid) const
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    const auto found = parameters_.find(uid);
+    return found != parameters_.end() ? &found->second : nullptr;
 }
 
 std::size_t PluginInstanceManager::loadedLibraryCount() const

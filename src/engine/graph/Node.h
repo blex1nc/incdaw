@@ -8,6 +8,8 @@
 
 namespace incdaw::engine {
 
+class ParameterSink;
+
 /// Everything a node is allowed to know while rendering one block.
 ///
 /// Passed by const reference into `Node::process`. Contains no pointers the
@@ -62,6 +64,12 @@ public:
     /// graph compiler so that delay compensation can align parallel paths
     /// (docs/AUDIO_ENGINE.md §7).
     [[nodiscard]] virtual FrameCount latencyFrames() const noexcept { return 0; }
+
+    /// This node's parameter sink, or nullptr for the many nodes that have no
+    /// parameters of their own. How the graph compiler binds automation onto
+    /// a node it only knows as `engine::Node` (docs/PLUGIN_HOST.md §5). The
+    /// sink lives and dies with the node.
+    [[nodiscard]] virtual ParameterSink* parameterSink() noexcept { return nullptr; }
 
     /// For diagnostics and graph dumps. Must be a string literal or otherwise
     /// outlive the node.

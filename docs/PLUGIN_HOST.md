@@ -120,15 +120,41 @@ restored on reload. Losing a session to someone else's bug is not acceptable.
 
 ## 5. Parameter system
 
-- Parameters are discovered once and cached in the registry.
+Implemented (docs/DECISIONS.md D-029):
+
+- Discovery happens once per plugin TYPE, at first instantiation, on the main
+  thread: `ClapInstance` snapshots `CLAP_EXT_PARAMS` into format-agnostic
+  `plugins::PluginParameterInfo` (plain min/max/default, stepped flag;
+  non-automatable and malformed parameters are skipped as hostile input).
+  `PluginInstanceManager` caches the list per uid.
 - Every parameter maps to INCDAW's **generic** automation subsystem — there is
-  no plugin-specific automation code anywhere (CLAUDE.md §10).
+  no plugin-specific automation code anywhere (CLAUDE.md §10). The
+  `ParameterRegistry` entry generalised: `StripApplier` OR `SinkApplier` over
+  `engine::ParameterSink`. Registration
+  (`registerPluginParameters`) is all a plugin's parameters need to become
+  automatable; keys are `plugin:<uid>:<param-id>`, and the lane's
+  `targetEntity` (the insert slot id) picks the instance.
+- Delivery is by EVENT, never by a call into the plugin: the instance is a
+  `ParameterSink` whose `setParameter` pushes onto a preallocated lock-free
+  queue; `process()` drains it into the block's `clap_event_param_value`
+  input list at block start. This is what keeps the CLAP concurrency contract
+  (no flush during processing) unviolatable by construction.
+- The graph compiler binds a sink-applier lane to the insert node's
+  `parameterSink()`; a mismatched key/target pair is skipped as data, exactly
+  like an unknown key.
+
+Still to come:
+
 - Parameter changes from the UI reach the audio thread through the same
-  lock-free command queue as everything else.
-- Plugin-originated parameter changes (a user turning a knob in the plugin's own
-  editor) flow back and are recordable as automation.
-- Sample-accurate parameter changes are honoured where the format supports them
-  (CLAP natively; VST3 via sample-offset parameter queues).
+  lock-free command queue as everything else; `params->flush()` when the
+  engine is idle (today a value queued while no audio runs waits for the next
+  process call).
+- Plugin-originated parameter changes (a user turning a knob in the plugin's
+  own editor) flow back through the output event list and are recordable as
+  automation (§7).
+- Sample-accurate parameter changes are honoured where the format supports
+  them (CLAP natively; VST3 via sample-offset parameter queues). Today the
+  grain is one block, matching the AutomationNode's evaluation.
 
 ---
 

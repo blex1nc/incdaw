@@ -4,6 +4,7 @@
 #include "engine/audio/InputMonitorNode.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
+#include "engine/graph/ParameterSink.h"
 #include "engine/instrument/SimpleSynth.h"
 #include "engine/automation/AutomationNode.h"
 #include "project/PatternCompiler.h"
@@ -13,6 +14,7 @@
 #include <filesystem>
 #include <limits>
 #include <unordered_map>
+#include <variant>
 
 namespace incdaw::project {
 namespace {
@@ -104,6 +106,11 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     /// into the destination's fader and past its plugins.
     std::unordered_map<EntityId, engine::NodeIndex> stripInputIndices;
 
+    /// Parameter sinks of the insert nodes that made it into the graph, by
+    /// slot id — what a lane automating a plugin parameter resolves its
+    /// targetEntity against. A bypassed or unbuildable slot is simply absent.
+    std::unordered_map<EntityId, engine::ParameterSink*> insertSinks;
+
     engine::NodeIndex master = engine::invalidNode;
 
     for (const MixerNode& node : project.mixerNodes()) {
@@ -153,6 +160,9 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                                             + node.name + "\" is bypassed: " + insertError);
                 continue;
             }
+
+            if (engine::ParameterSink* sink = insertNode->parameterSink())
+                insertSinks.emplace(slot.id, sink);
 
             chain.push_back(builder.addNode(std::move(insertNode)));
         }
@@ -473,25 +483,59 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             return;
 
         const ParameterRegistry::Entry* parameter = registry.find(lane.parameterKey);
-        if (parameter == nullptr || !parameter->apply)
+        if (parameter == nullptr)
             return;   // a lane naming an unknown parameter is data, not an error
 
-        // The lane's target resolves to whichever strip renders it: a mixer
-        // node's own strip, or the channel strip of a channel.
-        engine::dsp::MixerStripNode* strip = nullptr;
+        // Which applier kind the entry holds decides what the lane's target
+        // must resolve to: a strip parameter targets whichever strip renders
+        // the entity; a plugin parameter targets an insert slot's sink. A
+        // mismatch is skipped like an unknown key — stale data, not an error.
+        //
+        // The applier is copied out of the registry either way: the registry
+        // may be the stack-local builtins above, and a reference into it
+        // would dangle the moment this function returns.
+        engine::AutomationApplier apply;
 
-        if (const auto found = stripIndices.find(lane.targetEntity); found != stripIndices.end()) {
-            for (std::size_t index = 0; index < mixerIds.size(); ++index)
-                if (mixerIds[index] == lane.targetEntity)
-                    strip = stripNodes[index];
-        } else {
-            for (std::size_t index = 0; index < channelIds.size(); ++index)
-                if (channelIds[index] == lane.targetEntity)
-                    strip = channelStripNodes[index];
+        if (const auto* stripApply =
+                std::get_if<ParameterRegistry::StripApplier>(&parameter->apply)) {
+            if (!*stripApply)
+                return;
+
+            // The lane's target resolves to whichever strip renders it: a
+            // mixer node's own strip, or the channel strip of a channel.
+            engine::dsp::MixerStripNode* strip = nullptr;
+
+            if (const auto found = stripIndices.find(lane.targetEntity);
+                found != stripIndices.end()) {
+                for (std::size_t index = 0; index < mixerIds.size(); ++index)
+                    if (mixerIds[index] == lane.targetEntity)
+                        strip = stripNodes[index];
+            } else {
+                for (std::size_t index = 0; index < channelIds.size(); ++index)
+                    if (channelIds[index] == lane.targetEntity)
+                        strip = channelStripNodes[index];
+            }
+
+            if (strip == nullptr)
+                return;   // silent channel, or a target that no longer exists
+
+            apply = [strip, applier = *stripApply](float value) { applier(*strip, value); };
+        } else if (const auto* sinkApply =
+                       std::get_if<ParameterRegistry::SinkApplier>(&parameter->apply)) {
+            if (!*sinkApply)
+                return;
+
+            const auto found = insertSinks.find(lane.targetEntity);
+            if (found == insertSinks.end())
+                return;   // bypassed, unbuildable, or a slot that no longer exists
+
+            apply = [sink = found->second, applier = *sinkApply](float value) {
+                applier(*sink, value);
+            };
         }
 
-        if (strip == nullptr)
-            return;   // silent channel, or a target that no longer exists
+        if (!apply)
+            return;
 
         engine::AutomationNode::Binding binding;
         binding.windowStart = placement.windowStart;
@@ -517,11 +561,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         }
 
         binding.sequence.setPoints(std::move(points));
-
-        // The applier is copied into the binding: the registry may be the
-        // stack-local builtins above, and a reference into it would dangle the
-        // moment this function returns.
-        binding.apply = [strip, apply = parameter->apply](float value) { apply(*strip, value); };
+        binding.apply = std::move(apply);
 
         automation->addBinding(std::move(binding));
     };
