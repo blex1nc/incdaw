@@ -22,6 +22,13 @@ constexpr clap_id gainParamId = 0;
 
 struct State {
     double gain = defaultGain;
+
+    // Editor bookkeeping. This plugin's "editor" draws nothing: it records
+    // the host's calls, which is exactly what the host's bridge tests need —
+    // a real NSView would need a display and prove no more.
+    bool  guiCreated = false;
+    void* guiParent  = nullptr;
+    bool  guiVisible = false;
 };
 
 State* stateOf(const clap_plugin_t* plugin)
@@ -185,6 +192,95 @@ bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream)
 
 const clap_plugin_state_t stateExtension = {stateSave, stateLoad};
 
+// ── The gui extension ────────────────────────────────────────────────────────
+
+constexpr uint32_t editorWidth  = 300;
+constexpr uint32_t editorHeight = 200;
+
+bool guiIsApiSupported(const clap_plugin_t*, const char* api, bool isFloating)
+{
+    return !isFloating && api != nullptr && std::strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
+}
+
+bool guiGetPreferredApi(const clap_plugin_t*, const char** api, bool* isFloating)
+{
+    if (api == nullptr || isFloating == nullptr)
+        return false;
+
+    *api        = CLAP_WINDOW_API_COCOA;
+    *isFloating = false;
+    return true;
+}
+
+bool guiCreate(const clap_plugin_t* plugin, const char* api, bool isFloating)
+{
+    if (!guiIsApiSupported(plugin, api, isFloating))
+        return false;
+
+    stateOf(plugin)->guiCreated = true;
+    return true;
+}
+
+void guiDestroy(const clap_plugin_t* plugin)
+{
+    State* state     = stateOf(plugin);
+    state->guiCreated = false;
+    state->guiParent  = nullptr;
+    state->guiVisible = false;
+}
+
+bool guiSetScale(const clap_plugin_t*, double) { return true; }
+
+bool guiGetSize(const clap_plugin_t* plugin, uint32_t* width, uint32_t* height)
+{
+    if (!stateOf(plugin)->guiCreated || width == nullptr || height == nullptr)
+        return false;
+
+    *width  = editorWidth;
+    *height = editorHeight;
+    return true;
+}
+
+bool guiCanResize(const clap_plugin_t*) { return false; }
+bool guiGetResizeHints(const clap_plugin_t*, clap_gui_resize_hints_t*) { return false; }
+bool guiAdjustSize(const clap_plugin_t*, uint32_t*, uint32_t*) { return false; }
+bool guiSetSize(const clap_plugin_t*, uint32_t, uint32_t) { return false; }
+
+bool guiSetParent(const clap_plugin_t* plugin, const clap_window_t* window)
+{
+    if (window == nullptr || window->cocoa == nullptr)
+        return false;
+
+    stateOf(plugin)->guiParent = window->cocoa;
+    return true;
+}
+
+bool guiSetTransient(const clap_plugin_t*, const clap_window_t*) { return false; }
+void guiSuggestTitle(const clap_plugin_t*, const char*) {}
+
+bool guiShow(const clap_plugin_t* plugin)
+{
+    State* state = stateOf(plugin);
+    if (!state->guiCreated || state->guiParent == nullptr)
+        return false;
+
+    state->guiVisible = true;
+    return true;
+}
+
+bool guiHide(const clap_plugin_t* plugin)
+{
+    stateOf(plugin)->guiVisible = false;
+    return true;
+}
+
+const clap_plugin_gui_t guiExtension = {
+    guiIsApiSupported, guiGetPreferredApi, guiCreate,      guiDestroy,
+    guiSetScale,       guiGetSize,         guiCanResize,   guiGetResizeHints,
+    guiAdjustSize,     guiSetSize,         guiSetParent,   guiSetTransient,
+    guiSuggestTitle,   guiShow,            guiHide,
+};
+
 // ── The plugin ───────────────────────────────────────────────────────────────
 
 bool pluginInit(const clap_plugin_t*) { return true; }
@@ -208,6 +304,9 @@ const void* pluginGetExtension(const clap_plugin_t*, const char* id)
 
     if (id != nullptr && std::strcmp(id, CLAP_EXT_STATE) == 0)
         return &stateExtension;
+
+    if (id != nullptr && std::strcmp(id, CLAP_EXT_GUI) == 0)
+        return &guiExtension;
 
     return nullptr;
 }

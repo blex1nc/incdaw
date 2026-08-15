@@ -197,6 +197,22 @@ Rules:
 
 ## 7. Editor / UI bridge
 
+Implemented (part 10):
+
+- `ClapInstance` bridges CLAP_EXT_GUI for embedded (non-floating) Cocoa
+  editors: create → set_scale → get_size → set_parent → show, with no editor
+  left behind on any refusal; hide → destroy on close; the destructor closes
+  an open editor first, so a closing window and a dying instance cannot
+  double-free. The parent view crosses the layer as void* — plugins/ never
+  includes Cocoa.
+- The shell owns one NSWindow per slot (Open Editor in the mixer's insert
+  submenu), keyed by slot id. Because instances live for their slot's
+  lifetime (D-031), the window survives graph rebuilds; when a slot leaves
+  the project, the shell closes its window BEFORE the retain pass disposes
+  the instance.
+
+Still to come:
+
 - Plugin editors are hosted in a native window owned by `ui/`, via
   `CoreAudioKit` / `AUCocoaUIView` for AU and the format-native mechanisms for
   CLAP and VST3.

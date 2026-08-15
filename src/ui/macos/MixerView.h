@@ -47,4 +47,8 @@ namespace incdaw::engine::dsp { class MixerStripNode; }
 /// not plugin catalogues.
 @property (nonatomic, copy) NSArray<NSDictionary*>* availableInserts;
 
+/// Asks the shell to open the slot's plugin editor window. The shell owns
+/// windows and instances; the view only knows the slot was asked for.
+@property (nonatomic, copy) void (^onOpenInsertEditor)(unsigned long long slotId);
+
 @end

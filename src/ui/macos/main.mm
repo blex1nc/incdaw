@@ -161,6 +161,12 @@ std::filesystem::path incdawSupportDirectory()
 
     /// The scanned plugin catalogue as menu fodder, built once at launch.
     NSArray<NSDictionary*>* _availableInserts;
+
+    /// Open plugin editor windows and their close observers, by slot key.
+    /// Closed by the shell BEFORE an instance is disposed (D-031): the
+    /// window's death must reach the plugin while the plugin is still alive.
+    NSMutableDictionary<NSNumber*, NSWindow*>* _editorWindows;
+    NSMutableDictionary<NSNumber*, id>*        _editorObservers;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -192,6 +198,8 @@ std::filesystem::path incdawSupportDirectory()
         }];
     }
     _availableInserts = available;
+    _editorWindows    = [NSMutableDictionary dictionary];
+    _editorObservers  = [NSMutableDictionary dictionary];
 
     const project::EntityId channelId = _project->addChannel("Channel 1").id;
     const project::EntityId patternId = _project->addPattern("Pattern 1").id;
@@ -290,6 +298,11 @@ std::filesystem::path incdawSupportDirectory()
     self.mixer.selectedChannelIdValue = channelId.value();
     self.mixer.hidden                 = YES;
     self.mixer.availableInserts       = _availableInserts;
+
+    __weak INCDAWAppDelegate* weakSelfForEditors = self;
+    self.mixer.onOpenInsertEditor = ^(unsigned long long slotKey) {
+        [weakSelfForEditors openEditorForSlotKey:slotKey];
+    };
 
     self.audioEditor = [[INCDAWAudioEditorView alloc]
         initWithFrame:editorFrame
@@ -907,6 +920,14 @@ std::filesystem::path incdawSupportDirectory()
             for (const project::PluginSlot& slot : node.inserts)
                 slotKeys.push_back(slot.id.value());
 
+        // Editor windows over vanished slots close FIRST, while their
+        // instance is still alive to be told (closeEditor inside the close
+        // notification). Then the instances go.
+        for (NSNumber* key in _editorWindows.allKeys)
+            if (std::find(slotKeys.begin(), slotKeys.end(), key.unsignedLongLongValue)
+                == slotKeys.end())
+                [_editorWindows[key] close];
+
         _pluginInstances->retainOnlyInstances(slotKeys);
     }
 }
@@ -964,6 +985,99 @@ std::filesystem::path incdawSupportDirectory()
 
     NSLog(@"INCDAW: plugin scan ran %zu child scans; %lu plugins known", scanned,
           static_cast<unsigned long>(available.count));
+}
+
+// ── Plugin editor windows ────────────────────────────────────────────────────
+
+/// One window per slot, embedding the plugin's own editor view
+/// (docs/PLUGIN_HOST.md §7). The instance belongs to the manager and lives
+/// for the slot's lifetime (D-031), so the window survives graph rebuilds;
+/// the shell closes it before the instance is ever disposed.
+- (void)openEditorForSlotKey:(unsigned long long)slotKey
+{
+    NSNumber* key = @(slotKey);
+
+    if (NSWindow* existing = _editorWindows[key]) {
+        [existing makeKeyAndOrderFront:nil];
+        return;
+    }
+
+    plugins::ClapInstance* instance =
+        _pluginInstances != nullptr ? _pluginInstances->instanceFor(slotKey) : nullptr;
+
+    if (instance == nullptr || !instance->hasEditor()) {
+        // Bypassed or unbuilt slots have no live instance; some plugins have
+        // no editor at all. Either way there is nothing to open.
+        NSBeep();
+        return;
+    }
+
+    NSView* container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+
+    std::uint32_t width  = 0;
+    std::uint32_t height = 0;
+
+    if (!instance->openEditor((__bridge void*)container, width, height)) {
+        NSBeep();
+        return;
+    }
+
+    const NSRect frame = NSMakeRect(0, 0, width, height);
+    container.frame    = frame;
+
+    NSWindow* window = [[NSWindow alloc]
+        initWithContentRect:frame
+                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+
+    window.releasedWhenClosed = NO;
+    window.contentView        = container;
+
+    // Titled by what the user loaded, not by an internal key.
+    NSString* title = @"Plugin";
+    for (const project::MixerNode& node : _project->mixerNodes())
+        for (const project::PluginSlot& slot : node.inserts)
+            if (slot.id.value() == slotKey)
+                title = @(slot.plugin.uid.c_str());
+    for (NSDictionary* plugin in _availableInserts)
+        if ([plugin[@"uid"] isEqualToString:title])
+            title = plugin[@"name"];
+    window.title = title;
+
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+
+    _editorWindows[key] = window;
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+    _editorObservers[key] = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSWindowWillCloseNotification
+                    object:window
+                     queue:nil
+                usingBlock:^(NSNotification*) {
+                    [weakSelf editorWindowClosedForSlotKey:slotKey];
+                }];
+}
+
+- (void)editorWindowClosedForSlotKey:(unsigned long long)slotKey
+{
+    NSNumber* key = @(slotKey);
+
+    if (_editorWindows[key] == nil)
+        return;
+
+    if (id observer = _editorObservers[key])
+        [NSNotificationCenter.defaultCenter removeObserver:observer];
+
+    [_editorObservers removeObjectForKey:key];
+    [_editorWindows removeObjectForKey:key];
+
+    // The instance may already be gone when the slot was removed first; the
+    // manager answers nullptr then, and there is nothing left to close.
+    if (_pluginInstances != nullptr)
+        if (plugins::ClapInstance* instance = _pluginInstances->instanceFor(slotKey))
+            instance->closeEditor();
 }
 
 // ── The project as a document ────────────────────────────────────────────────

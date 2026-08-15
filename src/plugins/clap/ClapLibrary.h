@@ -105,6 +105,24 @@ public:
     /// compensation (docs/AUDIO_ENGINE.md §7).
     [[nodiscard]] std::uint32_t latencyFrames() const noexcept { return latency_; }
 
+    // ── The editor (CLAP_EXT_GUI, docs/PLUGIN_HOST.md §7) ────────────────
+    // Main-thread only, like all lifecycle calls. `parentView` is an NSView*
+    // as void*: this layer never includes Cocoa (platform containment), and
+    // the CLAP window handle is a void* anyway.
+
+    /// True when the plugin offers an embeddable Cocoa editor.
+    [[nodiscard]] bool hasEditor() const noexcept;
+
+    /// Creates the editor embedded in `parentView` and reports the plugin's
+    /// size. False leaves no editor behind, whichever step refused.
+    [[nodiscard]] bool openEditor(void* parentView, std::uint32_t& width, std::uint32_t& height);
+
+    /// Destroys the editor if one is open. Safe to call twice; called by the
+    /// destructor, so a closing window and a dying instance cannot double-free.
+    void closeEditor() noexcept;
+
+    [[nodiscard]] bool isEditorOpen() const noexcept { return editorOpen_; }
+
     /// Captures the plugin's opaque state (CLAP_EXT_STATE). False when the
     /// plugin has no state extension, refuses, or writes beyond the size cap
     /// a hostile plugin is held to — the caller keeps its previous blob.
@@ -128,8 +146,10 @@ private:
 
     const clap_plugin_t*       plugin_ = nullptr;
     const clap_plugin_state_t* state_  = nullptr;   ///< CLAP_EXT_STATE, or null
+    const clap_plugin_gui_t*   gui_    = nullptr;   ///< CLAP_EXT_GUI, or null
     clap_host_t                host_{};
     bool                       processing_ = false;
+    bool                       editorOpen_ = false;
     std::int64_t               steadyTime_ = 0;
     std::uint32_t              latency_    = 0;
 

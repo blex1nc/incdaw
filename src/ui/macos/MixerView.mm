@@ -414,6 +414,12 @@ enum class MixerDrag { none, fader, pan };
 
             NSDictionary* address = @{@"node": @(nodeId.value()), @"slot": @(slot.id.value())};
 
+            NSMenuItem* editor = [slotMenu addItemWithTitle:@"Open Editor"
+                                                     action:@selector(openInsertEditorFromMenu:)
+                                              keyEquivalent:@""];
+            editor.target            = self;
+            editor.representedObject = address;
+
             NSMenuItem* bypass = [slotMenu addItemWithTitle:@"Bypass"
                                                      action:@selector(toggleInsertBypassFromMenu:)
                                               keyEquivalent:@""];
@@ -445,6 +451,14 @@ enum class MixerDrag { none, fader, pan };
 }
 
 // ── Insert-chain edits ───────────────────────────────────────────────────────
+
+- (void)openInsertEditorFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+
+    if (self.onOpenInsertEditor != nil)
+        self.onOpenInsertEditor([info[@"slot"] unsignedLongLongValue]);
+}
 
 - (void)addInsertFromMenu:(NSMenuItem*)item
 {

@@ -8,6 +8,32 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 10) — The editor bridge — 2026-08-15
+
+**Added**
+
+- `ClapInstance` bridges CLAP_EXT_GUI for embedded Cocoa editors: the strict
+  create → set_scale → get_size → set_parent → show sequence, with no editor
+  left behind on any refusal; hide → destroy on close; the destructor closes
+  an open editor first. The parent view crosses the layer as void* —
+  plugins/ never includes Cocoa. Half an extension is treated as none, like
+  params and state before it.
+- Open Editor in the mixer's insert submenu; the shell owns one NSWindow per
+  slot. Because instances live for their slot's lifetime (D-031), an editor
+  window survives graph rebuilds; when a slot leaves the project the shell
+  closes its window BEFORE the retain pass disposes the instance, so the
+  plugin is told while it is still alive.
+- The test gain plugin grew a recording gui extension — it draws nothing and
+  records the host's calls, which is what a headless bridge test can
+  honestly verify.
+
+**Tests**
+
+- 2 new cases (411 total, 169,335 assertions, green in Debug and Release):
+  the full open/refuse-double-open/close/reopen/destruct-while-open cycle
+  with the reported size; nullptr parents and editor-less plugins refused
+  politely.
+
 ### Phase 13 (part 9) — Instances outlive graphs — 2026-08-15
 
 **Changed**

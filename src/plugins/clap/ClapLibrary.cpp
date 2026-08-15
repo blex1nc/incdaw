@@ -278,6 +278,15 @@ std::unique_ptr<ClapInstance> ClapLibrary::create(const std::string& pluginId,
         && (instance->state_->save == nullptr || instance->state_->load == nullptr))
         instance->state_ = nullptr;   // hostile input: half an extension is none
 
+    instance->gui_ = static_cast<const clap_plugin_gui_t*>(
+        instance->plugin_->get_extension(instance->plugin_, CLAP_EXT_GUI));
+
+    if (instance->gui_ != nullptr
+        && (instance->gui_->is_api_supported == nullptr || instance->gui_->create == nullptr
+            || instance->gui_->destroy == nullptr || instance->gui_->get_size == nullptr
+            || instance->gui_->set_parent == nullptr || instance->gui_->show == nullptr))
+        instance->gui_ = nullptr;   // same rule for the editor
+
     if (!instance->plugin_->activate(instance->plugin_, sampleRate, 1, maxFrames)) {
         error = "plugin activate failed: " + pluginId;
         instance->plugin_->destroy(instance->plugin_);
@@ -313,6 +322,8 @@ std::unique_ptr<ClapInstance> ClapLibrary::create(const std::string& pluginId,
 
 ClapInstance::~ClapInstance()
 {
+    closeEditor();
+
     if (plugin_ != nullptr) {
         if (processing_)
             plugin_->stop_processing(plugin_);
@@ -321,6 +332,59 @@ ClapInstance::~ClapInstance()
         plugin_->destroy(plugin_);
         plugin_ = nullptr;
     }
+}
+
+bool ClapInstance::hasEditor() const noexcept
+{
+    return plugin_ != nullptr && gui_ != nullptr
+        && gui_->is_api_supported(plugin_, CLAP_WINDOW_API_COCOA, false);
+}
+
+bool ClapInstance::openEditor(void* parentView, std::uint32_t& width, std::uint32_t& height)
+{
+    if (editorOpen_ || parentView == nullptr || !hasEditor())
+        return false;
+
+    if (!gui_->create(plugin_, CLAP_WINDOW_API_COCOA, false))
+        return false;
+
+    // Scale is advisory and refusable; size and parent are not.
+    if (gui_->set_scale != nullptr)
+        (void)gui_->set_scale(plugin_, 1.0);
+
+    if (!gui_->get_size(plugin_, &width, &height)) {
+        gui_->destroy(plugin_);
+        return false;
+    }
+
+    clap_window_t window{};
+    window.api   = CLAP_WINDOW_API_COCOA;
+    window.cocoa = parentView;
+
+    if (!gui_->set_parent(plugin_, &window)) {
+        gui_->destroy(plugin_);
+        return false;
+    }
+
+    if (!gui_->show(plugin_)) {
+        gui_->destroy(plugin_);
+        return false;
+    }
+
+    editorOpen_ = true;
+    return true;
+}
+
+void ClapInstance::closeEditor() noexcept
+{
+    if (!editorOpen_)
+        return;
+
+    if (gui_->hide != nullptr)
+        (void)gui_->hide(plugin_);
+
+    gui_->destroy(plugin_);
+    editorOpen_ = false;
 }
 
 bool ClapInstance::saveState(std::vector<std::uint8_t>& out) const

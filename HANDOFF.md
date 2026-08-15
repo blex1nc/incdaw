@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  409 test cases, 169,316 assertions, green in both Debug and Release.
+  411 test cases, 169,335 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1232,15 +1232,22 @@ recording and the Audio Logger all work. What remains in it is polish):
   Caveat recorded in D-031: undoing a slot REMOVAL returns a fresh
   instance (only the saved blob survives the retain pass).
 
+  Phase 13 part 10 is DONE: the editor bridge (§7). ClapInstance hosts
+  embedded Cocoa editors through CLAP_EXT_GUI (strict call sequence, no
+  editor left on refusal, destructor closes first); the shell owns one
+  NSWindow per slot, opened from the mixer insert submenu, surviving
+  rebuilds because of D-031 and closed BEFORE the retain pass disposes an
+  instance. Tested headlessly against the gain plugin's recording gui.
+
   Phase 13 continues, in dependency order:
-    - editor hosting (§7), then AU, then VST3 (D-007 order). The editor
-      bridge is also where params->flush() lands: today a value queued
-      while the engine is idle waits for the next process call (D-029
-      records this), and where plugin-originated changes (out_events) flow
-      back to become recordable automation. mark_dirty (clap_host_state)
-      belongs here too.
-    - the browser/UI story: pick a plugin from the registry onto a strip;
-      a generic parameter surface over discovered PluginParameterInfo
+    - params->flush() while the engine is idle, plugin-originated changes
+      (out_events -> recordable automation), clap_host_state.mark_dirty,
+      clap_host_latency.changed -> recompile. These are the remaining
+      host-callback halves of §5/§6/§8.
+    - AU, then VST3 (D-007 order) — new format backends behind the same
+      PluginInstanceManager surface.
+    - a generic parameter surface over discovered PluginParameterInfo
+      (UI listing every automatable parameter of a slot).
     - sample-accurate event splitting inside the block, once the
       AutomationNode itself evaluates finer than per-block
 
