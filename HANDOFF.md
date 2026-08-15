@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  405 test cases, 169,280 assertions, green in both Debug and Release.
+  409 test cases, 169,316 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1221,6 +1221,16 @@ recording and the Audio Logger all work. What remains in it is polish):
   out-of-process scanner (incdaw-pluginscan is copied into
   INCDAW.app/Contents/MacOS at build). Insert reordering is NOT yet a
   command; the chain order can only be built by add order today.
+
+  Phase 13 part 9 is DONE: instances outlive graphs (D-031).
+  PluginInstanceManager keys live instances by slot id; PluginNode
+  borrows. Rebuilds reuse the slot's instance (live state intact); a
+  changed sample rate/block recreates it carrying the state blob; a
+  changed uid starts fresh; the shell's retain pass after each swap is
+  the only disposer. This was the precondition editor hosting was
+  waiting for — an editor window can now outlive every graph rebuild.
+  Caveat recorded in D-031: undoing a slot REMOVAL returns a fresh
+  instance (only the saved blob survives the retain pass).
 
   Phase 13 continues, in dependency order:
     - editor hosting (§7), then AU, then VST3 (D-007 order). The editor

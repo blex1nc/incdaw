@@ -144,7 +144,7 @@ project::InsertFactory factoryFor(plugins::PluginInstanceManager& manager)
 {
     return [&manager](const project::PluginSlot& slot,
                       std::string& error) -> std::unique_ptr<engine::Node> {
-        return manager.createInsert(slot.plugin, 48000.0, blockSize, error);
+        return manager.createInsert(slot.id.value(), slot.plugin, 48000.0, blockSize, error);
     };
 }
 

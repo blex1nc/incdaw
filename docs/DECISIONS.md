@@ -1008,3 +1008,43 @@ the shell does not yet call capture/restore — recorded as the standing
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+## D-031 — Plugin instances live for their slot's lifetime, not the graph's
+
+**Context:** graphs are rebuilt on every edit and retired asynchronously.
+Through part 8, a PluginNode owned its ClapInstance, so every rebuild —
+every added note — created a fresh instance: live plugin state silently
+reset unless it happened to be restored from a saved blob, and the planned
+editor window (§7) would have dangled over a destroyed instance on the
+user's next keystroke.
+
+**Options:**
+
+1. Keep node-owned instances and re-restore state from blobs on every
+   rebuild. Loses everything since the last save, costs a state round trip
+   per edit, and still dangles an open editor.
+2. Key instances by SLOT in PluginInstanceManager; the node borrows. An
+   instance is destroyed only when its slot leaves the project (a retain
+   pass after each rebuild), when its plugin uid changes, or when the
+   activation terms (sample rate, max block) change — the last carrying the
+   state blob across so the plugin does not audibly reset.
+
+**Chosen:** option 2.
+
+**Reason:** the slot IS the user-facing identity of "this plugin here";
+its instance keeping its state across unrelated edits is what users mean
+by a DAW behaving. Two graphs may briefly both name an instance, but only
+one graph is ever processed — the engine swaps atomically between blocks —
+so the audio thread never runs it twice; and the retain pass runs AFTER
+the swap, so disposal cannot race the old graph. A bypassed slot keeps its
+instance (and its state) on purpose: bypass is an audition gesture, not
+an unload.
+
+**Tradeoffs:** undoing a slot REMOVAL brings the slot back with a fresh
+instance — the in-memory state died with the retain pass; only the saved
+blob survives. The manager grew instance bookkeeping, and tests may not
+compare instance pointers across recreation (allocators reuse addresses);
+they assert behaviour instead.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

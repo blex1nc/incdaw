@@ -94,20 +94,16 @@ struct ScratchDir {
 
 /// Impulse into two parallel paths — one through the hosted latent plugin,
 /// one direct — summed at the master. Alignment is the whole question.
-std::unique_ptr<CompiledGraph> buildParallelGraph(plugins::ClapLibrary& library, bool compensate)
+/// The instance is BORROWED by the node (D-031): the caller keeps it alive
+/// for as long as the returned graph renders.
+std::unique_ptr<CompiledGraph> buildParallelGraph(plugins::ClapInstance* instance,
+                                                  bool compensate)
 {
-    std::string error;
-
-    auto instance = library.create(latencyUid, 48000.0,
-                                   static_cast<std::uint32_t>(blockSize), error);
-    REQUIRE(instance != nullptr);
-
     GraphBuilder builder;
     builder.setDelayCompensationEnabled(compensate);
 
     const auto source      = builder.addNode(std::make_unique<ImpulseNode>(0));
-    const auto latent      = builder.addNode(
-        std::make_unique<plugins::PluginNode>(std::move(instance)));
+    const auto latent      = builder.addNode(std::make_unique<plugins::PluginNode>(instance));
     const auto latentStrip = builder.addNode(std::make_unique<dsp::MixerStripNode>());
     const auto direct      = builder.addNode(std::make_unique<dsp::MixerStripNode>());
     const auto summing     = builder.addNode(std::make_unique<dsp::MixerStripNode>());
@@ -152,11 +148,19 @@ TEST_CASE("EXIT CRITERION: a hosted plugin's reported latency aligns parallel pa
     std::string          error;
     REQUIRE(library.open(INCDAW_TESTLATENCY_PLUGIN, error));
 
+    // One instance per graph, kept alive here for as long as its graph is.
+    auto first  = library.create(latencyUid, 48000.0,
+                                 static_cast<std::uint32_t>(blockSize), error);
+    auto second = library.create(latencyUid, 48000.0,
+                                 static_cast<std::uint32_t>(blockSize), error);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+
     // Without compensation the two arrivals are 64 frames apart — the comb a
     // mixer without PDC produces. This half proves the test can see the flaw.
     // Amplitudes are measured relative to one arrival, because each strip
     // applies the centre pan law on the way through.
-    auto uncompensated = buildParallelGraph(library, false);
+    auto uncompensated = buildParallelGraph(first.get(), false);
     REQUIRE(uncompensated != nullptr);
 
     const auto   combed  = render(*uncompensated, 2);
@@ -166,7 +170,7 @@ TEST_CASE("EXIT CRITERION: a hosted plugin's reported latency aligns parallel pa
     CHECK(combed[pluginLatency] == arrival);
 
     // With compensation both arrive together, once, at the plugin's latency.
-    auto compensated = buildParallelGraph(library, true);
+    auto compensated = buildParallelGraph(second.get(), true);
     REQUIRE(compensated != nullptr);
     CHECK(compensated->latencyFrames() == pluginLatency);
 
@@ -221,7 +225,7 @@ TEST_CASE("a project whose insert is latent reports the graph's total latency")
     options.maxBlockSize  = blockSize;
     options.pattern       = pattern;
     options.insertFactory = [&manager](const project::PluginSlot& slot, std::string& error) {
-        return manager.createInsert(slot.plugin, 48000.0,
+        return manager.createInsert(slot.id.value(), slot.plugin, 48000.0,
                                     static_cast<std::uint32_t>(blockSize), error);
     };
 

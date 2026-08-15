@@ -98,11 +98,11 @@ TEST_CASE("a hosted plugin processes inside the render graph, allocation-free")
     REQUIRE(instance != nullptr);
 
     // sine -> plugin insert -> master. What reaches the master must be the
-    // sine through the plugin's -6 dB, sample for sample.
+    // sine through the plugin's -6 dB, sample for sample. The node borrows
+    // the instance (D-031); `instance` above outlives the graph below.
     GraphBuilder builder;
     const auto source = builder.addNode(std::make_unique<dsp::SineOscillatorNode>(220.0, 0.4f));
-    const auto insert = builder.addNode(
-        std::make_unique<plugins::PluginNode>(std::move(instance)));
+    const auto insert = builder.addNode(std::make_unique<plugins::PluginNode>(instance.get()));
     const auto master = builder.addNode(std::make_unique<dsp::GainNode>(1.0f));
     builder.connect(source, insert);
     builder.connect(insert, master);

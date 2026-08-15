@@ -2,6 +2,8 @@
 
 #include "plugins/PluginNode.h"
 
+#include <algorithm>
+
 namespace incdaw::plugins {
 
 ClapLibrary* PluginInstanceManager::libraryFor(const std::string& path, std::string& error)
@@ -17,10 +19,9 @@ ClapLibrary* PluginInstanceManager::libraryFor(const std::string& path, std::str
     return libraries_.emplace(path, std::move(library)).first->second.get();
 }
 
-std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(const PluginIdentifier& identifier,
-                                                                  double                  sampleRate,
-                                                                  std::uint32_t           maxFrames,
-                                                                  std::string&            error)
+std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(
+    std::uint64_t slotKey, const PluginIdentifier& identifier, double sampleRate,
+    std::uint32_t maxFrames, std::string& error)
 {
     if (!identifier.isValid()) {
         error = "empty plugin identifier";
@@ -36,6 +37,26 @@ std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(const PluginId
     }
 
     const std::lock_guard<std::mutex> lock(mutex_);
+
+    // The reuse path: same plugin at the same activation terms means the
+    // slot's live instance — and its live state — carries straight on.
+    std::vector<std::uint8_t> carriedState;
+    bool                      carryState = false;
+
+    if (const auto found = instances_.find(slotKey); found != instances_.end()) {
+        Held& held = found->second;
+
+        if (held.uid == identifier.uid && held.sampleRate == sampleRate
+            && held.maxFrames == maxFrames)
+            return std::make_unique<PluginNode>(held.instance.get());
+
+        // Same plugin at new terms: recreate, but carry the state blob so
+        // the plugin does not audibly reset on a device change (D-031).
+        if (held.uid == identifier.uid)
+            carryState = held.instance->saveState(carriedState);
+
+        instances_.erase(found);
+    }
 
     const PluginRegistry::Located located = registry_->find(identifier.uid);
     if (located.library == nullptr) {
@@ -53,11 +74,43 @@ std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(const PluginId
     if (instance == nullptr)
         return nullptr;
 
+    if (carryState)
+        (void)instance->loadState(carriedState.data(), carriedState.size());
+
     // Cache the discovered parameters on the first successful instance: the
     // list describes the plugin TYPE, so later instances reuse it.
     parameters_.try_emplace(identifier.uid, instance->parameters());
 
-    return std::make_unique<PluginNode>(std::move(instance));
+    Held held;
+    held.instance   = std::move(instance);
+    held.uid        = identifier.uid;
+    held.sampleRate = sampleRate;
+    held.maxFrames  = maxFrames;
+
+    ClapInstance* borrowed = held.instance.get();
+    instances_[slotKey]    = std::move(held);
+
+    return std::make_unique<PluginNode>(borrowed);
+}
+
+void PluginInstanceManager::retainOnlyInstances(const std::vector<std::uint64_t>& slotKeys)
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    for (auto it = instances_.begin(); it != instances_.end();) {
+        const bool keep = std::find(slotKeys.begin(), slotKeys.end(), it->first)
+                       != slotKeys.end();
+
+        it = keep ? std::next(it) : instances_.erase(it);
+    }
+}
+
+ClapInstance* PluginInstanceManager::instanceFor(std::uint64_t slotKey) const
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    const auto found = instances_.find(slotKey);
+    return found != instances_.end() ? found->second.instance.get() : nullptr;
 }
 
 const std::vector<PluginParameterInfo>* PluginInstanceManager::parametersFor(
@@ -73,6 +126,12 @@ std::size_t PluginInstanceManager::loadedLibraryCount() const
 {
     const std::lock_guard<std::mutex> lock(mutex_);
     return libraries_.size();
+}
+
+std::size_t PluginInstanceManager::liveInstanceCount() const
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return instances_.size();
 }
 
 } // namespace incdaw::plugins

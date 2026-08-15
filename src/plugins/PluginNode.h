@@ -12,18 +12,19 @@ namespace incdaw::plugins {
 /// block. Sums its graph inputs (like a strip does), then the plugin
 /// processes the result in place on the node's output.
 ///
-/// Ownership: the node owns the INSTANCE; the ClapLibrary the instance came
-/// from must outlive the node, because destroying the instance calls into
-/// the library's code. The instance manager that owns libraries for the
-/// application's lifetime arrives with the compiler wiring; tests keep the
-/// library alive on the stack.
+/// Ownership: the node BORROWS the instance (D-031). Instances belong to
+/// PluginInstanceManager and live for their slot's lifetime, not the
+/// graph's — graphs are rebuilt on every edit, and an instance dying with
+/// its node would reset the plugin's live state (and dangle under any open
+/// editor) every time the user added a note. Whoever constructs the node
+/// guarantees the instance outlives it; tests keep instance and library on
+/// the stack, declared before the graph.
 ///
 /// Stereo today, like the rest of the graph. A mono graph passes through
 /// untouched rather than handing the plugin two aliases of one buffer.
 class PluginNode final : public engine::Node {
 public:
-    explicit PluginNode(std::unique_ptr<ClapInstance> instance) noexcept
-        : instance_(std::move(instance)) {}
+    explicit PluginNode(ClapInstance* instance) noexcept : instance_(instance) {}
 
     void process(const engine::ProcessContext& context) noexcept override
     {
@@ -57,14 +58,11 @@ public:
 
     /// Automation reaches the hosted plugin through here: the instance is the
     /// sink, turning values into CLAP events for its next process call.
-    [[nodiscard]] engine::ParameterSink* parameterSink() noexcept override
-    {
-        return instance_.get();
-    }
+    [[nodiscard]] engine::ParameterSink* parameterSink() noexcept override { return instance_; }
 
     /// Project save and load reach the hosted plugin's opaque state blob
     /// through here (docs/PLUGIN_HOST.md §6).
-    [[nodiscard]] engine::StateIO* stateIO() noexcept override { return instance_.get(); }
+    [[nodiscard]] engine::StateIO* stateIO() noexcept override { return instance_; }
 
     /// What the plugin reported through CLAP_EXT_LATENCY. The graph compiler
     /// reads this like any node's latency, so a hosted plugin joins delay
@@ -76,7 +74,7 @@ public:
     }
 
 private:
-    std::unique_ptr<ClapInstance> instance_;
+    ClapInstance* instance_ = nullptr;
 };
 
 } // namespace incdaw::plugins

@@ -300,7 +300,7 @@ TEST_CASE("the instance manager caches discovery per plugin type")
     identifier.uid    = testGainUid;
 
     std::string error;
-    auto        first = manager.createInsert(identifier, 48000.0, blockSize, error);
+    auto        first = manager.createInsert(1, identifier, 48000.0, blockSize, error);
     REQUIRE(first != nullptr);
 
     const auto* discovered = manager.parametersFor(testGainUid);
@@ -309,7 +309,7 @@ TEST_CASE("the instance manager caches discovery per plugin type")
     CHECK(discovered->front().id == gainParamId);
 
     // A second instance reuses the cached list rather than rediscovering.
-    auto second = manager.createInsert(identifier, 48000.0, blockSize, error);
+    auto second = manager.createInsert(2, identifier, 48000.0, blockSize, error);
     REQUIRE(second != nullptr);
     CHECK(manager.parametersFor(testGainUid) == discovered);
 
@@ -391,7 +391,8 @@ TEST_CASE("EXIT CRITERION: a hosted plugin parameter automates through the gener
 
     const auto factory = [&](const project::PluginSlot& insert, std::string& error)
         -> std::unique_ptr<engine::Node> {
-        auto node = manager.createInsert(insert.plugin, 48000.0, blockSize, error);
+        auto node = manager.createInsert(insert.id.value(), insert.plugin, 48000.0, blockSize,
+                                         error);
 
         if (node != nullptr)
             if (const auto* discovered = manager.parametersFor(insert.plugin.uid))
@@ -453,7 +454,8 @@ TEST_CASE("a mismatched key/target pair is data, not an error")
 
     const auto factory = [&](const project::PluginSlot& insert, std::string& error)
         -> std::unique_ptr<engine::Node> {
-        auto node = manager.createInsert(insert.plugin, 48000.0, blockSize, error);
+        auto node = manager.createInsert(insert.id.value(), insert.plugin, 48000.0, blockSize,
+                                         error);
 
         if (node != nullptr)
             if (const auto* discovered = manager.parametersFor(insert.plugin.uid))

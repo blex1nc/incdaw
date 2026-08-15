@@ -498,7 +498,7 @@ TEST_CASE("EXIT CRITERION: a hosted plugin processes as a mixer insert")
     fixture.addMasterInsert("com.incdaw.testgain");
 
     const auto factory = [&manager](const project::PluginSlot& slot, std::string& error) {
-        return manager.createInsert(slot.plugin, 48000.0, blockSize, error);
+        return manager.createInsert(slot.id.value(), slot.plugin, 48000.0, blockSize, error);
     };
 
     auto compiled = fixture.compile(factory);
@@ -539,22 +539,23 @@ TEST_CASE("the instance manager reuses one library and names what it cannot find
     identifier.uid    = "com.incdaw.testgain";
 
     std::string error;
-    auto first = manager.createInsert(identifier, 48000.0, blockSize, error);
+    auto first = manager.createInsert(1, identifier, 48000.0, blockSize, error);
     REQUIRE(first != nullptr);
 
-    auto second = manager.createInsert(identifier, 48000.0, blockSize, error);
+    auto second = manager.createInsert(2, identifier, 48000.0, blockSize, error);
     REQUIRE(second != nullptr);
 
     // Two instances, one library: the binary is opened once and outlives every
     // graph built from it.
     CHECK(manager.loadedLibraryCount() == 1);
+    CHECK(manager.liveInstanceCount() == 2);
 
     identifier.uid = "com.nobody.nothing";
-    CHECK(manager.createInsert(identifier, 48000.0, blockSize, error) == nullptr);
+    CHECK(manager.createInsert(3, identifier, 48000.0, blockSize, error) == nullptr);
     CHECK(error.find("com.nobody.nothing") != std::string::npos);
 
     identifier.format = plugins::Format::vst3;
     identifier.uid    = "whatever";
-    CHECK(manager.createInsert(identifier, 48000.0, blockSize, error) == nullptr);
+    CHECK(manager.createInsert(4, identifier, 48000.0, blockSize, error) == nullptr);
     CHECK(error.find("vst3") != std::string::npos);
 }

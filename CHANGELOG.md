@@ -8,6 +8,30 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 9) — Instances outlive graphs — 2026-08-15
+
+**Changed**
+
+- `PluginInstanceManager` now owns live instances keyed by SLOT id;
+  `PluginNode` borrows (docs/DECISIONS.md D-031). Until now every rebuild —
+  every added note — created a fresh instance and silently reset the
+  plugin's live state. Now the same slot gets the same instance across
+  rebuilds; a changed sample rate or block size recreates it but carries
+  the state blob across; a changed plugin uid starts fresh.
+- Instances are disposed only by the retain pass the shell runs AFTER the
+  engine swaps to the rebuilt graph, with the slots the project still
+  contains — so disposal cannot race the audio thread, and a bypassed slot
+  keeps its instance and state.
+- `createInsert` takes the slot key; `instanceFor`/`liveInstanceCount`
+  expose the held instances (the editor bridge will need the former).
+
+**Tests**
+
+- 4 new cases (409 total, 169,316 assertions, green in Debug and Release):
+  live state survives a rebuild; disposal only when the slot leaves the
+  project; a device change carries state across re-activation; a replaced
+  plugin starts fresh, proven by behaviour rather than pointer identity.
+
 ### Phase 13 (part 8) — Plugins reach the user: scan, add, bypass, remove — 2026-08-15
 
 **Added**

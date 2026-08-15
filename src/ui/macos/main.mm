@@ -865,7 +865,8 @@ std::filesystem::path incdawSupportDirectory()
             return nullptr;
         }
 
-        auto node = instances->createInsert(slot.plugin, sampleRate, maxFrames, error);
+        auto node = instances->createInsert(slot.id.value(), slot.plugin, sampleRate,
+                                            maxFrames, error);
 
         // Discovery lands in the registry HERE — between the instance being
         // created and automation lanes binding later in the same compile.
@@ -896,6 +897,18 @@ std::filesystem::path incdawSupportDirectory()
     // The handles outlive the unique_ptr that was moved out: the nodes belong
     // to the graph the engine now owns.
     _live = std::move(compiled);
+
+    // Instances whose slot left the project are disposed only now, AFTER the
+    // swap: the old graph no longer processes, so destroying them cannot race
+    // the audio thread (D-031). Bypassed slots keep theirs — and their state.
+    if (_pluginInstances != nullptr) {
+        std::vector<std::uint64_t> slotKeys;
+        for (const project::MixerNode& node : _project->mixerNodes())
+            for (const project::PluginSlot& slot : node.inserts)
+                slotKeys.push_back(slot.id.value());
+
+        _pluginInstances->retainOnlyInstances(slotKeys);
+    }
 }
 
 // ── Plugins as a catalogue ───────────────────────────────────────────────────

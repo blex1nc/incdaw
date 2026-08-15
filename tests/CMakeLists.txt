@@ -40,6 +40,7 @@ add_executable(incdaw_tests
     unit/PluginParameterTests.cpp
     unit/PluginStateTests.cpp
     unit/PluginLatencyTests.cpp
+    unit/PluginPersistenceTests.cpp
     unit/InsertCommandTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
