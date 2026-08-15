@@ -133,6 +133,12 @@ std::filesystem::path incdawSupportDirectory()
     /// this only services them, so destruction order does not matter.
     std::unique_ptr<engine::DiskStreamer> _diskStreamer;
 
+    /// Decoded audio shared across graph rebuilds (docs/DECISIONS.md D-032):
+    /// without it, every edit on a sampler channel would re-decode its
+    /// samples. Graphs hold shared_ptrs into it, so entries can never vanish
+    /// under a live graph.
+    std::unique_ptr<engine::SampleCache> _sampleCache;
+
     /// Undo/redo of an audio edit rewrites a file behind the editor's back;
     /// watching the undo stack's depth from housekeeping catches it without
     /// the registry having to know views exist.
@@ -176,6 +182,7 @@ std::filesystem::path incdawSupportDirectory()
     _project      = std::make_unique<project::Project>();
     _registry     = std::make_unique<app::CommandRegistry>(*_project);
     _diskStreamer = std::make_unique<engine::DiskStreamer>();
+    _sampleCache  = std::make_unique<engine::SampleCache>();
 
     // The plugin catalogue is read from a file; launching touches no plugin
     // binary at all, because startup time must not scale with the size of a
@@ -855,6 +862,7 @@ std::filesystem::path incdawSupportDirectory()
                                      : project::PlaybackSource::pattern;
     options.pattern      = project::EntityId{self.pianoRoll.patternIdValue};
     options.diskStreamer = _diskStreamer.get();
+    options.sampleCache  = _sampleCache.get();
 
     if (_audio->isMonitoringEnabled() && _audio->inputChannels() > 0) {
         options.monitorRing         = _audio->monitorRing();

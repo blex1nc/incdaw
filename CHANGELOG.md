@@ -8,6 +8,40 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 14 (part 3) — The sampler reaches the model — 2026-08-16
+
+**Added**
+
+- `Channel::samplerZones` (`ChannelSamplerZone`): the sampler's program in
+  the MODEL — each zone names an audio asset by `EntityId` plus the mapping
+  numbers, so the relinker can see a sampler's samples. Serialized
+  additively as project format **1.3** (migration path declared; frozen
+  hand-written fixtures for v1.2 *and* v1.3 added, closing the standing
+  "no fixture" gap for 1.2).
+- `plugins::Format::builtin` with `builtinSampler()` /
+  `builtinSimpleSynth()` (`builtin:incdaw.sampler`,
+  `builtin:incdaw.simplesynth`): builtin instruments share the plugin
+  identity scheme instead of inventing a second one. An empty identifier
+  still means "no instrument chosen" and still yields the default synth.
+- `engine::SampleCache` (D-032): decoded audio cached by (path, size,
+  mtime), shared immutably across graph rebuilds. Owned by the app, passed
+  via `GraphCompileOptions::sampleCache`; zones AND preloaded audio clips
+  resolve through it, so neither re-decodes per rebuild.
+- The project compiler builds builtin instruments itself — the factory
+  remains the seam for hosted formats (D-028). A sampler channel comes out
+  of `compileProjectGraph` playing: zones resolved, cross-rate zones
+  allowed (the sampler repitches by rate; the clip path still refuses
+  cross-rate assets), a missing sample degrading to a warning and a silent
+  channel that stays in the graph.
+
+**Tests**
+
+- 11 new cases (435 total, 170,219 assertions, green in Debug and
+  Release): cache identity/invalidation/miss-not-cached; builtin
+  identifier round-trips; v1.2 and v1.3 fixtures load; sampler channel
+  renders audibly through the compiler, with and without the cache; the
+  degradation paths (missing file, unknown asset id, unknown builtin uid).
+
 ### Phase 14 (part 2) — Sustain loops and the crossfaded seam — 2026-08-15
 
 **Added**

@@ -13,6 +13,7 @@ enum class Format {
     clap,       ///< implemented first — cleanest ABI, MIT licensed
     audioUnit,  ///< native to macOS
     vst3,       ///< widest availability; SDK 3.8.x is MIT licensed
+    builtin,    ///< INCDAW's own instruments and effects — never scanned, always present
 };
 
 [[nodiscard]] const char* formatName(Format format) noexcept;
@@ -39,5 +40,12 @@ struct PluginIdentifier {
     [[nodiscard]] std::string toString() const;
     [[nodiscard]] static bool  fromString(const std::string& text, PluginIdentifier& out);
 };
+
+/// INCDAW's own instruments, addressed like plugins so a channel's instrument
+/// field has one identity scheme rather than two. An empty identifier still
+/// means "no instrument chosen", which the compiler answers with the default
+/// synth — these names are for a channel that has *chosen* a builtin.
+[[nodiscard]] PluginIdentifier builtinSampler();
+[[nodiscard]] PluginIdentifier builtinSimpleSynth();
 
 } // namespace incdaw::plugins

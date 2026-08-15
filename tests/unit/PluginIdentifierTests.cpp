@@ -11,6 +11,7 @@ TEST_CASE("format names are stable — project files depend on them")
     CHECK(std::string{formatName(Format::clap)} == "clap");
     CHECK(std::string{formatName(Format::audioUnit)} == "au");
     CHECK(std::string{formatName(Format::vst3)} == "vst3");
+    CHECK(std::string{formatName(Format::builtin)} == "builtin");
 }
 
 TEST_CASE("identifiers round-trip through their serialized form")
@@ -19,6 +20,8 @@ TEST_CASE("identifiers round-trip through their serialized form")
         {Format::clap,      "com.acme.reverb"},
         {Format::audioUnit, "aufx:dely:appl"},
         {Format::vst3,      "56535444656C61792D42617A"},
+        builtinSampler(),
+        builtinSimpleSynth(),
     };
 
     for (const auto& original : originals) {

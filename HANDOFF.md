@@ -1,8 +1,8 @@
 # INCDAW — HANDOFF
 
-Version: 2.2
-Status: PHASES 0-11 COMPLETE / PHASE 12 FUNCTIONALLY DONE / PHASE 13 PARTS 1-4 DONE
-Last updated: 2026-08-15
+Version: 2.3
+Status: PHASES 0-13 COMPLETE / PHASE 14 PARTS 1-3 DONE
+Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
 Primary coding agent: Claude Code
@@ -1267,29 +1267,32 @@ recording and the Audio Logger all work. What remains in it is polish):
   the wrap lands on — continuous by construction). Unfit loops are
   ignored, not repaired; reverse zones do not loop yet.
 
+  Phase 14 part 3 is DONE: the sampler reached the model. All four design
+  gates resolved and tested (11 new cases, 435 total):
+    (a) Channel::samplerZones (ChannelSamplerZone: asset EntityId + the
+        mapping numbers) -> project format 1.3, additive; frozen fixtures
+        for BOTH v1.2 (the standing gap) and v1.3 now exist.
+    (b) plugins::Format::builtin + builtinSampler()/builtinSimpleSynth()
+        ("builtin:incdaw.sampler" / "builtin:incdaw.simplesynth"). Empty
+        identifier still means "no instrument yet" -> default synth.
+    (c) The COMPILER resolves zones (it already had asset resolution for
+        clips, now hoisted and shared); builtins are constructed by the
+        compiler, and the InstrumentFactory signature is UNCHANGED — it
+        remains the seam for hosted formats only (D-028).
+    (d) engine::SampleCache, D-032: decoded audio keyed by (path,size,
+        mtime), owned by the shell (_sampleCache), passed via
+        GraphCompileOptions::sampleCache; sampler zones and clip preloads
+        both resolve through it. Chosen over persistent sampler instances
+        deliberately — rationale in DECISIONS.md D-032.
+    Degradation contract: missing file / unknown asset id -> warning +
+    the sampler stays in the graph silent (reconnecting must not change
+    topology); unknown builtin uid -> warning + silent channel. Cross-rate
+    zones are ALLOWED (sampler repitches by rate); clips still refuse.
+
   Phase 14 continues, in dependency order:
-    - the model/wiring story: how a Channel declares "I am a sampler with
-      these zones". Design notes from part 2's session, worth not
-      rediscovering:
-        (a) Channel needs a zone list in the MODEL (asset EntityId + the
-            SamplerZone numbers), serialized additively -> format 1.2 ->
-            1.3 bump + a hand-written v1.3 fixture (PROJECT_FORMAT §2).
-        (b) Which instrument a channel gets: today empty
-            Channel.instrument means SimpleSynth via the default factory.
-            A built-in identity convention is needed (e.g. a builtin
-            format value in plugins::Format, uid "incdaw.sampler") —
-            check what Format offers before inventing one.
-        (c) The InstrumentFactory receives only (const Channel&); zones
-            name assets by EntityId, so the factory needs the Project
-            too (signature change ripples tests) OR the compiler
-            resolves zones into decoded samples before calling it.
-        (d) Decoding a WAV per rebuild is unacceptable for big samples:
-            decoded AudioFileData must be CACHED across rebuilds, keyed
-            like the plugin registry caches (path,size,mtime) — or
-            samplers persist across rebuilds the way plugin instances
-            now do (D-031 precedent). Decide deliberately; record as
-            D-032.
-    - a minimal UI to load a sample onto a channel
+    - a minimal UI to load a sample onto a channel (channel rack context
+      menu -> open panel -> AddAudioAsset + set builtinSampler identity +
+      a default zone; must be a Command for undo)
     - per-zone envelopes, filters, LFOs (roadmap order)
     - disk streaming for long samples (DiskStreamer exists from Phase 12)
     - the multisample exit criterion run: velocity layers streaming from

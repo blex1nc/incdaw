@@ -81,6 +81,7 @@ requires a migration step.
 | 1.0 | 4 | First format. |
 | 1.1 | 8 | Pattern notes stored per channel (`channels[]` in a `.pat` file) instead of one flat `events[]`; patterns gained `swing` / `swingGrid`; clips gained `startTick` / `lengthTicks` / `sourceOffsetTicks`. |
 | 1.2 | 8b | Channels gained `stepKey`, the pitch a step sequencer step is written at. Additive. |
+| 1.3 | 14 | Channels gained `samplerZones[]`, the builtin sampler's program — each zone names an audio asset by id plus key/velocity range, slice, sustain loop, crossfade, reverse and gain. Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -104,6 +105,15 @@ accepting unknown ones is how a loader starts dropping fields.
 It is a frozen document rather than something the current writer regenerates:
 two channels, one pattern with per-channel content and swing, and no `stepKey`
 anywhere.
+
+**Reading a 1.2 file.** Purely additive again: a 1.2 document has no
+`samplerZones` and the reader defaults each channel to an empty program, which
+is what those channels had. The path is declared in `ProjectFile::migrate`.
+
+`tests/fixtures/v1.2/Fixture.incdaw` (frozen: `stepKey` present, no
+`samplerZones`) and `tests/fixtures/v1.3/Fixture.incdaw` (frozen: a channel
+whose `instrument` is `builtin:incdaw.sampler` with one zone naming an audio
+asset) are kept permanently beside the earlier ones.
 
 ---
 

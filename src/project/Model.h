@@ -243,6 +243,40 @@ struct Track {
     [[nodiscard]] friend bool operator==(const Track&, const Track&) = default;
 };
 
+/// One sample mapping on a sampler channel: which asset, where it sits in
+/// pitch, which keys and velocities it answers, and how it loops.
+///
+/// The numbers deliberately mirror `engine::SamplerZone` — the compiler's job
+/// is to swap the asset id for decoded audio and hand the rest through. What
+/// the engine type holds as a pointer, the model names by EntityId, because
+/// entities refer to one another by id, never by pointer (docs/ARCHITECTURE.md
+/// §5): the asset can be relinked or re-embedded without touching the zones.
+struct ChannelSamplerZone {
+    EntityId   asset;
+
+    int rootKey      = 60;    ///< the key at which the sample plays unshifted
+    int keyLow       = 0;
+    int keyHigh      = 127;
+    int velocityLow  = 1;
+    int velocityHigh = 127;
+
+    /// The slice that plays, in source frames. end == 0 means "to the end".
+    FrameCount start = 0;
+    FrameCount end   = 0;
+
+    /// Sustain loop within the slice, in source frames. loopEnd == 0 means no
+    /// loop; the crossfade is the frames blended at the seam.
+    FrameCount loopStart     = 0;
+    FrameCount loopEnd       = 0;
+    FrameCount loopCrossfade = 0;
+
+    bool   reverse = false;
+    double gain    = 1.0;
+
+    [[nodiscard]] friend bool operator==(const ChannelSamplerZone&,
+                                         const ChannelSamplerZone&) = default;
+};
+
 /// A sound source: instrument, sampler, audio input, or external MIDI device.
 struct Channel {
     EntityId      id;
@@ -268,6 +302,11 @@ struct Channel {
     /// Opaque plugin state. INCDAW never interprets it
     /// (docs/PLUGIN_HOST.md §6).
     std::string   instrumentStateFile;
+
+    /// The sampler program, meaningful when `instrument` is the builtin
+    /// sampler. Kept on the channel rather than in opaque state because zones
+    /// reference audio assets by id, and the relinker has to see that.
+    std::vector<ChannelSamplerZone> samplerZones;
 
     [[nodiscard]] friend bool operator==(const Channel&, const Channel&) = default;
 };

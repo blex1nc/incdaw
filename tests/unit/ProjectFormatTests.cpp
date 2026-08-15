@@ -111,6 +111,23 @@ Project makePopulatedProject()
     asset.channelCount = 2;
     asset.contentHash  = "deadbeef";
 
+    // Format 1.3: a sampler program on the channel, naming the asset by id.
+    ChannelSamplerZone zone;
+    zone.asset         = asset.id;
+    zone.rootKey       = 48;
+    zone.keyLow        = 24;
+    zone.keyHigh       = 84;
+    zone.velocityLow   = 32;
+    zone.velocityHigh  = 96;
+    zone.start         = 100;
+    zone.end           = 90000;
+    zone.loopStart     = 2000;
+    zone.loopEnd       = 80000;
+    zone.loopCrossfade = 512;
+    zone.reverse       = true;
+    zone.gain          = 0.75;
+    channel.samplerZones.push_back(zone);
+
     auto& send = project.connect(bus.id, project.masterMixerNode());
     send.isSend   = true;
     send.gain     = 0.25;
@@ -615,6 +632,67 @@ TEST_CASE("the v1.1 fixture still loads")
     REQUIRE(lead != nullptr);
     REQUIRE(lead->size() == 1);
     CHECK((*lead)[0].tick == 480);
+}
+
+TEST_CASE("the v1.2 fixture still loads")
+{
+    const fs::path fixture = fs::path{INCDAW_FIXTURE_DIR} / "v1.2" / "Fixture.incdaw";
+    REQUIRE(fs::exists(fixture));
+
+    Project project;
+    const auto result = ProjectFile::load(project, fixture);
+
+    REQUIRE(result.succeeded);
+    CHECK(result.migrated);
+    CHECK(result.migratedFrom == "1.2");
+
+    CHECK(project.metadata().title == "Format v1.2 fixture");
+
+    REQUIRE(project.channels().size() == 2);
+
+    // The step key, which is what 1.2 introduced, must survive the upgrade.
+    CHECK(project.channels()[0].stepKey == 36);
+    CHECK(project.channels()[1].stepKey == 60);
+
+    // 1.2 had no sampler zones. Those channels had no sampler program, and
+    // that is exactly how they must read back.
+    CHECK(project.channels()[0].samplerZones.empty());
+    CHECK(project.channels()[1].samplerZones.empty());
+}
+
+TEST_CASE("the v1.3 fixture still loads")
+{
+    const fs::path fixture = fs::path{INCDAW_FIXTURE_DIR} / "v1.3" / "Fixture.incdaw";
+    REQUIRE(fs::exists(fixture));
+
+    Project project;
+    const auto result = ProjectFile::load(project, fixture);
+
+    REQUIRE(result.succeeded);
+    CHECK(!result.migrated);   // 1.3 is the current format
+
+    CHECK(project.metadata().title == "Format v1.3 fixture");
+
+    REQUIRE(project.channels().size() == 2);
+    const Channel& kick = project.channels()[0];
+
+    CHECK(kick.instrument == plugins::builtinSampler());
+
+    REQUIRE(kick.samplerZones.size() == 1);
+    const ChannelSamplerZone& zone = kick.samplerZones[0];
+    CHECK(zone.asset == EntityId{5});
+    CHECK(zone.rootKey == 36);
+    CHECK(zone.keyHigh == 96);
+    CHECK(zone.loopStart == 1000);
+    CHECK(zone.loopEnd == 9000);
+    CHECK(zone.loopCrossfade == 256);
+    CHECK(zone.gain == doctest::Approx(0.9));
+
+    // The zone's asset must resolve within the same document.
+    REQUIRE(project.audioAssets().size() == 1);
+    CHECK(project.audioAssets()[0].id == zone.asset);
+
+    CHECK(project.channels()[1].samplerZones.empty());
 }
 
 TEST_CASE("a fixture re-saved by this build still round-trips")

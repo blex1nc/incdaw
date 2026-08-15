@@ -286,6 +286,27 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("stepKey", static_cast<std::int64_t>(channel.stepKey));
         json.set("instrument", toJson(channel.instrument));
         json.set("instrumentStateFile", channel.instrumentStateFile);
+
+        Json zones = Json::array();
+        for (const ChannelSamplerZone& zone : channel.samplerZones) {
+            Json entry;
+            entry.set("asset", toJson(zone.asset));
+            entry.set("rootKey", static_cast<std::int64_t>(zone.rootKey));
+            entry.set("keyLow", static_cast<std::int64_t>(zone.keyLow));
+            entry.set("keyHigh", static_cast<std::int64_t>(zone.keyHigh));
+            entry.set("velocityLow", static_cast<std::int64_t>(zone.velocityLow));
+            entry.set("velocityHigh", static_cast<std::int64_t>(zone.velocityHigh));
+            entry.set("start", zone.start);
+            entry.set("end", zone.end);
+            entry.set("loopStart", zone.loopStart);
+            entry.set("loopEnd", zone.loopEnd);
+            entry.set("loopCrossfade", zone.loopCrossfade);
+            entry.set("reverse", zone.reverse);
+            entry.set("gain", zone.gain);
+            zones.append(std::move(entry));
+        }
+        json.set("samplerZones", std::move(zones));
+
         channels.append(std::move(json));
     }
     document.set("channels", std::move(channels));
@@ -606,6 +627,25 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         channel.stepKey             = static_cast<int>(json["stepKey"].asInt(60));
         channel.instrument          = pluginFrom(json["instrument"]);
         channel.instrumentStateFile = json["instrumentStateFile"].asString();
+
+        for (const Json& zoneJson : json["samplerZones"].elements()) {
+            ChannelSamplerZone zone;
+            zone.asset         = idFrom(zoneJson["asset"]);
+            zone.rootKey       = static_cast<int>(zoneJson["rootKey"].asInt(60));
+            zone.keyLow        = static_cast<int>(zoneJson["keyLow"].asInt(0));
+            zone.keyHigh       = static_cast<int>(zoneJson["keyHigh"].asInt(127));
+            zone.velocityLow   = static_cast<int>(zoneJson["velocityLow"].asInt(1));
+            zone.velocityHigh  = static_cast<int>(zoneJson["velocityHigh"].asInt(127));
+            zone.start         = zoneJson["start"].asInt(0);
+            zone.end           = zoneJson["end"].asInt(0);
+            zone.loopStart     = zoneJson["loopStart"].asInt(0);
+            zone.loopEnd       = zoneJson["loopEnd"].asInt(0);
+            zone.loopCrossfade = zoneJson["loopCrossfade"].asInt(0);
+            zone.reverse       = zoneJson["reverse"].asBool(false);
+            zone.gain          = zoneJson["gain"].asDouble(1.0);
+            channel.samplerZones.push_back(zone);
+        }
+
         project.channels().push_back(std::move(channel));
     }
 
@@ -790,6 +830,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // an undeclared version is refused, and silently accepting unknown ones is
     // how a loader starts dropping fields.
     if (major == 1 && minor == 1) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.2 -> 1.3. Purely additive: `Channel::samplerZones` is absent from a
+    // 1.2 document and reads back as an empty program — those channels had no
+    // sampler.
+    if (major == 1 && minor == 2) {
         result.succeeded = true;
         return result;
     }

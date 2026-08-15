@@ -1048,3 +1048,40 @@ they assert behaviour instead.
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+## D-032 — Decoded samples are cached by file identity, not held by persistent samplers
+
+**Context:** a zone edit is a graph rebuild (the sampler's `setZones` is
+build-time-only by contract), and Phase 14 part 3 makes the compiler resolve
+a channel's zones from audio assets. Without a cache, every rebuild — every
+added note, every fader-driven recompile — would re-decode every sample on
+every sampler channel; a 3-minute stereo file is ~60 MB decoded.
+
+**Options:**
+
+1. Persist sampler INSTANCES across rebuilds, keyed like plugin instances
+   (the D-031 precedent), so decoded zones ride along inside them.
+2. Cache the DECODED AUDIO by file identity (path, size, mtime) — the way
+   the plugin registry recognises a changed binary — and let samplers be
+   rebuilt freely; zones already share immutable `AudioFileData` through
+   `shared_ptr`.
+
+**Chosen:** option 2 (`engine::SampleCache`, owned by the application,
+passed through `GraphCompileOptions::sampleCache`).
+
+**Reason:** the expensive thing is the decode, not the sampler object — a
+sampler is a few hundred bytes of voice bookkeeping; its voices are
+transient and are silenced by a swap anyway, which is exactly what a zone
+edit must do. D-031 solved a different problem: a plugin instance carries
+irreplaceable LIVE state; a decode is pure function of the file and can be
+shared by any number of samplers, audio clips and future previews. The
+cache also serves the clip preload path, which re-decoded per rebuild too.
+
+**Tradeoffs:** cache entries pin decoded audio in memory until `clear()`
+(no eviction policy yet — revisit when projects hold gigabytes of
+samples). A racing double-decode on the same new file is possible and
+harmless (last one wins). File identity by (path, size, mtime) misses a
+same-size same-mtime rewrite, the standard and accepted blind spot.
+
+**Date:** 2026-08-16
+**Status:** ACCEPTED

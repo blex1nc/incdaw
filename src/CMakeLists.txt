@@ -50,6 +50,7 @@ add_library(incdaw_engine STATIC
     engine/instrument/Sampler.cpp
     engine/instrument/SimpleSynth.cpp
     engine/instrument/InstrumentNode.cpp
+    engine/audio/SampleCache.cpp
     engine/audio/WavFile.cpp
     engine/audio/WavStreamWriter.cpp
     engine/audio/WavStreamReader.cpp

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/audio/AudioStream.h"
+#include "engine/audio/SampleCache.h"
 #include "engine/core/SampleRingBuffer.h"
 #include "engine/graph/RenderGraph.h"
 #include "engine/graph/StateIO.h"
@@ -83,6 +84,12 @@ struct GraphCompileOptions {
     /// application (or the test); graphs only weak-reference it via the
     /// streams they register.
     engine::DiskStreamer* diskStreamer = nullptr;
+
+    /// Decoded audio shared across rebuilds (docs/DECISIONS.md D-032): sampler
+    /// zones and preloaded clips resolve through this when set. Null decodes
+    /// fresh each compile, which is what most tests want. Owned by the
+    /// application, like the streamer.
+    engine::SampleCache* sampleCache = nullptr;
 
     /// Input monitoring: when set, an InputMonitorNode draining this ring
     /// feeds the master strip. The ring is the engine's and outlives every

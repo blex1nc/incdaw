@@ -22,7 +22,11 @@ inline constexpr int projectFormatMajor = 1;
 /// 1.2 (Phase 8b): a channel carries the pitch its step sequencer steps are
 /// written at. A 1.1 file simply has no such field and reads back as middle C,
 /// which is what those projects meant.
-inline constexpr int projectFormatMinor = 2;
+///
+/// 1.3 (Phase 14): a channel carries sampler zones — the mapped samples the
+/// builtin sampler plays, each naming an audio asset by id. Additive: earlier
+/// files have none and read back with an empty program.
+inline constexpr int projectFormatMinor = 3;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

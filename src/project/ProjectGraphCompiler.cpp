@@ -5,6 +5,7 @@
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/graph/ParameterSink.h"
+#include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
 #include "engine/automation/AutomationNode.h"
 #include "project/PatternCompiler.h"
@@ -254,6 +255,99 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         builder.connect(send, destination->second);
     }
 
+    // ── Asset decoding ──────────────────────────────────────────────────────
+    // Shared by sampler zones and preloaded audio clips: each asset decodes at
+    // most once per compile, and with a SampleCache (docs/DECISIONS.md D-032)
+    // at most once per *file change* across compiles. Missing and unreadable
+    // assets warn once here; any policy beyond "can it be read" stays with the
+    // caller.
+    std::unordered_map<EntityId, std::shared_ptr<const engine::AudioFileData>> loadedAssets;
+
+    const auto assetPath = [&](EntityId id) -> const std::string* {
+        for (const AudioAsset& candidate : project.audioAssets())
+            if (candidate.id == id)
+                return !candidate.absolutePath.empty() ? &candidate.absolutePath
+                                                       : &candidate.relativePath;
+        return nullptr;
+    };
+
+    const auto loadAsset = [&](EntityId id) -> std::shared_ptr<const engine::AudioFileData> {
+        if (const auto found = loadedAssets.find(id); found != loadedAssets.end())
+            return found->second;
+
+        std::shared_ptr<const engine::AudioFileData> loaded;
+
+        if (const std::string* path = assetPath(id)) {
+            std::string error;
+
+            if (options.sampleCache != nullptr) {
+                loaded = options.sampleCache->load(*path, error);
+            } else {
+                auto data = std::make_shared<engine::AudioFileData>();
+                if (const auto read = engine::WavFile::read(*path, *data); read)
+                    loaded = std::move(data);
+                else
+                    error = read.error;
+            }
+
+            if (loaded == nullptr)
+                compiled.warnings.push_back("audio asset unreadable: " + *path + " (" + error
+                                            + ")");
+        } else {
+            compiled.warnings.push_back("audio asset missing from the project: id "
+                                        + std::to_string(id.value()));
+        }
+
+        loadedAssets.emplace(id, loaded);
+        return loaded;
+    };
+
+    // Builtin instruments are constructed here rather than through the
+    // factory: the factory is the seam hosted formats plug into
+    // (docs/DECISIONS.md D-028), while builtins are the engine's own — and
+    // the sampler needs decoded assets, which only the compiler can resolve.
+    const auto buildBuiltin =
+        [&](const Channel& channel) -> std::unique_ptr<engine::Instrument> {
+        if (channel.instrument.uid == plugins::builtinSimpleSynth().uid)
+            return std::make_unique<engine::SimpleSynth>();
+
+        if (channel.instrument.uid == plugins::builtinSampler().uid) {
+            auto sampler = std::make_unique<engine::Sampler>();
+
+            std::vector<engine::SamplerZone> zones;
+            for (const ChannelSamplerZone& spec : channel.samplerZones) {
+                auto audio = loadAsset(spec.asset);
+                if (audio == nullptr)
+                    continue;   // warned above; the zone is absent, not wrong
+
+                engine::SamplerZone zone;
+                zone.sample        = std::move(audio);
+                zone.rootKey       = spec.rootKey;
+                zone.keyLow        = spec.keyLow;
+                zone.keyHigh       = spec.keyHigh;
+                zone.velocityLow   = spec.velocityLow;
+                zone.velocityHigh  = spec.velocityHigh;
+                zone.start         = spec.start;
+                zone.end           = spec.end;
+                zone.loopStart     = spec.loopStart;
+                zone.loopEnd       = spec.loopEnd;
+                zone.loopCrossfade = spec.loopCrossfade;
+                zone.reverse       = spec.reverse;
+                zone.gain          = spec.gain;
+                zones.push_back(std::move(zone));
+            }
+
+            // A sampler with no loadable zone still compiles — a channel whose
+            // sample is missing should be silent with a warning, not absent.
+            sampler->setZones(std::move(zones));
+            return sampler;
+        }
+
+        compiled.warnings.push_back("unknown builtin instrument \"" + channel.instrument.uid
+                                    + "\" on channel \"" + channel.name + "\"");
+        return nullptr;
+    };
+
     // ── Channels ────────────────────────────────────────────────────────────
     std::vector<engine::InstrumentNode*>      instrumentNodes;
     std::vector<EntityId>                     channelIds;
@@ -263,7 +357,9 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         if (!isAudible(channel, anySoloed))
             continue;
 
-        std::unique_ptr<engine::Instrument> instrument = factory(channel);
+        std::unique_ptr<engine::Instrument> instrument =
+            channel.instrument.format == plugins::Format::builtin ? buildBuiltin(channel)
+                                                                  : factory(channel);
         if (instrument == nullptr)
             continue;   // a channel with no working instrument is silent, not an error
 
@@ -303,45 +399,32 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     // the shared_ptrs die with the graph, off the audio thread, like
     // everything else the reaper handles.
     if (options.source == PlaybackSource::arrangement) {
-        std::unordered_map<EntityId, std::shared_ptr<engine::AudioFileData>> loadedAssets;
+        // Rate policy for clips, over the shared loader: a clip at the wrong
+        // sample rate would play at the wrong pitch and the wrong length, so
+        // it is silenced with a reason. (Sampler zones have no such rule —
+        // the sampler repitches by rate anyway.) Import-time sample-rate
+        // conversion remains recorded as outstanding work. Memoised so one
+        // bad asset warns once, not once per clip.
+        std::unordered_map<EntityId, std::shared_ptr<const engine::AudioFileData>> clipAssets;
 
-        const auto assetPath = [&](EntityId id) -> const std::string* {
-            for (const AudioAsset& candidate : project.audioAssets())
-                if (candidate.id == id)
-                    return !candidate.absolutePath.empty() ? &candidate.absolutePath
-                                                           : &candidate.relativePath;
-            return nullptr;
-        };
-
-        const auto loadAsset =
-            [&](EntityId id) -> std::shared_ptr<engine::AudioFileData> {
-            if (const auto found = loadedAssets.find(id); found != loadedAssets.end())
+        const auto loadClipAsset =
+            [&](EntityId id) -> std::shared_ptr<const engine::AudioFileData> {
+            if (const auto found = clipAssets.find(id); found != clipAssets.end())
                 return found->second;
 
-            std::shared_ptr<engine::AudioFileData> loaded;
+            std::shared_ptr<const engine::AudioFileData> data = loadAsset(id);
 
-            if (const std::string* path = assetPath(id)) {
-                auto data = std::make_shared<engine::AudioFileData>();
-
-                if (const auto read = engine::WavFile::read(*path, *data); !read) {
-                    compiled.warnings.push_back("audio asset unreadable: " + *path
-                                                + " (" + read.error + ")");
-                } else if (data->sampleRate != options.sampleRate) {
-                    // Playing it anyway would be the wrong pitch and the wrong
-                    // length. Silence with a reason beats subtly wrong audio;
-                    // import-time sample-rate conversion is recorded as
-                    // outstanding work.
+            if (data != nullptr && data->sampleRate != options.sampleRate) {
+                if (const std::string* path = assetPath(id))
                     compiled.warnings.push_back(
                         "audio asset at " + std::to_string(data->sampleRate)
                         + " Hz in a " + std::to_string(options.sampleRate)
                         + " Hz session, left silent: " + *path);
-                } else {
-                    loaded = std::move(data);
-                }
+                data = nullptr;
             }
 
-            loadedAssets.emplace(id, loaded);
-            return loaded;
+            clipAssets.emplace(id, data);
+            return data;
         };
 
         /// True when this asset should stream rather than preload. Decided
@@ -414,7 +497,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                     if (placed.stream == nullptr)
                         continue;
                 } else {
-                    placed.audio = loadAsset(clip.source);
+                    placed.audio = loadClipAsset(clip.source);
                     if (placed.audio == nullptr)
                         continue;
                 }
