@@ -1232,11 +1232,11 @@ Things to be careful about:
     doctest nor the CLAP headers, and the build fails on the test target
     and on plugins/ until both are fetched (HANDOFF section 5 has the
     doctest command; D-027 has CLAP's).
-  - VERIFIED STILL TRUE: no menu action saves a project. ProjectFile works
-    and is tested, but the app never calls it — the INCDAW target does not
-    even pull ProjectFile.cpp.o out of the archive. Everything a session
-    produces is lost on quit. This is the largest gap between "the code
-    works" and "the application works".
+  - RESOLVED (2026-08-15): the File menu exists — Open/Save/Save As call
+    ProjectFile and PluginStateFiles in the documented order (capture before
+    save; restore after the rebuild). Still missing: dirty prompt on quit,
+    autosave, recent projects. Unsaved work is still lost silently on quit;
+    only SAVING became possible.
   - tests/fixtures/v1.1/ does not exist. Format 1.1 is covered only by the
     save/load round trip, which proves the code agrees with itself and nothing
     more. docs/PROJECT_FORMAT.md §2 requires a hand-written fixture before 1.1

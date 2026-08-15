@@ -8,6 +8,29 @@ public version yet.
 
 ## [Unreleased]
 
+### The project as a document — Open, Save, Save As in the application — 2026-08-15
+
+**Added**
+
+- A File menu: Open… (Cmd-O), Save (Cmd-S), Save As… (Shift-Cmd-S). This
+  closes the long-standing largest gap: ProjectFile worked and was tested
+  since Phase 4, but no menu action ever called it — everything a session
+  produced was lost on quit.
+- Save captures live plugin state FIRST (docs/PLUGIN_HOST.md §6), so the
+  recorded stateFile paths land in the project.json the same save writes.
+- Open loads IN PLACE into the project object every view holds a pointer to,
+  clears undo history (it no longer applies), adopts the loaded tempo into
+  the transport at the device's rate, repoints every view at the loaded
+  content, rebuilds the graph, and hands hosted plugins their state blobs
+  back once the graph that owns them exists. A migrated older format is
+  reported; a directory that is not a package is refused by name.
+
+**Known limits (recorded, not hidden)**
+
+- No dirty-state prompt on quit yet, no autosave, no recent-projects menu.
+  Closing without Cmd-S still loses unsaved work — the difference is that
+  saving is now possible.
+
 ### Phase 13 (part 7) — Hosted plugin latency joins delay compensation — 2026-08-15
 
 **Added**

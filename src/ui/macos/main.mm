@@ -25,6 +25,8 @@
 #include "plugins/PluginRegistry.h"
 #include "project/Model.h"
 #include "project/PatternCompiler.h"
+#include "project/PluginStateFiles.h"
+#include "project/ProjectFile.h"
 #include "project/ProjectGraphCompiler.h"
 #include "project/RecordingSession.h"
 #include "app/commands/AudioEditCommands.h"
@@ -152,6 +154,10 @@ std::filesystem::path incdawSupportDirectory()
     /// plugin parameter discovered so far. Graphs compile against it, so it
     /// outlives them all here.
     project::ParameterRegistry _parameters;
+
+    /// Where the project lives on disk. Empty until the first Save As or
+    /// Open; Save falls back to Save As while it is.
+    std::filesystem::path _projectPath;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -876,6 +882,146 @@ std::filesystem::path incdawSupportDirectory()
     _live = std::move(compiled);
 }
 
+// ── The project as a document ────────────────────────────────────────────────
+
+- (void)saveProject:(id)sender
+{
+    if (_projectPath.empty()) {
+        [self saveProjectAs:sender];
+        return;
+    }
+
+    [self writeProjectToPath];
+}
+
+- (void)saveProjectAs:(id)sender
+{
+    (void)sender;
+
+    NSSavePanel* panel = [NSSavePanel savePanel];
+    panel.nameFieldStringValue = @"Untitled.incdaw";
+    panel.canCreateDirectories = YES;
+
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+        return;
+
+    std::filesystem::path chosen{panel.URL.path.UTF8String};
+    if (chosen.extension() != ".incdaw")
+        chosen += ".incdaw";
+
+    _projectPath = chosen;
+    [self writeProjectToPath];
+}
+
+/// The save itself. Live plugin state is captured FIRST, so the stateFile
+/// paths land in the project.json this save writes (docs/PLUGIN_HOST.md §6).
+- (void)writeProjectToPath
+{
+    for (const std::string& warning :
+         project::capturePluginState(*_project, _live, _projectPath))
+        NSLog(@"INCDAW: save: %s", warning.c_str());
+
+    const auto result = project::ProjectFile::save(*_project, _projectPath);
+
+    if (!result) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Could not save the project";
+        alert.informativeText = @(result.error.c_str());
+        [alert runModal];
+        return;
+    }
+
+    self.window.title =
+        [NSString stringWithFormat:@"INCDAW — %s", _projectPath.stem().string().c_str()];
+}
+
+- (void)openProject:(id)sender
+{
+    (void)sender;
+
+    NSOpenPanel* panel            = [NSOpenPanel openPanel];
+    panel.canChooseFiles          = YES;
+    panel.canChooseDirectories    = YES;   // a package is a directory
+    panel.allowsMultipleSelection = NO;
+
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+        return;
+
+    const std::filesystem::path chosen{panel.URL.path.UTF8String};
+
+    if (!project::ProjectFile::isProjectPackage(chosen)) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Not an INCDAW project";
+        alert.informativeText = @(chosen.string().c_str());
+        [alert runModal];
+        return;
+    }
+
+    // Loaded IN PLACE: every view holds a pointer to this project object, and
+    // ProjectFile::load replaces its contents wholesale. Undo history against
+    // the previous contents no longer applies to what is now here.
+    const auto result = project::ProjectFile::load(*_project, chosen);
+
+    if (!result) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Could not open the project";
+        alert.informativeText = @(result.error.c_str());
+        [alert runModal];
+        return;
+    }
+
+    if (result.migrated)
+        NSLog(@"INCDAW: project migrated from format %s", result.migratedFrom.c_str());
+
+    _registry->clearHistory();
+    _projectPath = chosen;
+
+    [self adoptLoadedProject];
+}
+
+/// Points everything at what was just loaded: tempo, views, the graph — and
+/// hands hosted plugins their state back once the graph that owns them exists.
+- (void)adoptLoadedProject
+{
+    const project::EntityId firstPattern =
+        _project->patterns().empty() ? project::EntityId{} : _project->patterns().front().id;
+    const project::EntityId firstChannel =
+        _project->channels().empty() ? project::EntityId{} : _project->channels().front().id;
+
+    self.pianoRoll.patternIdValue           = firstPattern.value();
+    self.pianoRoll.channelIdValue           = firstChannel.value();
+    self.channelRack.patternIdValue         = firstPattern.value();
+    self.channelRack.selectedChannelIdValue = firstChannel.value();
+    self.patternList.selectedPatternIdValue = firstPattern.value();
+    self.playlist.patternIdValue            = firstPattern.value();
+    self.mixer.selectedChannelIdValue       = firstChannel.value();
+
+    if (_audioReady) {
+        // The loaded tempo replaces the transport's, at the device's rate.
+        _audio->transport().tempoMapForEdit() = _project->tempoMap();
+        _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
+    }
+
+    [self rebuildGraph];
+
+    if (_audioReady && !_projectPath.empty())
+        for (const std::string& warning :
+             project::restorePluginState(*_project, _live, _projectPath))
+            NSLog(@"INCDAW: open: %s", warning.c_str());
+
+    [self retargetLoop];
+
+    [self.pianoRoll setNeedsDisplay:YES];
+    [self.channelRack setNeedsDisplay:YES];
+    [self.patternList setNeedsDisplay:YES];
+    [self.playlist setNeedsDisplay:YES];
+    [self.mixer setNeedsDisplay:YES];
+    [self.audioEditor setNeedsDisplay:YES];
+
+    self.window.title =
+        [NSString stringWithFormat:@"INCDAW — %s", _projectPath.stem().string().c_str()];
+}
+
 /// Loops whatever pattern is selected, so playback repeats rather than running
 /// off into silence — and so that switching pattern while playing does not keep
 /// looping the length of the previous one.
@@ -1121,6 +1267,19 @@ std::filesystem::path incdawSupportDirectory()
     NSMenu* appMenu = [[NSMenu alloc] init];
     [appMenu addItemWithTitle:@"Quit INCDAW" action:@selector(terminate:) keyEquivalent:@"q"];
     appItem.submenu = appMenu;
+
+    // File: the project as a document. Until this menu existed, everything a
+    // session produced was lost on quit — ProjectFile worked and was tested,
+    // but nothing called it.
+    NSMenuItem* fileItem = [[NSMenuItem alloc] init];
+    [menuBar addItem:fileItem];
+
+    NSMenu* fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+    [fileMenu addItemWithTitle:@"Open…" action:@selector(openProject:) keyEquivalent:@"o"];
+    [fileMenu addItem:[NSMenuItem separatorItem]];
+    [fileMenu addItemWithTitle:@"Save" action:@selector(saveProject:) keyEquivalent:@"s"];
+    [fileMenu addItemWithTitle:@"Save As…" action:@selector(saveProjectAs:) keyEquivalent:@"S"];
+    fileItem.submenu = fileMenu;
 
     // A View menu, so the panes are reachable by keyboard as well as by the
     // toolbar. Every DAW binds its editors to keys; a workspace you can only
