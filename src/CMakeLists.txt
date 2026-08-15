@@ -97,6 +97,7 @@ add_library(incdaw_project STATIC
     project/MidiCapture.cpp
     project/ParameterRegistry.cpp
     project/PatternCompiler.cpp
+    project/PluginStateFiles.cpp
     project/ProjectGraphCompiler.cpp
     project/RecordingSession.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

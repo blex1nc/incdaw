@@ -62,6 +62,10 @@ public:
         return instance_.get();
     }
 
+    /// Project save and load reach the hosted plugin's opaque state blob
+    /// through here (docs/PLUGIN_HOST.md §6).
+    [[nodiscard]] engine::StateIO* stateIO() noexcept override { return instance_.get(); }
+
 private:
     std::unique_ptr<ClapInstance> instance_;
 };

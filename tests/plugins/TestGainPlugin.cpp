@@ -127,6 +127,64 @@ const clap_plugin_params_t paramsExtension = {
     paramsCount, paramsGetInfo, paramsGetValue, paramsValueToText, paramsTextToValue, paramsFlush,
 };
 
+// ── The state extension ──────────────────────────────────────────────────────
+// The state is the gain, serialised as its 8 raw bytes. Loading demands
+// exactly that shape and a sane value, so the host's "plugin rejected its
+// saved state" path has something honest to trigger it.
+
+bool stateSave(const clap_plugin_t* plugin, const clap_ostream_t* stream)
+{
+    if (stream == nullptr || stream->write == nullptr)
+        return false;
+
+    const double gain    = stateOf(plugin)->gain;
+    const auto*  bytes   = reinterpret_cast<const uint8_t*>(&gain);
+    uint64_t     written = 0;
+
+    while (written < sizeof(gain)) {
+        const int64_t count = stream->write(stream, bytes + written, sizeof(gain) - written);
+        if (count <= 0)
+            return false;
+
+        written += static_cast<uint64_t>(count);
+    }
+
+    return true;
+}
+
+bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream)
+{
+    if (stream == nullptr || stream->read == nullptr)
+        return false;
+
+    double   gain = 0.0;
+    auto*    bytes = reinterpret_cast<uint8_t*>(&gain);
+    uint64_t total = 0;
+
+    while (total < sizeof(gain)) {
+        const int64_t count = stream->read(stream, bytes + total, sizeof(gain) - total);
+        if (count < 0)
+            return false;
+        if (count == 0)
+            return false;   // short blob: not ours
+
+        total += static_cast<uint64_t>(count);
+    }
+
+    uint8_t       extra = 0;
+    const int64_t tail  = stream->read(stream, &extra, 1);
+    if (tail != 0)
+        return false;   // trailing bytes: not ours either
+
+    if (!(gain >= 0.0 && gain <= 2.0))
+        return false;   // out of range or NaN
+
+    stateOf(plugin)->gain = gain;
+    return true;
+}
+
+const clap_plugin_state_t stateExtension = {stateSave, stateLoad};
+
 // ── The plugin ───────────────────────────────────────────────────────────────
 
 bool pluginInit(const clap_plugin_t*) { return true; }
@@ -147,6 +205,9 @@ const void* pluginGetExtension(const clap_plugin_t*, const char* id)
 {
     if (id != nullptr && std::strcmp(id, CLAP_EXT_PARAMS) == 0)
         return &paramsExtension;
+
+    if (id != nullptr && std::strcmp(id, CLAP_EXT_STATE) == 0)
+        return &stateExtension;
 
     return nullptr;
 }

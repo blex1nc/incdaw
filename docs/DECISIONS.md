@@ -964,3 +964,47 @@ processing resumes; that lands with the editor/UI bridge (PLUGIN_HOST §7).
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+## D-030 — Plugin state travels as blob files inside the package
+
+**Context:** PLUGIN_HOST §6 defines plugin state as an opaque blob the host
+stores and never interprets. `PluginSlot::stateFile` has been in the model
+and in project.json since the inserts serialized (so no format change was
+pending), but nothing captured a live plugin's state or handed it back. The
+open questions were where blobs live, who reaches a live instance at save
+time, and what happens when a plugin misbehaves or is missing.
+
+**Options:**
+
+1. Embed blobs base64-encoded inside project.json. One file, but it bloats
+   the document, breaks the package's per-file corruption resilience, and
+   makes a 50 MB sampler state re-write on every save.
+2. Blob files under `plugins/` in the package, referenced by the slot's
+   `stateFile`; live instances reached the same way automation reaches them —
+   a capability accessor (`Node::stateIO()`) surfaced per slot by the graph
+   compiler.
+
+**Chosen:** option 2.
+
+**Reason:** it is the package's own design ("a corrupted pattern costs one
+pattern") applied to plugins, and it makes the missing-plugin rule free: a
+slot with no live instance is simply not touched, so its blob and stateFile
+survive untouched until the plugin returns. `engine::StateIO` mirrors
+D-029's ParameterSink exactly — a pure interface in engine/, implemented by
+ClapInstance over CLAP_EXT_STATE with stack-local stream adapters, exposed
+per slot on CompiledProjectGraph. `project/PluginStateFiles` owns the file
+side: capture BEFORE ProjectFile::save (so stateFile lands in project.json),
+restore after compile. Blob writes stage-and-rename like every package write,
+so a crash mid-save loses the new blob, never the old one.
+
+**Tradeoffs:** capture reads live instances, so it needs the compiled graph —
+a project saved with no graph compiled keeps its previous blobs (correct,
+since the user heard nothing new). A hostile plugin is held to a 64 MB save
+cap and refused beyond it. Failures are warnings by design: a plugin that
+will not save keeps its previous state; one that rejects its blob plays its
+defaults, named to the UI. The application still lacks a save/open action, so
+the shell does not yet call capture/restore — recorded as the standing
+"largest gap" in HANDOFF; the library side is complete and tested.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

@@ -44,6 +44,57 @@ const clap_event_header_t* pendingInGet(const clap_input_events_t* list, uint32_
 
 bool emptyOutTryPush(const clap_output_events_t*, const clap_event_header_t*) { return false; }
 
+// ── State streams ────────────────────────────────────────────────────────────
+// CLAP state travels through pull/push streams. Both adapters live on the
+// caller's stack for the duration of one save/load call — main-thread only.
+
+/// What a hostile plugin is held to when saving: a state blob larger than
+/// this is a refusal, not a purchase of all available memory.
+constexpr std::uint64_t maxStateBlobBytes = 64ull * 1024 * 1024;
+
+struct BlobWriter {
+    std::vector<std::uint8_t>* out;
+    bool                       overflowed = false;
+};
+
+int64_t blobWrite(const clap_ostream_t* stream, const void* buffer, uint64_t size)
+{
+    auto* writer = static_cast<BlobWriter*>(stream->ctx);
+
+    if (buffer == nullptr)
+        return -1;
+
+    if (writer->out->size() + size > maxStateBlobBytes) {
+        writer->overflowed = true;
+        return -1;
+    }
+
+    const auto* bytes = static_cast<const std::uint8_t*>(buffer);
+    writer->out->insert(writer->out->end(), bytes, bytes + size);
+    return static_cast<int64_t>(size);
+}
+
+struct BlobReader {
+    const std::uint8_t* data   = nullptr;
+    std::size_t         size   = 0;
+    std::size_t         cursor = 0;
+};
+
+int64_t blobRead(const clap_istream_t* stream, void* buffer, uint64_t size)
+{
+    auto* reader = static_cast<BlobReader*>(stream->ctx);
+
+    if (buffer == nullptr)
+        return -1;
+
+    const std::uint64_t remaining = reader->size - reader->cursor;
+    const std::uint64_t count     = size < remaining ? size : remaining;
+
+    std::memcpy(buffer, reader->data + reader->cursor, static_cast<std::size_t>(count));
+    reader->cursor += static_cast<std::size_t>(count);
+    return static_cast<int64_t>(count);   // 0 at the end, per the stream contract
+}
+
 /// A macOS .clap is a bundle directory; the loadable binary lives inside.
 /// A flat dylib named .clap (our test plugins) loads as-is.
 std::filesystem::path resolveBinary(const std::filesystem::path& path)
@@ -220,6 +271,13 @@ std::unique_ptr<ClapInstance> ClapLibrary::create(const std::string& pluginId,
         }
     }
 
+    instance->state_ = static_cast<const clap_plugin_state_t*>(
+        instance->plugin_->get_extension(instance->plugin_, CLAP_EXT_STATE));
+
+    if (instance->state_ != nullptr
+        && (instance->state_->save == nullptr || instance->state_->load == nullptr))
+        instance->state_ = nullptr;   // hostile input: half an extension is none
+
     if (!instance->plugin_->activate(instance->plugin_, sampleRate, 1, maxFrames)) {
         error = "plugin activate failed: " + pluginId;
         instance->plugin_->destroy(instance->plugin_);
@@ -251,6 +309,40 @@ ClapInstance::~ClapInstance()
         plugin_->destroy(plugin_);
         plugin_ = nullptr;
     }
+}
+
+bool ClapInstance::saveState(std::vector<std::uint8_t>& out) const
+{
+    if (plugin_ == nullptr || state_ == nullptr)
+        return false;
+
+    std::vector<std::uint8_t> blob;
+
+    BlobWriter writer{&blob};
+
+    clap_ostream_t stream{};
+    stream.ctx   = &writer;
+    stream.write = blobWrite;
+
+    if (!state_->save(plugin_, &stream) || writer.overflowed)
+        return false;   // the caller keeps its previous blob
+
+    out = std::move(blob);
+    return true;
+}
+
+bool ClapInstance::loadState(const std::uint8_t* data, std::size_t size)
+{
+    if (plugin_ == nullptr || state_ == nullptr || (data == nullptr && size != 0))
+        return false;
+
+    BlobReader reader{data, size, 0};
+
+    clap_istream_t stream{};
+    stream.ctx  = &reader;
+    stream.read = blobRead;
+
+    return state_->load(plugin_, &stream);
 }
 
 void ClapInstance::setParameter(std::uint32_t parameterId, double plainValue) noexcept

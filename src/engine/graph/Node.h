@@ -9,6 +9,7 @@
 namespace incdaw::engine {
 
 class ParameterSink;
+class StateIO;
 
 /// Everything a node is allowed to know while rendering one block.
 ///
@@ -70,6 +71,11 @@ public:
     /// a node it only knows as `engine::Node` (docs/PLUGIN_HOST.md §5). The
     /// sink lives and dies with the node.
     [[nodiscard]] virtual ParameterSink* parameterSink() noexcept { return nullptr; }
+
+    /// This node's state carrier, or nullptr for the many nodes that carry
+    /// none. Same capability pattern as `parameterSink`, for project save and
+    /// load (docs/PLUGIN_HOST.md §6). Lives and dies with the node.
+    [[nodiscard]] virtual StateIO* stateIO() noexcept { return nullptr; }
 
     /// For diagnostics and graph dumps. Must be a string literal or otherwise
     /// outlive the node.

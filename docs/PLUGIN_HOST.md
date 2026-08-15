@@ -167,14 +167,31 @@ Plugin state is an **opaque binary blob** owned by the plugin, stored per
 instance in the project package under `plugins/` (docs/PROJECT_FORMAT.md).
 INCDAW never interprets it.
 
+Implemented (docs/DECISIONS.md D-030): `ClapInstance` is an `engine::StateIO`
+(CLAP_EXT_STATE through stack-local stream adapters, 64 MB save cap against
+hostile plugins); the compiled graph maps each live insert slot to its
+carrier (`insertStateFor`); `project/PluginStateFiles` captures blobs into
+`plugins/insert-<slot-id>.state` (stage-and-rename) and restores them after a
+compile. `PluginSlot::stateFile` records the package-relative path and
+already travels in project.json. Capture runs BEFORE `ProjectFile::save`;
+restore runs after compiling a loaded project. The shell does not call either
+yet — the application still has no save/open action (the standing gap).
+
 Rules:
 - State is saved on project save and on freeze/bounce.
 - State survives a plugin crash: the last successfully-saved blob is retained.
+  (Enforced twice: a failed `save()` keeps the previous blob and stateFile,
+  and blob writes stage-and-rename so a crash mid-write loses only the new
+  version.)
 - A missing plugin at load time does **not** discard its state — the node
   becomes a placeholder that retains the blob, so installing the plugin later
-  restores the session intact.
+  restores the session intact. (Enforced by capture/restore only touching
+  slots with a live carrier.)
+- A blob the plugin rejects is a named warning and the plugin plays its
+  defaults; the blob stays on disk.
 - State is versioned alongside the project format so a future migration can
-  reason about it.
+  reason about it: blobs live inside the versioned package, and the manifest
+  records which app version saved them.
 
 ---
 

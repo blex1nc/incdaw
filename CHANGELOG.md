@@ -8,6 +8,46 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 6) — Plugin state: capture, the package, and restore — 2026-08-15
+
+**Added**
+
+- `engine::StateIO` — a pure interface for nodes whose state is an opaque
+  blob, with `Node::stateIO()` following the `parameterSink()` capability
+  pattern (docs/DECISIONS.md D-030).
+- `ClapInstance` implements it over CLAP_EXT_STATE with stack-local stream
+  adapters; a hostile plugin is held to a 64 MB save cap, and half an
+  extension (save without load) is treated as none.
+- `CompiledProjectGraph::insertSlots/insertStates` + `insertStateFor` — how
+  project save reaches a live insert's blob. Filled only on a successful
+  compile, so a failed build can never hand out dangling carriers.
+- `project/PluginStateFiles` — `capturePluginState` writes each live
+  insert's blob to `plugins/insert-<slot-id>.state` in the package
+  (stage-and-rename, like every package write) and records the relative path
+  in `PluginSlot::stateFile`, which already travels in project.json — no
+  format change. `restorePluginState` hands blobs back after a compile.
+- The test gain plugin gained CLAP_EXT_STATE: its gain as 8 raw bytes,
+  strict about shape and range so the host's rejection path is honest.
+
+**Behaviour**
+
+- Capture before `ProjectFile::save`; restore after compiling a loaded
+  project. Failures are warnings, never a failed save: a plugin that will
+  not save keeps its previous blob; a plugin that rejects its blob plays its
+  defaults, named to the UI; a missing plugin's slot (and its blob file) is
+  simply not touched, so installing the plugin later restores the session.
+- The shell does not call capture/restore yet — the application still has no
+  save/open action, which remains the standing gap.
+
+**Tests**
+
+- 5 new cases (398 total, 168,719 assertions, green in Debug and Release):
+  instance-level state round trip incl. garbage rejection; the exit
+  criterion — state survives save, load and recompile bit-exactly; the
+  missing-plugin placeholder rule; a rejected blob as a named warning with
+  the plugin at defaults; an unreadable state file as a warning, not a
+  failed load.
+
 ### Phase 13 (part 5) — Plugin parameters: discovery and the event queue — 2026-08-15
 
 **Added**

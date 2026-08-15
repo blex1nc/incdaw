@@ -3,6 +3,7 @@
 #include "engine/audio/AudioStream.h"
 #include "engine/core/SampleRingBuffer.h"
 #include "engine/graph/RenderGraph.h"
+#include "engine/graph/StateIO.h"
 #include "engine/instrument/Instrument.h"
 #include "engine/automation/AutomationNode.h"
 #include "engine/dsp/MixerStripNode.h"
@@ -141,6 +142,13 @@ struct CompiledProjectGraph {
     /// `graph`, like everything else here.
     engine::AutomationNode* automation = nullptr;
 
+    /// Insert slots that made it into the graph, and their state carriers —
+    /// how project save reaches a hosted plugin's opaque blob
+    /// (docs/PLUGIN_HOST.md §6). Bypassed and unbuildable slots are absent;
+    /// so is a slot whose node carries no state. Owned by `graph`.
+    std::vector<EntityId>         insertSlots;
+    std::vector<engine::StateIO*> insertStates;
+
     std::string error;
 
     /// Non-fatal compile notes: an asset file that could not be read, an
@@ -158,6 +166,9 @@ struct CompiledProjectGraph {
 
     /// Strip for a channel, or nullptr if the channel is silent.
     [[nodiscard]] engine::dsp::MixerStripNode* channelStripFor(EntityId channel) const noexcept;
+
+    /// State carrier for an insert slot, or nullptr if it is not in the graph.
+    [[nodiscard]] engine::StateIO* insertStateFor(EntityId slot) const noexcept;
 };
 
 /// Compiles `project` against `tempoMap`, which must outlive the returned graph

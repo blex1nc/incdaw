@@ -2,6 +2,7 @@
 
 #include "engine/core/LockFreeQueue.h"
 #include "engine/graph/ParameterSink.h"
+#include "engine/graph/StateIO.h"
 #include "platform/SharedLibrary.h"
 #include "plugins/PluginParameterInfo.h"
 
@@ -69,7 +70,11 @@ private:
 /// its next process() call — never through a direct call into the plugin,
 /// which the CLAP params contract forbids while processing (clap/ext/params.h:
 /// flush must not run concurrently with process).
-class ClapInstance final : public engine::ParameterSink {
+///
+/// As an engine::StateIO it captures and restores the plugin's opaque state
+/// blob through CLAP_EXT_STATE — main-thread calls, used by project save and
+/// load (docs/PLUGIN_HOST.md §6).
+class ClapInstance final : public engine::ParameterSink, public engine::StateIO {
 public:
     ~ClapInstance() override;
 
@@ -94,6 +99,16 @@ public:
         return parameters_;
     }
 
+    /// Captures the plugin's opaque state (CLAP_EXT_STATE). False when the
+    /// plugin has no state extension, refuses, or writes beyond the size cap
+    /// a hostile plugin is held to — the caller keeps its previous blob.
+    [[nodiscard]] bool saveState(std::vector<std::uint8_t>& out) const override;
+
+    /// Hands a previously captured blob back to the plugin. The blob is
+    /// untrusted on principle, but it is the PLUGIN's job to validate its own
+    /// serialisation; false means it refused.
+    [[nodiscard]] bool loadState(const std::uint8_t* data, std::size_t size) override;
+
     [[nodiscard]] const clap_plugin_t* raw() const noexcept { return plugin_; }
 
 private:
@@ -105,10 +120,11 @@ private:
         double        value = 0.0;
     };
 
-    const clap_plugin_t* plugin_ = nullptr;
-    clap_host_t          host_{};
-    bool                 processing_ = false;
-    std::int64_t         steadyTime_ = 0;
+    const clap_plugin_t*       plugin_ = nullptr;
+    const clap_plugin_state_t* state_  = nullptr;   ///< CLAP_EXT_STATE, or null
+    clap_host_t                host_{};
+    bool                       processing_ = false;
+    std::int64_t               steadyTime_ = 0;
 
     /// 256 slots is every automatable parameter of a large plugin changing in
     /// one block — sized for the worst block, not the common one. Preallocated

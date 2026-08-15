@@ -68,6 +68,15 @@ engine::dsp::MixerStripNode* CompiledProjectGraph::channelStripFor(EntityId chan
     return nullptr;
 }
 
+engine::StateIO* CompiledProjectGraph::insertStateFor(EntityId slot) const noexcept
+{
+    for (std::size_t index = 0; index < insertSlots.size(); ++index)
+        if (insertSlots[index] == slot)
+            return insertStates[index];
+
+    return nullptr;
+}
+
 CompiledProjectGraph compileProjectGraph(const Project& project, const engine::TempoMap& tempoMap,
                                          const GraphCompileOptions& options)
 {
@@ -110,6 +119,11 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     /// slot id — what a lane automating a plugin parameter resolves its
     /// targetEntity against. A bypassed or unbuildable slot is simply absent.
     std::unordered_map<EntityId, engine::ParameterSink*> insertSinks;
+
+    /// State carriers, same population rule. Local until the compile succeeds:
+    /// on failure the builder (and every node these point into) is destroyed.
+    std::vector<EntityId>         insertSlotIds;
+    std::vector<engine::StateIO*> insertStateHandles;
 
     engine::NodeIndex master = engine::invalidNode;
 
@@ -163,6 +177,11 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
             if (engine::ParameterSink* sink = insertNode->parameterSink())
                 insertSinks.emplace(slot.id, sink);
+
+            if (engine::StateIO* state = insertNode->stateIO()) {
+                insertSlotIds.push_back(slot.id);
+                insertStateHandles.push_back(state);
+            }
 
             chain.push_back(builder.addNode(std::move(insertNode)));
         }
@@ -638,6 +657,8 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     compiled.mixerNodes    = std::move(mixerIds);
     compiled.strips        = std::move(stripNodes);
     compiled.automation    = automationHandle;
+    compiled.insertSlots   = std::move(insertSlotIds);
+    compiled.insertStates  = std::move(insertStateHandles);
     return compiled;
 }
 

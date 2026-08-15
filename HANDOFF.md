@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  393 test cases, 162,525 assertions, green in both Debug and Release.
+  398 test cases, 168,719 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1191,13 +1191,30 @@ recording and the Audio Logger all work. What remains in it is polish):
         list into the app-owned ParameterRegistry during the same compile
         the lanes bind in.
 
+  Phase 13 part 6 is DONE: plugin state save/load (§6, D-030).
+  engine::StateIO mirrors the ParameterSink pattern (Node::stateIO());
+  ClapInstance carries CLAP_EXT_STATE with stack-local stream adapters and
+  a 64 MB hostile-save cap; CompiledProjectGraph::insertStateFor(slot)
+  reaches a live insert's carrier (filled only on successful compile);
+  project/PluginStateFiles captures blobs to plugins/insert-<id>.state
+  (stage-and-rename) and restores after compile. stateFile was already in
+  project.json, so NO format change. Ordering contract: capture BEFORE
+  ProjectFile::save, restore AFTER compiling a loaded project. All failure
+  modes are warnings, never a failed save; a missing plugin's slot and blob
+  are never touched. NOTE: the shell calls neither yet — the app still has
+  no save/open action (the standing "largest gap"), so state capture is
+  wired and tested at library level only.
+
   Phase 13 continues, in dependency order:
-    - state save/load into the project (§6), latency reporting -> PDC
+    - latency reporting -> PDC (Node::latencyFrames already exists; a
+      hosted plugin must report CLAP_EXT_LATENCY through it, and the graph
+      compiler must start compensating parallel paths)
     - editor hosting (§7), then AU, then VST3 (D-007 order). The editor
       bridge is also where params->flush() lands: today a value queued
       while the engine is idle waits for the next process call (D-029
       records this), and where plugin-originated changes (out_events) flow
-      back to become recordable automation.
+      back to become recordable automation. mark_dirty (clap_host_state)
+      belongs here too.
     - the browser/UI story: pick a plugin from the registry onto a strip;
       a generic parameter surface over discovered PluginParameterInfo
     - sample-accurate event splitting inside the block, once the
