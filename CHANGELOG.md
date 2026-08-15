@@ -8,6 +8,35 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 14 (part 1) — The sampler core — 2026-08-15
+
+**Added**
+
+- `engine/instrument/Sampler` — zones in, sample-accurate voices out. A
+  `SamplerZone` maps a shared, immutable decoded sample to key and velocity
+  ranges with a root key, a start/end slice, reverse, and gain; a program is
+  nothing but zones, and key/velocity LAYERING falls out of several zones
+  matching one note. Playback repitches by rate through linear interpolation
+  (a sampler is not time stretching, §16); a source at another sample rate
+  is resampled by the same mechanism, so pitch stays true. ADSR envelope and
+  voice stealing mirror the reference synth; 64 voices.
+- `setZones` follows the structural-edit contract: build time only, like an
+  insert edit — a zone edit is a graph rebuild. Live control is the
+  realtime-safe envelope setters.
+
+**Not yet (recorded, coming in later parts)**
+
+- Loop points and crossfade, filters, LFOs, per-zone envelopes, disk
+  streaming for long samples, the channel/model wiring and UI.
+
+**Tests**
+
+- 10 new cases (421 total, 170,123 assertions, green in Debug and Release):
+  verbatim playback at root; octave-up reads twice as fast; key/velocity
+  gating; layer selection and overlapping-zone summing; velocity scaling;
+  reverse; slice bounds ending the voice; release ramp and allNotesOff;
+  stereo/mono channel mapping; a 24 kHz source resampled at 48 kHz.
+
 ### Phase 13 (part 10) — The editor bridge — 2026-08-15
 
 **Added**

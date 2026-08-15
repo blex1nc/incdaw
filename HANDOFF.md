@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  411 test cases, 169,335 assertions, green in both Debug and Release.
+  421 test cases, 170,123 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1239,17 +1239,40 @@ recording and the Audio Logger all work. What remains in it is polish):
   rebuilds because of D-031 and closed BEFORE the retain pass disposes an
   instance. Tested headlessly against the gain plugin's recording gui.
 
-  Phase 13 continues, in dependency order:
+  Phase 13 remaining (recorded, not blocking Phase 14+):
     - params->flush() while the engine is idle, plugin-originated changes
       (out_events -> recordable automation), clap_host_state.mark_dirty,
       clap_host_latency.changed -> recompile. These are the remaining
       host-callback halves of §5/§6/§8.
-    - AU, then VST3 (D-007 order) — new format backends behind the same
-      PluginInstanceManager surface.
+    - AU, then VST3 (D-007 order) — DEPENDENCY-GATED: each needs its SDK
+      vendored, and the constitution (§41) requires the user's approval
+      for any new dependency. Do not start these without it.
     - a generic parameter surface over discovered PluginParameterInfo
       (UI listing every automatable parameter of a slot).
     - sample-accurate event splitting inside the block, once the
       AutomationNode itself evaluates finer than per-block
+
+  PHASE 14 IS STARTED (continuous execution authorized 2026-08-15,
+  including "do all phases without stopping"). Part 1 done: the sampler
+  core — engine/instrument/Sampler with SamplerZone (shared immutable
+  sample, root key, key/velocity ranges, start/end slice, reverse, gain),
+  rate-based repitch via linear interpolation, cross-rate resampling,
+  SimpleSynth-style ADSR and stealing, 64 voices, layering by overlapping
+  zones. setZones is build-time-only by contract (a zone edit is a graph
+  rebuild, like inserts). 10 tests in tests/unit/SamplerTests.cpp.
+
+  Phase 14 continues, in dependency order:
+    - loop points + crossfade looping in the voice (roadmap: loop, then
+      crossfade; the Slice machinery is where they land)
+    - the model/wiring story: how a Channel declares "I am a sampler with
+      these zones" (today only the instrument PluginIdentifier exists;
+      zones need project-model representation + serialization + a format
+      bump if fields are added), the InstrumentFactory mapping, and a
+      minimal UI to load a sample onto a channel
+    - per-zone envelopes, filters, LFOs (roadmap order)
+    - disk streaming for long samples (DiskStreamer exists from Phase 12)
+    - the multisample exit criterion run: velocity layers streaming from
+      disk without underruns
 
 Things to be careful about:
 

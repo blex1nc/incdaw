@@ -47,6 +47,7 @@ add_library(incdaw_engine STATIC
     engine/midi/MidiRecorder.cpp
     engine/midi/NoteSequence.cpp
     engine/instrument/Instrument.cpp
+    engine/instrument/Sampler.cpp
     engine/instrument/SimpleSynth.cpp
     engine/instrument/InstrumentNode.cpp
     engine/audio/WavFile.cpp

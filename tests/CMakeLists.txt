@@ -18,6 +18,7 @@ add_executable(incdaw_tests
     unit/CommandTests.cpp
     unit/PianoRollTests.cpp
     unit/InstrumentTests.cpp
+    unit/SamplerTests.cpp
     unit/PatternTests.cpp
     unit/ChannelRackTests.cpp
     unit/PlaylistTests.cpp
