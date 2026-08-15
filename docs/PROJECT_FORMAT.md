@@ -82,6 +82,7 @@ requires a migration step.
 | 1.1 | 8 | Pattern notes stored per channel (`channels[]` in a `.pat` file) instead of one flat `events[]`; patterns gained `swing` / `swingGrid`; clips gained `startTick` / `lengthTicks` / `sourceOffsetTicks`. |
 | 1.2 | 8b | Channels gained `stepKey`, the pitch a step sequencer step is written at. Additive. |
 | 1.3 | 14 | Channels gained `samplerZones[]`, the builtin sampler's program — each zone names an audio asset by id plus key/velocity range, slice, sustain loop, crossfade, reverse and gain. Additive. |
+| 1.4 | 16 | The project gained `midiMappings[]` — hardware controls bound to parameters by registry key and target entity, with a normalised (possibly inverted) output range. Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -114,6 +115,10 @@ is what those channels had. The path is declared in `ProjectFile::migrate`.
 `samplerZones`) and `tests/fixtures/v1.3/Fixture.incdaw` (frozen: a channel
 whose `instrument` is `builtin:incdaw.sampler` with one zone naming an audio
 asset) are kept permanently beside the earlier ones.
+
+**Reading a 1.3 file.** Purely additive: no `midiMappings`, read back empty.
+`tests/fixtures/v1.4/Fixture.incdaw` (frozen: one mapping, CC 74 to the master
+node's volume) is kept permanently.
 
 ---
 

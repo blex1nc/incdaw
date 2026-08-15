@@ -18,6 +18,7 @@
 #include "app/AutomationWriteSession.h"
 #include "app/CommandRegistry.h"
 #include "app/Version.h"
+#include "app/commands/MidiMappingCommands.h"
 #include "app/commands/RecordingCommands.h"
 #include "engine/AudioEngine.h"
 #include "platform/SystemInfo.h"
@@ -139,6 +140,13 @@ std::filesystem::path incdawSupportDirectory()
     /// under a live graph.
     std::unique_ptr<engine::SampleCache> _sampleCache;
 
+    /// MIDI learn: armed by the mixer's context menu, resolved by
+    /// housekeeping when the next CC arrives at the input tap.
+    bool          _learnArmed;
+    NSString*     _learnParameterKey;
+    unsigned long long _learnTarget;
+    std::uint64_t _learnControlSeen;
+
     /// Undo/redo of an audio edit rewrites a file behind the editor's back;
     /// watching the undo stack's depth from housekeeping catches it without
     /// the registry having to know views exist.
@@ -194,9 +202,11 @@ std::filesystem::path incdawSupportDirectory()
     _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
     _parameters      = project::ParameterRegistry::withBuiltins();
 
-    // Builtin effect parameters register once at launch through the same
-    // path a scanned plugin's discovery does; there is nothing to rescan.
+    // Builtin effect and instrument parameters register once at launch
+    // through the same path a scanned plugin's discovery does; there is
+    // nothing to rescan.
     _parameters.registerBuiltinEffects();
+    _parameters.registerBuiltinInstruments();
 
     // What the mixer's Add Insert menu offers: every scanned, non-blacklisted
     // plugin, by display name. The view knows menus, not catalogues.
@@ -313,6 +323,14 @@ std::filesystem::path incdawSupportDirectory()
     __weak INCDAWAppDelegate* weakSelfForEditors = self;
     self.mixer.onOpenInsertEditor = ^(unsigned long long slotKey) {
         [weakSelfForEditors openEditorForSlotKey:slotKey];
+    };
+
+    self.mixer.onMidiLearn = ^(NSString* parameterKey, unsigned long long targetId) {
+        [weakSelfForEditors armMidiLearnForKey:parameterKey target:targetId];
+    };
+
+    self.mixer.onMidiForget = ^(unsigned long long targetId) {
+        [weakSelfForEditors forgetMidiMappingsForTarget:targetId];
     };
 
     self.audioEditor = [[INCDAWAudioEditorView alloc]
@@ -1384,12 +1402,79 @@ std::filesystem::path incdawSupportDirectory()
     [self refreshStatus];
 }
 
+- (void)armMidiLearnForKey:(NSString*)parameterKey target:(unsigned long long)targetId
+{
+    _learnArmed        = true;
+    _learnParameterKey = parameterKey;
+    _learnTarget       = targetId;
+    _learnControlSeen  = _audioReady ? _audio->midiInput().lastControlChange() : 0;
+}
+
+- (void)forgetMidiMappingsForTarget:(unsigned long long)targetId
+{
+    const project::EntityId target{targetId};
+
+    // One command per mapping keeps each undoable; targeting a node rarely
+    // holds more than a knob or two.
+    bool removed = false;
+    for (bool again = true; again;) {
+        again = false;
+        for (const project::MidiMapping& mapping : _project->midiMappings()) {
+            if (mapping.targetEntity != target)
+                continue;
+
+            removed = _registry->execute(
+                          std::make_unique<app::RemoveMidiMappingCommand>(mapping.id))
+                   || removed;
+            again = true;
+            break;   // the vector changed under the loop; restart
+        }
+    }
+
+    if (removed)
+        [self rebuildGraph];
+}
+
+/// The tail end of MIDI learn: the knob has been turned, bind it.
+- (void)completeMidiLearnWithPacked:(std::uint64_t)packed
+{
+    _learnArmed = false;
+
+    const int controller = engine::MidiInput::controllerOf(packed);
+
+    // Re-learning a control replaces its old binding, undoably: remove any
+    // mapping on the same CC first, then add the new one.
+    for (bool again = true; again;) {
+        again = false;
+        for (const project::MidiMapping& mapping : _project->midiMappings()) {
+            if (mapping.controller != controller || mapping.midiChannel != -1)
+                continue;
+
+            (void)_registry->execute(
+                std::make_unique<app::RemoveMidiMappingCommand>(mapping.id));
+            again = true;
+            break;
+        }
+    }
+
+    if (_registry->execute(std::make_unique<app::AddMidiMappingCommand>(
+            -1, controller, std::string{_learnParameterKey.UTF8String},
+            project::EntityId{_learnTarget})))
+        [self rebuildGraph];
+}
+
 - (void)housekeeping
 {
     if (!_audioReady)
         return;
 
     _audio->collectRetiredGraphs();
+
+    if (_learnArmed) {
+        const std::uint64_t packed = _audio->midiInput().lastControlChange();
+        if (packed != _learnControlSeen && packed != 0)
+            [self completeMidiLearnWithPacked:packed];
+    }
 
     // An undo or redo may have rewritten the file the editor and the
     // playlist's clip waveforms are showing.

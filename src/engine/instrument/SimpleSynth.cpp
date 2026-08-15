@@ -1,5 +1,6 @@
 #include "engine/instrument/SimpleSynth.h"
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -272,6 +273,21 @@ void SimpleSynth::renderRange(const AudioBufferView& output, FrameCount frameCou
         Sample* destination = output.channel(channel);
         for (FrameCount frame = 0; frame < frameCount; ++frame)
             destination[frame] += first[frame];
+    }
+}
+
+void SimpleSynth::setParameter(std::uint32_t parameterId, double plainValue) noexcept
+{
+    switch (static_cast<SimpleSynthParam>(parameterId)) {
+        case SimpleSynthParam::waveform:
+            setWaveform(static_cast<Waveform>(
+                std::clamp(static_cast<int>(plainValue + 0.5), 0, 3)));
+            return;
+        case SimpleSynthParam::gain:           setGain(static_cast<Sample>(plainValue)); return;
+        case SimpleSynthParam::attackSeconds:  setAttackSeconds(plainValue); return;
+        case SimpleSynthParam::decaySeconds:   setDecaySeconds(plainValue); return;
+        case SimpleSynthParam::sustainLevel:   setSustainLevel(plainValue); return;
+        case SimpleSynthParam::releaseSeconds: setReleaseSeconds(plainValue); return;
     }
 }
 

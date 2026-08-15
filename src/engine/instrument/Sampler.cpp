@@ -108,6 +108,25 @@ int Sampler::activeVoiceCount() const noexcept
     return count;
 }
 
+void Sampler::setParameter(std::uint32_t parameterId, double plainValue) noexcept
+{
+    switch (static_cast<SamplerParam>(parameterId)) {
+        case SamplerParam::attackSeconds:   setAttackSeconds(plainValue); return;
+        case SamplerParam::decaySeconds:    setDecaySeconds(plainValue); return;
+        case SamplerParam::sustainLevel:    setSustainLevel(plainValue); return;
+        case SamplerParam::releaseSeconds:  setReleaseSeconds(plainValue); return;
+        case SamplerParam::filterMode:
+            setFilterMode(static_cast<FilterMode>(
+                std::clamp(static_cast<int>(plainValue + 0.5), 0, 3)));
+            return;
+        case SamplerParam::filterCutoffHz:  setFilterCutoffHz(plainValue); return;
+        case SamplerParam::filterResonance: setFilterResonance(plainValue); return;
+        case SamplerParam::lfoRateHz:       setLfoRateHz(plainValue); return;
+        case SamplerParam::lfoToPitch:      setLfoToPitchSemitones(plainValue); return;
+        case SamplerParam::lfoToCutoff:     setLfoToCutoffOctaves(plainValue); return;
+    }
+}
+
 void Sampler::setZones(std::vector<SamplerZone> zones)
 {
     // Voices hold pointers into zones_; they cannot survive the swap. Build

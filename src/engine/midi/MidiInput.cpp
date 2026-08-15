@@ -11,6 +11,18 @@ void MidiInput::midiMessageReceived(const platform::TimestampedMidiMessage& mess
 {
     received_.fetch_add(1, std::memory_order_relaxed);
 
+    // The learn tap: publish the last CC seen, packed into one atomic so a
+    // reader can never tear it. Realtime-safe — one load, one store.
+    if ((message.status & 0xF0u) == 0xB0u) {
+        const std::uint64_t generation = (lastControl_.load(std::memory_order_relaxed) >> 24) + 1;
+        const std::uint64_t packed =
+            (generation << 24)
+            | (static_cast<std::uint64_t>(message.status & 0x0Fu) << 16)
+            | (static_cast<std::uint64_t>(message.data1) << 8)
+            | static_cast<std::uint64_t>(message.data2);
+        lastControl_.store(packed, std::memory_order_relaxed);
+    }
+
     if (!queue_.push(message))
         dropped_.fetch_add(1, std::memory_order_relaxed);
 }

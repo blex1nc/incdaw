@@ -33,6 +33,14 @@ public:
     [[nodiscard]] Instrument*       instrument()       noexcept { return instrument_.get(); }
     [[nodiscard]] const Instrument* instrument() const noexcept { return instrument_.get(); }
 
+    /// The instrument's parameters, surfaced as the node capability so
+    /// automation and MIDI mapping bind to an instrument exactly as they
+    /// bind to an insert.
+    [[nodiscard]] ParameterSink* parameterSink() noexcept override
+    {
+        return instrument_ != nullptr ? instrument_->parameterSink() : nullptr;
+    }
+
     /// The notes this node plays. Replaced off the audio thread when the
     /// pattern is edited; the graph is rebuilt around it.
     [[nodiscard]] NoteSequence&       sequence()       noexcept { return sequence_; }

@@ -63,6 +63,22 @@ struct SamplerZone {
     }
 };
 
+/// The sampler's automatable parameters, in plain units. The table is what
+/// the registry registers and the sink switches on; ids are stable, values
+/// land on the same atomic setters the UI uses.
+enum class SamplerParam : std::uint32_t {
+    attackSeconds  = 0,
+    decaySeconds   = 1,
+    sustainLevel   = 2,
+    releaseSeconds = 3,
+    filterMode     = 4,
+    filterCutoffHz = 5,
+    filterResonance = 6,
+    lfoRateHz      = 7,
+    lfoToPitch     = 8,
+    lfoToCutoff    = 9,
+};
+
 /// The sampler: zones in, sample-accurate voices out (CLAUDE.md §18).
 ///
 /// Playback repitches by RATE — a note a fifth above the root reads the
@@ -77,7 +93,7 @@ struct SamplerZone {
 /// Live, realtime-safe control is the envelope setters, like the reference
 /// synth. Envelope shape and voice stealing mirror SimpleSynth, because
 /// those behaviours are conventions users rely on.
-class Sampler final : public Instrument {
+class Sampler final : public Instrument, public ParameterSink {
 public:
     static constexpr int maxVoices = 64;
 
@@ -86,6 +102,11 @@ public:
 
     [[nodiscard]] const char* name() const noexcept override { return "Sampler"; }
     [[nodiscard]] int activeVoiceCount() const noexcept override;
+
+    [[nodiscard]] ParameterSink* parameterSink() noexcept override { return this; }
+
+    /// Routes a plain value onto the matching setter. Realtime-safe.
+    void setParameter(std::uint32_t parameterId, double plainValue) noexcept override;
 
     /// Replaces the program and silences every voice. Build time only: must
     /// not be called while the instrument is rendering (a zone edit is a
@@ -111,6 +132,11 @@ public:
     }
     void setFilterCutoffHz(double hz) noexcept  { filterCutoff_.store(hz, std::memory_order_relaxed); }
     void setFilterResonance(double q) noexcept  { filterResonance_.store(q, std::memory_order_relaxed); }
+
+    [[nodiscard]] double filterCutoffHz() const noexcept
+    {
+        return filterCutoff_.load(std::memory_order_relaxed);
+    }
 
     /// One LFO, retriggered per note, sine. Destinations are depth-controlled:
     /// zero depth is off, so there is no separate enable.

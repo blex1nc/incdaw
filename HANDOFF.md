@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.5
-Status: PHASES 0-15 COMPLETE / PHASE 16 NEXT
+Version: 2.6
+Status: PHASES 0-16 COMPLETE / PHASE 17 NEXT
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1338,6 +1338,29 @@ recording and the Audio Logger all work. What remains in it is polish):
     16/UI-phase companion), spectrum analyzer (level analyzer only),
     lookahead limiting (would need latency reporting, which the insert
     machinery already supports when it comes).
+
+  PHASE 16 IS COMPLETE (2026-08-16). MIDI hardware and controller linking:
+    - MidiMapping in the MODEL (format 1.4, fixture v1.4): registry key +
+      target entity + invertible normalised range. Add/Remove commands;
+      re-learn replaces undoably.
+    - engine/midi/MidiMapNode compiles from project mappings through the
+      SAME resolveApplier as automation lanes (factored out in
+      ProjectGraphCompiler — one resolution for lanes and knobs).
+    - Instruments are in the parameter system now:
+      Instrument::parameterSink, SamplerParam/SimpleSynthParam tables in
+      engine/instrument/BuiltinInstruments.{h,cpp},
+      registerBuiltinInstruments(); a lane/mapping targeting a CHANNEL
+      resolves to its instrument's sink.
+    - Learn mode: MidiInput publishes its last CC via a packed atomic
+      (lastControlChange); the mixer menu arms learn per node
+      (volume/pan); the shell's housekeeping completes it as commands and
+      rebuilds. "Forget MIDI Mappings" per node.
+    - EXIT CRITERION met in MidiMappingTests.cpp: mapped CCs drive mixer
+      volume + sampler cutoff + insert gain through one compiled graph,
+      then again after save/load. 466 cases / 286,224 assertions green.
+    Deferred, recorded: MIDI clock/sync and hardware feedback need MIDI
+    OUTPUT in platform/ (only input exists); channel-strip learn is
+    mixer-menu only (channel rack learn later); mapping list UI.
 
 Things to be careful about:
 

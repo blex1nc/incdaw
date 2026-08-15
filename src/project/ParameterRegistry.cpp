@@ -1,6 +1,7 @@
 #include "project/ParameterRegistry.h"
 
 #include "engine/dsp/effects/BuiltinEffects.h"
+#include "engine/instrument/BuiltinInstruments.h"
 
 #include <cmath>
 
@@ -67,27 +68,44 @@ void ParameterRegistry::registerPluginParameters(
     }
 }
 
+namespace {
+
+std::vector<plugins::PluginParameterInfo>
+convertParameters(const engine::dsp::EffectParameter* parameters, std::size_t count)
+{
+    std::vector<plugins::PluginParameterInfo> converted;
+    converted.reserve(count);
+
+    for (std::size_t index = 0; index < count; ++index) {
+        const engine::dsp::EffectParameter& parameter = parameters[index];
+
+        plugins::PluginParameterInfo entry;
+        entry.id           = parameter.id;
+        entry.name         = parameter.name;
+        entry.minValue     = parameter.minValue;
+        entry.maxValue     = parameter.maxValue;
+        entry.defaultValue = parameter.defaultValue;
+        entry.stepped      = parameter.stepped;
+        converted.push_back(std::move(entry));
+    }
+
+    return converted;
+}
+
+} // namespace
+
 void ParameterRegistry::registerBuiltinEffects()
 {
-    for (const engine::dsp::BuiltinEffectInfo& info : engine::dsp::builtinEffects()) {
-        std::vector<plugins::PluginParameterInfo> parameters;
-        parameters.reserve(info.parameterCount);
+    for (const engine::dsp::BuiltinEffectInfo& info : engine::dsp::builtinEffects())
+        registerPluginParameters(info.uid,
+                                 convertParameters(info.parameters, info.parameterCount));
+}
 
-        for (std::size_t index = 0; index < info.parameterCount; ++index) {
-            const engine::dsp::EffectParameter& parameter = info.parameters[index];
-
-            plugins::PluginParameterInfo converted;
-            converted.id           = parameter.id;
-            converted.name         = parameter.name;
-            converted.minValue     = parameter.minValue;
-            converted.maxValue     = parameter.maxValue;
-            converted.defaultValue = parameter.defaultValue;
-            converted.stepped      = parameter.stepped;
-            parameters.push_back(std::move(converted));
-        }
-
-        registerPluginParameters(info.uid, parameters);
-    }
+void ParameterRegistry::registerBuiltinInstruments()
+{
+    for (const engine::BuiltinInstrumentInfo& info : engine::builtinInstruments())
+        registerPluginParameters(info.uid,
+                                 convertParameters(info.parameters, info.parameterCount));
 }
 
 const ParameterRegistry::Entry* ParameterRegistry::find(const std::string& key) const noexcept

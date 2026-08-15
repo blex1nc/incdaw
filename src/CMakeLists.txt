@@ -53,6 +53,7 @@ add_library(incdaw_engine STATIC
     engine/midi/MidiRecorder.cpp
     engine/midi/NoteSequence.cpp
     engine/instrument/Instrument.cpp
+    engine/instrument/BuiltinInstruments.cpp
     engine/instrument/Sampler.cpp
     engine/instrument/SamplerStream.cpp
     engine/instrument/SimpleSynth.cpp
@@ -124,6 +125,7 @@ add_library(incdaw_app STATIC
     app/PlaylistModel.cpp
     app/commands/NoteCommands.cpp
     app/commands/ChannelCommands.cpp
+    app/commands/MidiMappingCommands.cpp
     app/commands/SamplerCommands.cpp
     app/commands/PatternCommands.cpp
     app/commands/StepCommands.cpp

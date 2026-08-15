@@ -1,0 +1,117 @@
+{
+  "metadata": {
+    "title": "Format v1.4 fixture",
+    "artist": "INCDAW",
+    "comment": ""
+  },
+  "tempo": {
+    "events": [
+      {
+        "tick": 0,
+        "bpm": 120
+      }
+    ],
+    "timeSignatures": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "masterMixerNode": 1,
+  "nextEntityId": 7,
+  "mixerNodes": [
+    {
+      "id": 1,
+      "type": 2,
+      "name": "Master",
+      "colour": 4282400832,
+      "volume": 1,
+      "pan": 0,
+      "muted": false,
+      "soloed": false,
+      "polarityFlip": false,
+      "inserts": []
+    }
+  ],
+  "tracks": [],
+  "channels": [
+    {
+      "id": 2,
+      "name": "Kick",
+      "colour": 4291585604,
+      "outputMixerNode": 1,
+      "volume": 0.8,
+      "pan": 0,
+      "muted": false,
+      "soloed": false,
+      "stepKey": 36,
+      "instrument": "builtin:incdaw.sampler",
+      "instrumentStateFile": "",
+      "samplerZones": [
+        {
+          "asset": 5,
+          "rootKey": 36,
+          "keyLow": 0,
+          "keyHigh": 96,
+          "velocityLow": 1,
+          "velocityHigh": 127,
+          "start": 0,
+          "end": 0,
+          "loopStart": 1000,
+          "loopEnd": 9000,
+          "loopCrossfade": 256,
+          "reverse": false,
+          "gain": 0.9
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Lead",
+      "colour": 4286611584,
+      "outputMixerNode": 1,
+      "volume": 1,
+      "pan": 0,
+      "muted": true,
+      "soloed": false,
+      "stepKey": 60,
+      "instrument": "",
+      "instrumentStateFile": "",
+      "samplerZones": []
+    }
+  ],
+  "clips": [],
+  "automation": [],
+  "audioAssets": [
+    {
+      "id": 5,
+      "relativePath": "media/kick.wav",
+      "absolutePath": "",
+      "contentHash": "",
+      "embedded": true,
+      "sampleRate": 48000,
+      "frameCount": 12000,
+      "channelCount": 1
+    }
+  ],
+  "routing": [],
+  "patterns": [
+    {
+      "id": 4,
+      "file": "4.pat"
+    }
+  ],
+  "midiMappings": [
+    {
+      "id": 6,
+      "midiChannel": -1,
+      "controller": 74,
+      "parameterKey": "volume",
+      "targetEntity": 1,
+      "minValue": 0.0,
+      "maxValue": 1.0
+    }
+  ]
+}

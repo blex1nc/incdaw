@@ -167,6 +167,37 @@ bool Project::removeAudioAsset(EntityId id) noexcept
     return true;
 }
 
+MidiMapping& Project::addMidiMapping(int controller, std::string parameterKey, EntityId target)
+{
+    MidiMapping mapping;
+    mapping.id           = ids_.next();
+    mapping.controller   = controller;
+    mapping.parameterKey = std::move(parameterKey);
+    mapping.targetEntity = target;
+
+    midiMappings_.push_back(std::move(mapping));
+    return midiMappings_.back();
+}
+
+MidiMapping& Project::insertMidiMapping(std::size_t index, MidiMapping mapping)
+{
+    ids_.observe(mapping.id);
+
+    const std::size_t position = std::min(index, midiMappings_.size());
+    return *midiMappings_.insert(midiMappings_.begin() + static_cast<std::ptrdiff_t>(position),
+                                 std::move(mapping));
+}
+
+bool Project::removeMidiMapping(EntityId id) noexcept
+{
+    const std::size_t index = indexOfMidiMapping(id);
+    if (index == notFound)
+        return false;
+
+    midiMappings_.erase(midiMappings_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
 bool Project::removeMixerNode(EntityId id) noexcept
 {
     // The master is what everything reaches; a project without one cannot be
@@ -232,6 +263,15 @@ std::size_t Project::indexOfAudioAsset(EntityId id) const noexcept
 {
     for (std::size_t index = 0; index < audioAssets_.size(); ++index)
         if (audioAssets_[index].id == id)
+            return index;
+
+    return notFound;
+}
+
+std::size_t Project::indexOfMidiMapping(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < midiMappings_.size(); ++index)
+        if (midiMappings_[index].id == id)
             return index;
 
     return notFound;
@@ -488,6 +528,7 @@ bool operator==(const Project& a, const Project& b)
         && a.clips_ == b.clips_
         && a.automation_ == b.automation_
         && a.audioAssets_ == b.audioAssets_
+        && a.midiMappings_ == b.midiMappings_
         && a.routing_ == b.routing_
         && a.master_ == b.master_;
 }

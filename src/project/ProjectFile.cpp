@@ -371,6 +371,20 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
     }
     document.set("audioAssets", std::move(assets));
 
+    Json mappings = Json::array();
+    for (const MidiMapping& mapping : project.midiMappings()) {
+        Json json = Json::object();
+        json.set("id", toJson(mapping.id));
+        json.set("midiChannel", static_cast<std::int64_t>(mapping.midiChannel));
+        json.set("controller", static_cast<std::int64_t>(mapping.controller));
+        json.set("parameterKey", mapping.parameterKey);
+        json.set("targetEntity", toJson(mapping.targetEntity));
+        json.set("minValue", mapping.minValue);
+        json.set("maxValue", mapping.maxValue);
+        mappings.append(std::move(json));
+    }
+    document.set("midiMappings", std::move(mappings));
+
     Json routing = Json::array();
     for (const RoutingConnection& connection : project.routing()) {
         Json json = Json::object();
@@ -714,6 +728,18 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         project.audioAssets().push_back(std::move(asset));
     }
 
+    for (const Json& json : document["midiMappings"].elements()) {
+        MidiMapping mapping;
+        mapping.id           = idFrom(json["id"]);
+        mapping.midiChannel  = static_cast<int>(json["midiChannel"].asInt(-1));
+        mapping.controller   = static_cast<int>(json["controller"].asInt(0));
+        mapping.parameterKey = json["parameterKey"].asString();
+        mapping.targetEntity = idFrom(json["targetEntity"]);
+        mapping.minValue     = json["minValue"].asDouble(0.0);
+        mapping.maxValue     = json["maxValue"].asDouble(1.0);
+        project.midiMappings().push_back(std::move(mapping));
+    }
+
     for (const Json& json : document["routing"].elements()) {
         RoutingConnection connection;
         connection.id          = idFrom(json["id"]);
@@ -838,6 +864,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // 1.2 document and reads back as an empty program — those channels had no
     // sampler.
     if (major == 1 && minor == 2) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.3 -> 1.4. Purely additive: `midiMappings` is absent from a 1.3
+    // document and reads back empty — those projects had no controller
+    // bindings.
+    if (major == 1 && minor == 3) {
         result.succeeded = true;
         return result;
     }

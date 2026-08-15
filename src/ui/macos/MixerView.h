@@ -51,4 +51,12 @@ namespace incdaw::engine::dsp { class MixerStripNode; }
 /// windows and instances; the view only knows the slot was asked for.
 @property (nonatomic, copy) void (^onOpenInsertEditor)(unsigned long long slotId);
 
+/// Arms MIDI learn for a parameter of a mixer node: the next CC that arrives
+/// becomes the mapping. The shell owns the armed state and the poll.
+@property (nonatomic, copy) void (^onMidiLearn)(NSString* parameterKey,
+                                                unsigned long long targetId);
+
+/// Removes every MIDI mapping targeting the node.
+@property (nonatomic, copy) void (^onMidiForget)(unsigned long long targetId);
+
 @end

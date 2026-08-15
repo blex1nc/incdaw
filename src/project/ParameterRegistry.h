@@ -71,6 +71,11 @@ public:
     /// shell calls this once at launch; builtins never rescan.
     void registerBuiltinEffects();
 
+    /// The instrument counterpart: every builtin instrument's parameters,
+    /// keyed by the same scheme. A lane or MIDI mapping whose target is a
+    /// CHANNEL resolves to that channel's instrument sink.
+    void registerBuiltinInstruments();
+
     [[nodiscard]] const Entry* find(const std::string& key) const noexcept;
 
     [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }

@@ -133,6 +133,12 @@ Project makePopulatedProject()
     send.gain     = 0.25;
     send.preFader = true;
 
+    // Format 1.4: a hardware control bound to a parameter.
+    auto& mapping       = project.addMidiMapping(74, "volume", bus.id);
+    mapping.midiChannel = 3;
+    mapping.minValue    = 0.1;
+    mapping.maxValue    = 0.9;
+
     return project;
 }
 
@@ -669,7 +675,8 @@ TEST_CASE("the v1.3 fixture still loads")
     const auto result = ProjectFile::load(project, fixture);
 
     REQUIRE(result.succeeded);
-    CHECK(!result.migrated);   // 1.3 is the current format
+    CHECK(result.migrated);
+    CHECK(result.migratedFrom == "1.3");
 
     CHECK(project.metadata().title == "Format v1.3 fixture");
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/core/AudioBuffer.h"
+#include "engine/graph/ParameterSink.h"
 #include "engine/midi/MidiBuffer.h"
 
 namespace incdaw::engine {
@@ -42,6 +43,11 @@ public:
     /// Voices currently sounding. Exposed for metering and for tests that need
     /// to assert a note actually started or stopped.
     [[nodiscard]] virtual int activeVoiceCount() const noexcept = 0;
+
+    /// The instrument's parameters as a sink, or nullptr when it has none.
+    /// The same capability pattern nodes use: automation and MIDI mapping
+    /// reach an instrument's parameters through here and nothing else.
+    [[nodiscard]] virtual ParameterSink* parameterSink() noexcept { return nullptr; }
 
 protected:
     /// Applies one message. Called at the exact frame it belongs to.

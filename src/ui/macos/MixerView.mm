@@ -415,6 +415,33 @@ enum class MixerDrag { none, fader, pan };
 
     addBuiltinItem.submenu = addBuiltinMenu;
 
+    // ── MIDI learn ───────────────────────────────────────────────────────
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* learnVolume = [menu addItemWithTitle:@"MIDI Learn Volume"
+                                              action:@selector(midiLearnVolumeFromMenu:)
+                                       keyEquivalent:@""];
+    learnVolume.target            = self;
+    learnVolume.representedObject = @(nodeId.value());
+
+    NSMenuItem* learnPan = [menu addItemWithTitle:@"MIDI Learn Pan"
+                                           action:@selector(midiLearnPanFromMenu:)
+                                    keyEquivalent:@""];
+    learnPan.target            = self;
+    learnPan.representedObject = @(nodeId.value());
+
+    bool anyMappingHere = false;
+    for (const project::MidiMapping& mapping : _project->midiMappings())
+        anyMappingHere = anyMappingHere || mapping.targetEntity == nodeId;
+
+    if (anyMappingHere) {
+        NSMenuItem* forget = [menu addItemWithTitle:@"Forget MIDI Mappings"
+                                             action:@selector(midiForgetFromMenu:)
+                                      keyEquivalent:@""];
+        forget.target            = self;
+        forget.representedObject = @(nodeId.value());
+    }
+
     // One submenu per slot: Bypass (checkable) and Remove, in chain order —
     // the order is the audible order.
     const project::MixerNode* node = _project->findMixerNode(nodeId);
@@ -492,6 +519,24 @@ enum class MixerDrag { none, fader, pan };
     if (_registry->execute(std::make_unique<app::AddInsertCommand>(
             project::EntityId{[info[@"node"] unsignedLongLongValue]}, std::move(plugin))))
         [self structuralChange];
+}
+
+- (void)midiLearnVolumeFromMenu:(NSMenuItem*)item
+{
+    if (self.onMidiLearn != nil)
+        self.onMidiLearn(@"volume", [item.representedObject unsignedLongLongValue]);
+}
+
+- (void)midiLearnPanFromMenu:(NSMenuItem*)item
+{
+    if (self.onMidiLearn != nil)
+        self.onMidiLearn(@"pan", [item.representedObject unsignedLongLongValue]);
+}
+
+- (void)midiForgetFromMenu:(NSMenuItem*)item
+{
+    if (self.onMidiForget != nil)
+        self.onMidiForget([item.representedObject unsignedLongLongValue]);
 }
 
 - (void)addBuiltinInsertFromMenu:(NSMenuItem*)item

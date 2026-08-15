@@ -26,7 +26,11 @@ inline constexpr int projectFormatMajor = 1;
 /// 1.3 (Phase 14): a channel carries sampler zones — the mapped samples the
 /// builtin sampler plays, each naming an audio asset by id. Additive: earlier
 /// files have none and read back with an empty program.
-inline constexpr int projectFormatMinor = 3;
+///
+/// 1.4 (Phase 16): the project carries MIDI controller mappings — hardware
+/// controls bound to parameters by registry key. Additive: earlier files
+/// have none.
+inline constexpr int projectFormatMinor = 4;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

@@ -21,7 +21,17 @@ namespace incdaw::engine {
 ///   - the envelope is a real ADSR with a release stage, so voices are stolen
 ///     from the quietest release rather than cut off mid-note.
 ///   - voice stealing prefers released voices, then the oldest.
-class SimpleSynth final : public Instrument {
+/// The reference synth's automatable parameters, in plain units.
+enum class SimpleSynthParam : std::uint32_t {
+    waveform       = 0,
+    gain           = 1,
+    attackSeconds  = 2,
+    decaySeconds   = 3,
+    sustainLevel   = 4,
+    releaseSeconds = 5,
+};
+
+class SimpleSynth final : public Instrument, public ParameterSink {
 public:
     static constexpr int maxVoices = 32;
 
@@ -32,6 +42,11 @@ public:
 
     [[nodiscard]] const char* name() const noexcept override { return "Reference Synth"; }
     [[nodiscard]] int activeVoiceCount() const noexcept override;
+
+    [[nodiscard]] ParameterSink* parameterSink() noexcept override { return this; }
+
+    /// Routes a plain value onto the matching setter. Realtime-safe.
+    void setParameter(std::uint32_t parameterId, double plainValue) noexcept override;
 
     // ── Parameters. Realtime-safe: written by the UI, read by the audio thread.
     void setWaveform(Waveform waveform) noexcept { waveform_.store(waveform, std::memory_order_relaxed); }

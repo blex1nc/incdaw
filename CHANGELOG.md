@@ -8,6 +8,48 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 16 — MIDI hardware and controller linking — PHASE 16 COMPLETE — 2026-08-16
+
+**Added**
+
+- `MidiMapping` in the model (project format **1.4**): a hardware control
+  bound to a parameter exactly the way an automation lane is — registry
+  key + target entity — plus a normalised, invertible output range.
+  Frozen v1.4 fixture; 1.3 declares its migration path.
+- `engine::MidiMapNode`: the hardware counterpart of the AutomationNode.
+  Mappings resolve at compile time through the SAME `resolveApplier` the
+  automation lanes use (the resolution was factored out, not duplicated),
+  ride the same graph, and write the same smoothed setters — a knob and a
+  lane cannot disagree about a parameter.
+- Instruments joined the parameter system: `Instrument::parameterSink`,
+  implemented by the Sampler (ADSR, filter, LFO — ids in `SamplerParam`)
+  and the reference synth; `InstrumentNode` surfaces it, and a lane or
+  mapping whose TARGET is a channel resolves to that channel's instrument.
+  `registerBuiltinInstruments()` mirrors the effects registration.
+- MIDI learn: the mixer context menu arms "MIDI Learn Volume/Pan"; the
+  MIDI input publishes its last CC through a packed atomic tap; the
+  shell's housekeeping completes the gesture as an undoable
+  `AddMidiMappingCommand` (re-learning a CC replaces its old binding,
+  undoably). "Forget MIDI Mappings" removes a node's bindings.
+
+**Exit criterion (docs/ROADMAP.md Phase 16) — MET and measured**
+
+- `MidiMappingTests.cpp`: three mapped CCs drive a mixer volume, a sampler
+  cutoff (instrument parameter through the channel target) and an insert's
+  gain (plugin parameter through the identical SinkApplier machinery
+  hosted plugins use) in one compiled graph's live MIDI — then the project
+  is saved, reloaded, recompiled, and the same knobs still work.
+
+**Deferred, recorded**
+
+- MIDI clock/sync and hardware feedback (LED echo) — need MIDI OUTPUT
+  device support in platform/, which does not exist yet. Listed in
+  HANDOFF as Phase 16 leftovers, non-blocking.
+
+**Tests**
+
+- 466 cases, 286,224 assertions, green in Debug and Release.
+
 ### Phase 15 — The builtin DSP suite — PHASE 15 COMPLETE — 2026-08-16
 
 **Added**

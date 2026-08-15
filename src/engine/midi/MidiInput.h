@@ -40,6 +40,24 @@ public:
                          FrameCount    frameCount,
                          SampleRate    sampleRate) noexcept;
 
+    /// The most recent control change, packed for MIDI learn: generation in
+    /// the high bits (from bit 24) | channel (8) | controller (8) | value
+    /// (8). Generation increments per CC, so the learn poller can tell "a
+    /// knob turned" from "nothing new". Zero until any CC arrives.
+    [[nodiscard]] std::uint64_t lastControlChange() const noexcept
+    {
+        return lastControl_.load(std::memory_order_relaxed);
+    }
+
+    static constexpr int controlChannelOf(std::uint64_t packed) noexcept
+    {
+        return static_cast<int>((packed >> 16) & 0xFFu);
+    }
+    static constexpr int controllerOf(std::uint64_t packed) noexcept
+    {
+        return static_cast<int>((packed >> 8) & 0xFFu);
+    }
+
     /// Messages dropped because the queue was full. Must be zero.
     [[nodiscard]] std::uint64_t droppedCount() const noexcept { return dropped_.load(std::memory_order_relaxed); }
 
@@ -73,6 +91,7 @@ private:
     std::atomic<std::uint64_t> received_{0};
     std::atomic<std::uint64_t> dropped_{0};
     std::atomic<std::uint64_t> late_{0};
+    std::atomic<std::uint64_t> lastControl_{0};
 };
 
 } // namespace incdaw::engine

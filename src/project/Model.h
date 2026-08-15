@@ -353,6 +353,28 @@ struct RoutingConnection {
     [[nodiscard]] friend bool operator==(const RoutingConnection&, const RoutingConnection&) = default;
 };
 
+// ── MIDI mappings ─────────────────────────────────────────────────────────────
+
+/// One hardware control bound to one parameter.
+///
+/// The parameter is named exactly the way an automation lane names its
+/// target — a registry key plus a target entity — so a mapped knob and an
+/// automation lane are interchangeable views of the same parameter system,
+/// and a mapping can drive anything a lane can (CLAUDE.md §22).
+struct MidiMapping {
+    EntityId    id;
+    int         midiChannel = -1;    ///< -1 matches any channel
+    int         controller  = 0;     ///< CC number
+    std::string parameterKey;        ///< ParameterRegistry key
+    EntityId    targetEntity;        ///< mixer node, channel, or insert slot
+
+    /// The mapped output range, normalised. min > max inverts the control.
+    double minValue = 0.0;
+    double maxValue = 1.0;
+
+    [[nodiscard]] friend bool operator==(const MidiMapping&, const MidiMapping&) = default;
+};
+
 // ── Project ───────────────────────────────────────────────────────────────────
 
 struct ProjectMetadata {
@@ -386,6 +408,8 @@ public:
     Clip&              addClip(ClipType type, EntityId track, EntityId source);
     AutomationLane&    addAutomationLane(EntityId target, std::string parameterKey);
     AudioAsset&        addAudioAsset(std::string path);
+    MidiMapping&       addMidiMapping(int controller, std::string parameterKey,
+                                      EntityId target);
     RoutingConnection& connect(EntityId source, EntityId destination);
 
     /// Puts an existing entity back where it was, keeping its id.
@@ -401,6 +425,7 @@ public:
     Clip&      insertClip(std::size_t index, Clip clip);
     MixerNode& insertMixerNode(std::size_t index, MixerNode node);
     AudioAsset& insertAudioAsset(std::size_t index, AudioAsset asset);
+    MidiMapping& insertMidiMapping(std::size_t index, MidiMapping mapping);
     RoutingConnection& insertRouting(std::size_t index, RoutingConnection connection);
 
     /// Removes an entity by id. False when there is nothing to remove.
@@ -414,6 +439,7 @@ public:
     bool removeClip(EntityId id) noexcept;
     bool removeMixerNode(EntityId id) noexcept;
     bool removeAudioAsset(EntityId id) noexcept;
+    bool removeMidiMapping(EntityId id) noexcept;
     bool removeRouting(EntityId id) noexcept;
 
     static constexpr std::size_t notFound = static_cast<std::size_t>(-1);
@@ -424,6 +450,7 @@ public:
     [[nodiscard]] std::size_t indexOfClip(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfMixerNode(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfAudioAsset(EntityId id) const noexcept;
+    [[nodiscard]] std::size_t indexOfMidiMapping(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfRouting(EntityId id) const noexcept;
 
     [[nodiscard]] std::vector<Track>&             tracks()      noexcept { return tracks_; }
@@ -433,6 +460,7 @@ public:
     [[nodiscard]] std::vector<Clip>&              clips()       noexcept { return clips_; }
     [[nodiscard]] std::vector<AutomationLane>&    automation()  noexcept { return automation_; }
     [[nodiscard]] std::vector<AudioAsset>&        audioAssets() noexcept { return audioAssets_; }
+    [[nodiscard]] std::vector<MidiMapping>&       midiMappings() noexcept { return midiMappings_; }
     [[nodiscard]] std::vector<RoutingConnection>& routing()     noexcept { return routing_; }
 
     [[nodiscard]] const std::vector<Track>&             tracks()      const noexcept { return tracks_; }
@@ -442,6 +470,7 @@ public:
     [[nodiscard]] const std::vector<Clip>&              clips()       const noexcept { return clips_; }
     [[nodiscard]] const std::vector<AutomationLane>&    automation()  const noexcept { return automation_; }
     [[nodiscard]] const std::vector<AudioAsset>&        audioAssets() const noexcept { return audioAssets_; }
+    [[nodiscard]] const std::vector<MidiMapping>&       midiMappings() const noexcept { return midiMappings_; }
     [[nodiscard]] const std::vector<RoutingConnection>& routing()     const noexcept { return routing_; }
 
     [[nodiscard]] EntityId masterMixerNode() const noexcept { return master_; }
@@ -477,6 +506,7 @@ private:
     std::vector<Clip>              clips_;
     std::vector<AutomationLane>    automation_;
     std::vector<AudioAsset>        audioAssets_;
+    std::vector<MidiMapping>       midiMappings_;
     std::vector<RoutingConnection> routing_;
 
     EntityId master_;
