@@ -860,3 +860,50 @@ system, MIT; AU next (native, no vendoring needed); VST3 after.
 
 **Date:** 2026-08-15
 **Status:** ACCEPTED
+
+---
+
+## D-028 — Hosted plugins reach the graph through an injected factory
+
+**Context:** the graph compiler lives in `project/` because it needs the
+project model, and `engine/` sits below it. Insert effects are hosted
+plugins, and everything about hosting one lives in `plugins/`, whose headers
+carry CLAP types. Compiling a strip's insert chain therefore looked like it
+required `project/` to include a plugin header — which would have put the
+CLAP C ABI in the include path of the serializer, the pattern compiler and
+every test that touches a project.
+
+**Options:**
+
+1. `project/` links and includes `plugins/`. Simplest; drags the plugin host
+   into every consumer of the project model, and makes a headless render tool
+   depend on a plugin ABI it may never use.
+2. Move insert compilation into `plugins/`. Splits one topology across two
+   layers; the compiler still has to know where the chain attaches.
+3. Inject the insert node factory into `GraphCompileOptions`, the way
+   `InstrumentFactory` already is. The compiler builds the topology and asks
+   for an `engine::Node` per slot; the shell supplies a factory backed by
+   `plugins::PluginInstanceManager`.
+
+**Chosen:** option 3.
+
+**Reason:** it is the pattern already established for instruments, and it
+makes the compiler's contract honest — an insert is *a node*, not *a plugin*.
+Built-in effects (Phase 15) will be inserts too, and they are not plugins at
+all. A factory that returns nullptr yields a pass-through slot and a compile
+warning, so a missing plugin costs its own slot and never the rest of the mix.
+
+**Tradeoffs:** the shell has to wire the factory (and link `incdaw_plugins`),
+and a caller that forgets gets a project whose inserts are silent — which is
+why the compiler emits a warning naming each skipped slot rather than
+dropping it quietly. The `std::function` indirection is paid once per slot at
+compile time, never on the audio thread.
+
+**Also decided here:** inserts run **pre-fader**. Everything reaching a strip
+is summed by the first insert, passed down the chain, and only then scaled by
+volume, panned, inverted and muted. A fader move must not change what a
+compressor hears. `tests/unit/PluginInsertTests.cpp` proves the ordering with
+a non-linear insert, and the test fails if the chain is wired after the strip.
+
+**Date:** 2026-08-15
+**Status:** ACCEPTED

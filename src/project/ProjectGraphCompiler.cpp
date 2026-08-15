@@ -98,6 +98,12 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     std::vector<EntityId>                           mixerIds;
     std::vector<engine::dsp::MixerStripNode*>       stripNodes;
 
+    /// Where signal ENTERS a mixer node: the head of its insert chain, or the
+    /// strip itself when it has no inserts. Separate from `stripIndices`,
+    /// which is where signal LEAVES. Collapsing the two would route a send
+    /// into the destination's fader and past its plugins.
+    std::unordered_map<EntityId, engine::NodeIndex> stripInputIndices;
+
     engine::NodeIndex master = engine::invalidNode;
 
     for (const MixerNode& node : project.mixerNodes()) {
@@ -119,6 +125,50 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         const auto index = builder.addNode(std::move(strip));
         stripIndices.emplace(node.id, index);
 
+        // ── This strip's insert chain ────────────────────────────────────
+        // Inserts run BEFORE the fader: everything arriving at the strip is
+        // summed by the first insert, handed down the chain, and only then
+        // scaled by volume, panned, inverted and muted. A fader move must
+        // not change what a compressor hears.
+        std::vector<engine::NodeIndex> chain;
+
+        for (const PluginSlot& slot : node.inserts) {
+            if (slot.bypassed)
+                continue;   // bypass is absence, not a node multiplying by one
+
+            if (!options.insertFactory) {
+                compiled.warnings.push_back("insert \"" + slot.plugin.toString() + "\" on \""
+                                            + node.name + "\" is silent: this build has no "
+                                            + "plugin host");
+                continue;
+            }
+
+            std::string insertError;
+            auto insertNode = options.insertFactory(slot, insertError);
+
+            if (insertNode == nullptr) {
+                // Pass-through, not silence and not a failed compile: a
+                // missing plugin must never cost the user the rest of the mix.
+                compiled.warnings.push_back("insert \"" + slot.plugin.toString() + "\" on \""
+                                            + node.name + "\" is bypassed: " + insertError);
+                continue;
+            }
+
+            chain.push_back(builder.addNode(std::move(insertNode)));
+        }
+
+        engine::NodeIndex chainInput = index;
+
+        if (!chain.empty()) {
+            for (std::size_t position = 0; position + 1 < chain.size(); ++position)
+                builder.connect(chain[position], chain[position + 1]);
+
+            builder.connect(chain.back(), index);
+            chainInput = chain.front();
+        }
+
+        stripInputIndices.emplace(node.id, chainInput);
+
         mixerIds.push_back(node.id);
         stripNodes.push_back(handle);
 
@@ -139,12 +189,23 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         stripNodes.back() = nullptr;
     }
 
+    // Where anything that reaches the master directly enters it: the head of
+    // the master's insert chain. A signal that skipped it would be the one
+    // thing in the project a master-bus limiter could not catch.
+    engine::NodeIndex masterInput = master;
+
+    if (const auto found = stripInputIndices.find(project.masterMixerNode());
+        found != stripInputIndices.end())
+        masterInput = found->second;
+
     // ── Routing between mixer nodes ─────────────────────────────────────────
     for (const RoutingConnection& connection : project.routing()) {
+        // Out of the source's fader, into the head of the destination's
+        // insert chain.
         const auto source      = stripIndices.find(connection.source);
-        const auto destination = stripIndices.find(connection.destination);
+        const auto destination = stripInputIndices.find(connection.destination);
 
-        if (source == stripIndices.end() || destination == stripIndices.end())
+        if (source == stripIndices.end() || destination == stripInputIndices.end())
             continue;   // an edge naming something that is not a mixer node
 
         if (connection.sidechain)
@@ -196,10 +257,11 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
         const auto strip = builder.addNode(std::move(channelStrip));
 
-        const auto destination = stripIndices.find(channel.outputMixerNode);
+        const auto destination = stripInputIndices.find(channel.outputMixerNode);
 
         builder.connect(source, strip);
-        builder.connect(strip, destination != stripIndices.end() ? destination->second : master);
+        builder.connect(strip,
+                        destination != stripInputIndices.end() ? destination->second : masterInput);
 
         channelIds.push_back(channel.id);
         instrumentNodes.push_back(handle);
@@ -371,10 +433,10 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 continue;   // an empty node would render nothing at some cost
 
             const auto source      = builder.addNode(std::move(node));
-            const auto destination = stripIndices.find(track.outputMixerNode);
+            const auto destination = stripInputIndices.find(track.outputMixerNode);
 
-            builder.connect(source, destination != stripIndices.end() ? destination->second
-                                                                      : master);
+            builder.connect(source, destination != stripInputIndices.end() ? destination->second
+                                                                           : masterInput);
         }
     }
 
@@ -385,7 +447,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     if (options.monitorRing != nullptr && options.monitorChannelCount > 0) {
         const auto monitor = builder.addNode(std::make_unique<engine::InputMonitorNode>(
             options.monitorRing, options.monitorChannelCount));
-        builder.connect(monitor, master);
+        builder.connect(monitor, masterInput);
     }
 
     // ── Automation ──────────────────────────────────────────────────────────

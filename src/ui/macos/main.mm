@@ -21,6 +21,8 @@
 #include "app/commands/RecordingCommands.h"
 #include "engine/AudioEngine.h"
 #include "platform/SystemInfo.h"
+#include "plugins/PluginInstanceManager.h"
+#include "plugins/PluginRegistry.h"
 #include "project/Model.h"
 #include "project/PatternCompiler.h"
 #include "project/ProjectGraphCompiler.h"
@@ -65,6 +67,25 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
         note.value    = 70 + (index % 4) * 15;
         events.push_back(note);
     }
+}
+
+/// Where INCDAW keeps state that belongs to the installation rather than to a
+/// project: the plugin catalogue today. Empty when the directory cannot be
+/// created, which callers treat as "no cache", never as a failure to launch.
+std::filesystem::path incdawSupportDirectory()
+{
+    NSString* base = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,
+                                                          NSUserDomainMask, YES) firstObject];
+    if (base == nil)
+        return {};
+
+    std::filesystem::path directory{base.UTF8String};
+    directory /= "INCDAW";
+
+    std::error_code failed;
+    std::filesystem::create_directories(directory, failed);
+
+    return failed ? std::filesystem::path{} : directory;
 }
 
 } // namespace
@@ -117,6 +138,15 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
 
     /// Write-mode automation recording (app/AutomationWriteSession.h).
     app::AutomationWriteSession _autoWrite;
+
+    /// The plugin catalogue, and the libraries hosted from it.
+    ///
+    /// Both outlive every graph, deliberately: a PluginNode's instance calls
+    /// back into its library when it is destroyed, and graphs are retired
+    /// asynchronously (plugins/PluginInstanceManager.h). The registry is loaded
+    /// from disk at launch and never scans on the startup path.
+    plugins::PluginRegistry                        _pluginRegistry;
+    std::unique_ptr<plugins::PluginInstanceManager> _pluginInstances;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -126,6 +156,15 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
     _project      = std::make_unique<project::Project>();
     _registry     = std::make_unique<app::CommandRegistry>(*_project);
     _diskStreamer = std::make_unique<engine::DiskStreamer>();
+
+    // The plugin catalogue is read from a file; launching touches no plugin
+    // binary at all, because startup time must not scale with the size of a
+    // plugin collection (docs/PLUGIN_HOST.md §3). A missing file is the normal
+    // first-run state, not an error.
+    if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty())
+        (void)_pluginRegistry.load(support / "plugins.tsv");
+
+    _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
 
     const project::EntityId channelId = _project->addChannel("Channel 1").id;
     const project::EntityId patternId = _project->addPattern("Pattern 1").id;
@@ -780,6 +819,24 @@ void addStarterPhrase(std::vector<project::MidiEvent>& events)
         options.monitorRing         = _audio->monitorRing();
         options.monitorChannelCount = _audio->inputChannels();
     }
+
+    // Hosted plugins reach the graph through this factory and nothing else:
+    // `project/` compiles the topology without knowing what a CLAP is
+    // (docs/DECISIONS.md D-028). The manager outlives every graph it feeds.
+    plugins::PluginInstanceManager* instances  = _pluginInstances.get();
+    const double                    sampleRate = _audio->sampleRate();
+    const auto maxFrames = static_cast<std::uint32_t>(_audio->maxServiceableBlockSize());
+
+    options.insertFactory = [instances, sampleRate, maxFrames](
+                                const project::PluginSlot& slot,
+                                std::string& error) -> std::unique_ptr<engine::Node> {
+        if (instances == nullptr) {
+            error = "plugin host unavailable";
+            return nullptr;
+        }
+
+        return instances->createInsert(slot.plugin, sampleRate, maxFrames, error);
+    };
 
     auto compiled = project::compileProjectGraph(*_project, _audio->transport().tempoMap(), options);
     if (!compiled) {

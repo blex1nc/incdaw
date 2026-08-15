@@ -64,6 +64,35 @@ Wraps one loaded plugin behind a format-agnostic interface. The engine knows
 only this interface; nothing above `plugins/` ever sees a CLAP, AU, or VST3
 type.
 
+### PluginInstanceManager
+
+Owns the loaded libraries for the application's lifetime, keyed by path. A
+`PluginNode` owns its instance, but destroying that instance calls back into
+the library it came from, and graphs are rebuilt on every edit and retired
+asynchronously — a library owned by a graph would be unloaded while a node
+from it was still queued for destruction. Two instances of the same plugin
+therefore share one opened binary, and no binary is closed while the
+application runs.
+
+### Inserts in the graph
+
+A `MixerNode`'s `inserts` are compiled into a chain in front of its strip:
+
+    incoming edges → insert[0] → insert[1] → … → strip (fader, pan, mute)
+
+Inserts run **pre-fader** (docs/DECISIONS.md D-028): a fader move must not
+change what a compressor hears. The compiler keeps two index maps per mixer
+node — where signal *enters* (the head of the chain) and where it *leaves*
+(the strip) — because a send routed into the destination's fader would
+bypass its plugins.
+
+`project/` never includes a plugin header. The compiler asks
+`GraphCompileOptions::insertFactory` for an `engine::Node` per slot, and the
+shell supplies a factory backed by the instance manager. A bypassed slot is
+not instantiated at all; a slot the factory cannot build becomes a
+pass-through and a named compile warning, never silence and never a failed
+compile.
+
 ---
 
 ## 4. Isolation strategy

@@ -73,6 +73,7 @@ add_library(incdaw_plugins STATIC
     plugins/PluginIdentifier.cpp
     plugins/PluginScan.cpp
     plugins/PluginRegistry.cpp
+    plugins/PluginInstanceManager.cpp
     plugins/clap/ClapLibrary.cpp)
 target_include_directories(incdaw_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -137,8 +138,12 @@ if(APPLE)
         ui/macos/PlaylistView.mm
         ui/macos/MixerView.mm
         ui/macos/AudioEditorView.mm)
+    # incdaw_plugins is linked directly: the shell owns the plugin registry and
+    # the instance manager, and injects the insert factory into the graph
+    # compiler (docs/DECISIONS.md D-028). project/ deliberately does not link
+    # it — the factory is how a hosted plugin reaches the graph.
     target_link_libraries(INCDAW
-        PRIVATE incdaw_app incdaw_warnings
+        PRIVATE incdaw_app incdaw_plugins incdaw_warnings
                 "-framework Cocoa"
                 "-framework Metal"
                 "-framework QuartzCore")

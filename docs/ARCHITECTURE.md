@@ -240,6 +240,12 @@ and pan use the same arithmetic the mixer does. The signal path is
 instrument → channel strip → mixer track → sends/buses → master, and a routing
 cycle is refused by the graph builder rather than broken arbitrarily.
 
+Since Phase 13 a mixer node's insert chain compiles in front of its strip, so
+the full path through a track is inserts → fader → pan → mute → outputs. The
+insert nodes themselves are built by an injected factory (D-028): the compiler
+places `engine::Node`s and never learns what a plugin is, which is also what
+lets Phase 15's built-in effects be inserts without being plugins.
+
 ### The editors above it
 
 Every editing pane follows the same shape: a headless model holding geometry and

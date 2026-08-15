@@ -54,6 +54,19 @@ using InstrumentFactory = std::function<std::unique_ptr<engine::Instrument>(cons
 /// INCDAW currently has.
 [[nodiscard]] InstrumentFactory defaultInstrumentFactory();
 
+/// Builds the render-graph node for one insert slot.
+///
+/// Injected for the same reason `InstrumentFactory` is, and for one more:
+/// `project/` must never include a CLAP header (docs/DECISIONS.md D-028). The
+/// factory hands back an `engine::Node`, so the compiler can wire a hosted
+/// plugin into the graph while knowing nothing about plugin formats.
+///
+/// Returning nullptr makes the slot a pass-through; `error` is then recorded
+/// as a compile warning. A plugin that will not load must not stop the project
+/// from playing.
+using InsertFactory =
+    std::function<std::unique_ptr<engine::Node>(const PluginSlot& slot, std::string& error)>;
+
 struct GraphCompileOptions {
     engine::SampleRate sampleRate   = 48000.0;
     engine::FrameCount maxBlockSize = 512;
@@ -91,6 +104,11 @@ struct GraphCompileOptions {
     std::uint64_t      randomSeed   = 0;
 
     InstrumentFactory  instrumentFactory;
+
+    /// Builds mixer insert nodes. Unset means every insert slot is a
+    /// pass-through — which is what a build without plugin hosting, and every
+    /// test that does not care about it, wants.
+    InsertFactory      insertFactory;
 
     /// The parameter system automation resolves keys against. Null uses the
     /// built-ins ("volume", "pan"); tests and later phases register more.

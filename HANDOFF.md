@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.1
-Status: PHASES 0-11 COMPLETE / PHASE 12: RECORDING, STREAMING AND THE EDITOR WORK
+Version: 2.2
+Status: PHASES 0-11 COMPLETE / PHASE 12 FUNCTIONALLY DONE / PHASE 13 PARTS 1-4 DONE
 Last updated: 2026-08-15
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1156,12 +1156,20 @@ recording and the Audio Logger all work. What remains in it is polish):
   spawning moved to platform/ChildProcess when the layering checker
   objected, correctly).
 
+  Phase 13 part 4 is DONE: a mixer node's inserts compile into a chain in
+  front of its strip, PRE-FADER. The compiler keeps separate input and
+  output indices per mixer node — signal enters at the head of the chain
+  and leaves at the strip — so channels, audio tracks, sends and the input
+  monitor all arrive ahead of the destination's plugins. Insert nodes come
+  from an injected `GraphCompileOptions::insertFactory` returning an
+  engine::Node, so project/ still includes no plugin header (D-028);
+  plugins::PluginInstanceManager owns the ClapLibraries for the app's
+  lifetime and the shell injects the factory on every rebuild. A bypassed
+  slot is never instantiated; an unbuildable one is a pass-through plus a
+  named warning. 9 tests, including one that fails if the chain is wired
+  after the fader.
+
   Phase 13 continues, in dependency order:
-    - MODEL + COMPILER wiring: MixerNode gains an insert list (serialized);
-      ProjectGraphCompiler routes a strip's incoming edges through its
-      insert chain (needs separate input/output index maps); a
-      PluginInstanceManager owning ClapLibraries for the app's lifetime
-      (PluginNode's library must outlive it — header documents this)
     - parameter discovery -> ParameterRegistry (generic automation, §5)
     - state save/load into the project (§6), latency reporting -> PDC
     - editor hosting (§7), then AU, then VST3 (D-007 order)
@@ -1169,6 +1177,15 @@ recording and the Audio Logger all work. What remains in it is polish):
 
 Things to be careful about:
 
+  - third_party/ is gitignored: a fresh clone or worktree has neither
+    doctest nor the CLAP headers, and the build fails on the test target
+    and on plugins/ until both are fetched (HANDOFF section 5 has the
+    doctest command; D-027 has CLAP's).
+  - VERIFIED STILL TRUE: no menu action saves a project. ProjectFile works
+    and is tested, but the app never calls it — the INCDAW target does not
+    even pull ProjectFile.cpp.o out of the archive. Everything a session
+    produces is lost on quit. This is the largest gap between "the code
+    works" and "the application works".
   - tests/fixtures/v1.1/ does not exist. Format 1.1 is covered only by the
     save/load round trip, which proves the code agrees with itself and nothing
     more. docs/PROJECT_FORMAT.md §2 requires a hand-written fixture before 1.1

@@ -8,6 +8,42 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 4) — Inserts in the compiled graph — 2026-08-15
+
+**Added**
+
+- `plugins/PluginInstanceManager` — owns loaded plugin libraries for the
+  application's lifetime, keyed by path. Two instances of a plugin share one
+  opened binary, and no binary is closed while the app runs: a PluginNode's
+  instance calls back into its library when destroyed, and graphs are retired
+  asynchronously.
+- `GraphCompileOptions::insertFactory` — a mixer node's `inserts` now compile
+  into a chain in front of its strip. The factory returns an `engine::Node`,
+  so `project/` places hosted plugins in the graph without including a plugin
+  header (docs/DECISIONS.md D-028).
+- The compiler keeps separate input and output indices per mixer node: signal
+  enters at the head of the insert chain and leaves at the strip. Channels,
+  audio tracks, sends and the input monitor all now arrive ahead of the
+  destination's plugins rather than behind them.
+- The shell loads the plugin catalogue from Application Support at launch
+  (touching no plugin binary) and injects the factory into every rebuild.
+
+**Behaviour**
+
+- Inserts run pre-fader: a fader move does not change what a compressor hears.
+- A bypassed slot is not instantiated at all. A slot that cannot be built is a
+  pass-through plus a named compile warning — a missing plugin costs its own
+  slot, never the rest of the mix.
+
+**Tests**
+
+- 9 new cases (386 total, 160,673 assertions, green in Debug and Release):
+  chain order, pre-fader placement proven with a non-linear insert (and shown
+  to fail when the chain is wired after the strip), bypass, one node per slot
+  regardless of source count, unbuildable slot, host-less build, and the
+  end-to-end case — a real hosted CLAP as a mixer insert, allocation-free
+  under the realtime guard.
+
 ### Phase 13 (part 3) — A plugin in the graph — 2026-08-15
 
 **Added**
