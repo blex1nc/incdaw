@@ -8,6 +8,8 @@
 
 #include "doctest.h"
 
+#include "app/CommandRegistry.h"
+#include "app/commands/SamplerCommands.h"
 #include "engine/audio/SampleCache.h"
 #include "engine/core/AudioBufferPool.h"
 #include "engine/transport/TempoMap.h"
@@ -293,6 +295,97 @@ TEST_CASE("an unknown builtin uid is a warning and a silent channel")
     REQUIRE(compiled);
     CHECK(!compiled.warnings.empty());
     CHECK(compiled.instrumentFor(fixture.channel) == nullptr);
+}
+
+TEST_CASE("loading a sample makes the channel a sampler, undoably")
+{
+    ScratchDirectory scratch{"load-command"};
+    const fs::path wav = writeTestWav(scratch.path, "snare.wav", 48000.0);
+
+    project::Project project;
+    const auto channel = project.addChannel("Snare").id;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::LoadSampleCommand>(channel, wav.string())));
+
+    {
+        const project::Channel* loaded = project.findChannel(channel);
+        CHECK(loaded->instrument == plugins::builtinSampler());
+        REQUIRE(loaded->samplerZones.size() == 1);
+
+        REQUIRE(project.audioAssets().size() == 1);
+        const project::AudioAsset& asset = project.audioAssets()[0];
+        CHECK(loaded->samplerZones[0].asset == asset.id);
+
+        // The header's metadata, not zeroes: the browser and the relinker
+        // read these without opening the file.
+        CHECK(asset.sampleRate == doctest::Approx(48000.0));
+        CHECK(asset.frameCount == 4800);
+        CHECK(asset.channelCount == 1);
+    }
+
+    SUBCASE("undo removes the asset it created; redo brings back the same id")
+    {
+        const project::EntityId assetId = project.audioAssets()[0].id;
+
+        REQUIRE(registry.undo());
+        CHECK(project.findChannel(channel)->samplerZones.empty());
+        CHECK(!project.findChannel(channel)->instrument.isValid());
+        CHECK(project.audioAssets().empty());
+
+        REQUIRE(registry.redo());
+        REQUIRE(project.audioAssets().size() == 1);
+        CHECK(project.audioAssets()[0].id == assetId);
+        CHECK(project.findChannel(channel)->samplerZones[0].asset == assetId);
+    }
+
+    SUBCASE("a second channel loading the same file shares the asset")
+    {
+        const auto second = project.addChannel("Snare 2").id;
+        REQUIRE(registry.execute(
+            std::make_unique<app::LoadSampleCommand>(second, wav.string())));
+
+        CHECK(project.audioAssets().size() == 1);
+
+        // Undoing the second load must NOT take the shared asset with it.
+        REQUIRE(registry.undo());
+        CHECK(project.audioAssets().size() == 1);
+        REQUIRE(project.findChannel(channel)->samplerZones.size() == 1);
+    }
+
+    SUBCASE("the loaded channel plays through the compiler")
+    {
+        project.findPattern(project.addPattern("P").id)
+            ->contentFor(channel)
+            .events.push_back(noteAtZero());
+
+        const engine::TempoMap map{120.0, 48000.0};
+
+        project::GraphCompileOptions options;
+        options.maxBlockSize = 256;
+
+        const auto compiled = project::compileProjectGraph(project, map, options);
+        REQUIRE(compiled);
+        CHECK(compiled.warnings.empty());
+        CHECK(renderedPeak(compiled) > 0.0f);
+    }
+}
+
+TEST_CASE("loading an unreadable file refuses cleanly, mutating nothing")
+{
+    ScratchDirectory scratch{"load-command-missing"};
+
+    project::Project project;
+    const auto channel = project.addChannel("Snare").id;
+    app::CommandRegistry registry{project};
+
+    CHECK(!registry.execute(std::make_unique<app::LoadSampleCommand>(
+        channel, (scratch.path / "missing.wav").string())));
+
+    CHECK(project.audioAssets().empty());
+    CHECK(!project.findChannel(channel)->instrument.isValid());
+    CHECK(project.findChannel(channel)->samplerZones.empty());
+    CHECK(!registry.canUndo());
 }
 
 TEST_CASE("the builtin synth identity builds a SimpleSynth")

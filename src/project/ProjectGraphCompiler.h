@@ -91,6 +91,11 @@ struct GraphCompileOptions {
     /// application, like the streamer.
     engine::SampleCache* sampleCache = nullptr;
 
+    /// Frames of a streamed sampler zone kept resident (the "head") so a note
+    /// starts instantly while the disk window catches up. ~1.4 s at 48 kHz.
+    /// Tests shrink it to force the hand-over quickly.
+    engine::FrameCount samplerHeadFrames = 65536;
+
     /// Input monitoring: when set, an InputMonitorNode draining this ring
     /// feeds the master strip. The ring is the engine's and outlives every
     /// graph; `monitorChannelCount` is the input channel count at compile

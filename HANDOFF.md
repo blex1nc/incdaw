@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.3
-Status: PHASES 0-13 COMPLETE / PHASE 14 PARTS 1-3 DONE
+Version: 2.4
+Status: PHASES 0-14 COMPLETE / PHASE 15 NEXT
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1289,14 +1289,30 @@ recording and the Audio Logger all work. What remains in it is polish):
     topology); unknown builtin uid -> warning + silent channel. Cross-rate
     zones are ALLOWED (sampler repitches by rate); clips still refuse.
 
-  Phase 14 continues, in dependency order:
-    - a minimal UI to load a sample onto a channel (channel rack context
-      menu -> open panel -> AddAudioAsset + set builtinSampler identity +
-      a default zone; must be a Command for undo)
-    - per-zone envelopes, filters, LFOs (roadmap order)
-    - disk streaming for long samples (DiskStreamer exists from Phase 12)
-    - the multisample exit criterion run: velocity layers streaming from
-      disk without underruns
+  PHASE 14 IS COMPLETE (2026-08-16). Parts 4-6 in one session:
+    - LoadSampleCommand + Channel Rack "Load Sample…" (undoable; asset
+      shared if the file is already in the project; redo keeps the id).
+    - Per-voice state-variable filter (off/LP/HP/BP, cutoff, resonance)
+      and one retriggered sine LFO (depth-controlled pitch and cutoff
+      destinations). Realtime-safe setters, like the envelope. NOT yet
+      per-zone: filter/LFO/envelope are per-instrument. NO UI for filter/
+      LFO parameters yet — engine + setters only.
+    - Streamed zones: engine/instrument/SamplerStream.{h,cpp}. Head
+      (options.samplerHeadFrames, default 65536) decoded resident + pool
+      of 4 AudioStreams per zone, claimed wait-free at note-on, windows
+      steered to the hand-over point. More held notes than slots degrade
+      to head-only voices (silent past the head), never block/allocate.
+      Forward unlooped zones stream past the clip threshold; looped and
+      reversed zones preload whole regardless of size (a loop must be
+      resident). Compiler decides; engine enforces forward-only.
+    - EXIT CRITERION MET, measured in SamplerStreamingTests.cpp: velocity
+      layers across the keyboard, ~3 s streamed, ZERO underruns (counted
+      by the streams), late-window RMS at the exact expected layer mix.
+      445 cases / 177,464 assertions green in Debug and Release.
+    Remaining sampler niceties (recorded, non-blocking): per-zone
+    envelopes/filters/LFOs, more LFO waveforms, streamed-zone loops
+    (requires resident loop span), a zone-mapping editor UI, filter/LFO
+    parameter UI + automation registration (ParameterRegistry).
 
 Things to be careful about:
 

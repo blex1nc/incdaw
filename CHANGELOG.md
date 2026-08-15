@@ -8,6 +8,46 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 14 (parts 4–6) — Loading, filter/LFO, disk streaming — PHASE 14 COMPLETE — 2026-08-16
+
+**Added**
+
+- `LoadSampleCommand` and the Channel Rack's "Load Sample…" context menu
+  item: one undoable gesture ensures an AudioAsset (probing the header for
+  metadata), gives the channel the builtin sampler identity and writes a
+  full-range zone rooted at middle C. Undo removes the asset only if the
+  command created it; a file already in the project is shared, not
+  duplicated, and redo replays the same asset id.
+- Per-voice state-variable filter (off/lowpass/highpass/bandpass, cutoff,
+  resonance) and one retriggered sine LFO with depth-controlled pitch and
+  cutoff destinations — realtime-safe atomic setters, per-voice filter
+  state, block-rate coefficient unless cutoff is modulated.
+- **Streamed sampler zones** (`engine::SamplerZoneStream`): the classic
+  head-plus-pool design — the first `samplerHeadFrames` (~1.4 s) live
+  decoded in RAM so a note starts instantly; past the head, a voice reads
+  from one of 4 pooled `AudioStream`s whose window was steered to the
+  hand-over point at note-on. Slots are claimed wait-free; more held notes
+  than slots degrade to head-only voices rather than blocking or
+  allocating. Forward, unlooped zones stream; looped and reversed zones
+  preload whole (a loop must be resident to be seamless). The compiler
+  applies the same size threshold as clips.
+
+**Exit criterion (docs/ROADMAP.md Phase 14) — MET and measured**
+
+- `SamplerStreamingTests.cpp` holds a chord across the keyboard (−12, root,
+  +12) split over two velocity layers, streaming ~3 s from disk: zero
+  underruns counted by the streams themselves, and the late-window RMS sits
+  at the exact expected mix of the correct layers' constants.
+
+**Tests**
+
+- 445 cases, 177,464 assertions, green in Debug and Release. New coverage:
+  load command (undo/redo/shared-asset/refusal), filter attenuation and
+  passband, LFO depth-zero bit-identity, extreme-resonance finiteness,
+  instant start from the head, pool exhaustion degradation and slot
+  reclamation, compiler-level end-to-end streaming at the exact expected
+  level.
+
 ### Phase 14 (part 3) — The sampler reaches the model — 2026-08-16
 
 **Added**

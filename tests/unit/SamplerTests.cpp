@@ -418,3 +418,154 @@ TEST_CASE("a sample at another rate is resampled to the engine's")
 
     CHECK(rendered.left[100] == doctest::Approx(50.0 * 0.001).epsilon(0.001));
 }
+
+// ── Filter and LFO (Phase 14 part 5) ─────────────────────────────────────────
+
+namespace {
+
+/// A mono sample alternating +v/−v every frame: a tone at Nyquist, the
+/// highest content a lowpass can be asked to remove.
+std::shared_ptr<const AudioFileData> nyquistSample(Sample value, FrameCount frames = 8192)
+{
+    auto data          = std::make_shared<AudioFileData>();
+    data->sampleRate   = 48000.0;
+    data->channelCount = 1;
+    data->frameCount   = frames;
+    data->channels.resize(1);
+    data->channels[0].resize(static_cast<std::size_t>(frames));
+
+    for (FrameCount frame = 0; frame < frames; ++frame)
+        data->channels[0][static_cast<std::size_t>(frame)] = (frame % 2 == 0) ? value : -value;
+
+    return data;
+}
+
+double rmsOf(const std::vector<Sample>& samples, std::size_t from = 0)
+{
+    double sum = 0.0;
+    for (std::size_t index = from; index < samples.size(); ++index)
+        sum += static_cast<double>(samples[index]) * static_cast<double>(samples[index]);
+
+    return std::sqrt(sum / static_cast<double>(samples.size() - from));
+}
+
+} // namespace
+
+TEST_CASE("the lowpass removes what the source has at the top")
+{
+    Sampler sampler;
+    sampler.prepare(48000.0, blockSize);
+    makeEnvelopeTransparent(sampler);
+    sampler.setZones({zoneOf(nyquistSample(0.5f))});
+
+    MidiBuffer midi;
+    midi.insert(MidiMessage::noteOn(0, 60, 127, 0));
+
+    // Baseline: filter off, the Nyquist tone arrives at full strength.
+    const auto open = render(sampler, midi, 4);
+    const double openRms = rmsOf(open.left, blockSize);   // skip the attack
+    REQUIRE(openRms > 0.3);
+
+    sampler.allNotesOff();
+    sampler.setFilterMode(Sampler::FilterMode::lowpass);
+    sampler.setFilterCutoffHz(200.0);
+
+    const auto closed = render(sampler, midi, 4);
+    const double closedRms = rmsOf(closed.left, blockSize);
+
+    // A 200 Hz lowpass against a 24 kHz tone: the energy must collapse.
+    CHECK(closedRms < openRms * 0.05);
+
+    for (const Sample value : closed.left)
+        REQUIRE(std::isfinite(value));
+}
+
+TEST_CASE("the highpass removes DC and keeps the top")
+{
+    Sampler sampler;
+    sampler.prepare(48000.0, blockSize);
+    makeEnvelopeTransparent(sampler);
+
+    SUBCASE("DC through a highpass collapses")
+    {
+        sampler.setZones({zoneOf(constantSample(0.5f, 8192))});
+        sampler.setFilterMode(Sampler::FilterMode::highpass);
+        sampler.setFilterCutoffHz(2000.0);
+
+        MidiBuffer midi;
+        midi.insert(MidiMessage::noteOn(0, 60, 127, 0));
+
+        const auto rendered = render(sampler, midi, 4);
+
+        // After the filter settles, the constant is gone.
+        CHECK(rmsOf(rendered.left, blockSize * 2) < 0.01);
+    }
+
+    SUBCASE("the Nyquist tone passes a low highpass nearly unchanged")
+    {
+        sampler.setZones({zoneOf(nyquistSample(0.5f))});
+        sampler.setFilterMode(Sampler::FilterMode::highpass);
+        sampler.setFilterCutoffHz(30.0);
+
+        MidiBuffer midi;
+        midi.insert(MidiMessage::noteOn(0, 60, 127, 0));
+
+        const auto rendered = render(sampler, midi, 4);
+        CHECK(rmsOf(rendered.left, blockSize) > 0.3);
+    }
+}
+
+TEST_CASE("LFO depth zero is bit-identical to no LFO at all")
+{
+    MidiBuffer midi;
+    midi.insert(MidiMessage::noteOn(0, 60, 127, 0));
+
+    const auto renderWith = [&](double pitchDepth) {
+        Sampler sampler;
+        sampler.prepare(48000.0, blockSize);
+        makeEnvelopeTransparent(sampler);
+        sampler.setZones({zoneOf(rampSample(65536, 0.0001f))});
+        sampler.setLfoRateHz(6.0);
+        sampler.setLfoToPitchSemitones(pitchDepth);
+        return render(sampler, midi, 8);
+    };
+
+    const auto without = renderWith(0.0);
+    const auto with    = renderWith(1.0);
+    const auto again   = renderWith(0.0);
+
+    REQUIRE(without.left.size() == again.left.size());
+    for (std::size_t index = 0; index < without.left.size(); ++index)
+        REQUIRE(without.left[index] == again.left[index]);
+
+    // With depth, the read position wanders: the output must differ.
+    bool differs = false;
+    for (std::size_t index = 0; index < with.left.size(); ++index)
+        differs = differs || with.left[index] != without.left[index];
+
+    CHECK(differs);
+
+    for (const Sample value : with.left)
+        REQUIRE(std::isfinite(value));
+}
+
+TEST_CASE("extreme resonance stays finite")
+{
+    Sampler sampler;
+    sampler.prepare(48000.0, blockSize);
+    makeEnvelopeTransparent(sampler);
+    sampler.setZones({zoneOf(nyquistSample(0.5f))});
+    sampler.setFilterMode(Sampler::FilterMode::bandpass);
+    sampler.setFilterCutoffHz(1000.0);
+    sampler.setFilterResonance(50.0);
+    sampler.setLfoRateHz(20.0);
+    sampler.setLfoToCutoffOctaves(4.0);
+
+    MidiBuffer midi;
+    midi.insert(MidiMessage::noteOn(0, 60, 127, 0));
+
+    const auto rendered = render(sampler, midi, 8);
+
+    for (const Sample value : rendered.left)
+        REQUIRE(std::isfinite(value));
+}

@@ -316,12 +316,48 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
             std::vector<engine::SamplerZone> zones;
             for (const ChannelSamplerZone& spec : channel.samplerZones) {
-                auto audio = loadAsset(spec.asset);
-                if (audio == nullptr)
-                    continue;   // warned above; the zone is absent, not wrong
+                // The streaming decision mirrors the clip policy: long files
+                // stream when a streamer exists. Only forward, unlooped zones
+                // qualify — a loop has to be resident to be seamless, so
+                // looped and reversed zones preload whole regardless of size.
+                std::shared_ptr<engine::SamplerZoneStream> zoneStream;
+
+                if (options.diskStreamer != nullptr && !spec.reverse
+                    && spec.loopEnd <= spec.loopStart) {
+                    if (const std::string* path = assetPath(spec.asset)) {
+                        engine::AudioFileData header;
+                        if (engine::WavFile::probe(*path, header)
+                            && header.frameCount > options.streamingThresholdFrames
+                            && header.channelCount >= 1
+                            && header.channelCount
+                                   <= engine::SamplerZoneStream::maxSourceChannels) {
+                            std::string error;
+                            zoneStream = engine::SamplerZoneStream::create(
+                                *path, options.samplerHeadFrames, error);
+
+                            if (zoneStream == nullptr)
+                                compiled.warnings.push_back(
+                                    "sampler zone cannot stream " + *path + " (" + error
+                                    + "); preloading instead");
+                            else
+                                zoneStream->registerWith(*options.diskStreamer);
+                        }
+                    }
+                }
 
                 engine::SamplerZone zone;
-                zone.sample        = std::move(audio);
+
+                if (zoneStream != nullptr) {
+                    zone.sample = zoneStream->head();
+                    zone.stream = std::move(zoneStream);
+                } else {
+                    auto audio = loadAsset(spec.asset);
+                    if (audio == nullptr)
+                        continue;   // warned above; the zone is absent, not wrong
+
+                    zone.sample = std::move(audio);
+                }
+
                 zone.rootKey       = spec.rootKey;
                 zone.keyLow        = spec.keyLow;
                 zone.keyHigh       = spec.keyHigh;

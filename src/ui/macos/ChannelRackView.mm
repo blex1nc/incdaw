@@ -3,8 +3,11 @@
 #include "app/ChannelRackModel.h"
 #include "app/CommandRegistry.h"
 #include "app/commands/ChannelCommands.h"
+#include "app/commands/SamplerCommands.h"
 #include "app/commands/StepCommands.h"
 #include "project/Model.h"
+
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include <algorithm>
 #include <cmath>
@@ -298,6 +301,12 @@ enum class RackDrag { none, volume, paintSteps };
 
     NSMenu* menu = [[NSMenu alloc] init];
 
+    NSMenuItem* loadSample = [menu addItemWithTitle:@"Load Sample…"
+                                             action:@selector(loadSampleFromMenu:)
+                                      keyEquivalent:@""];
+    loadSample.target = self;
+    loadSample.representedObject = @(channelId.value());
+
     NSMenuItem* rename = [menu addItemWithTitle:@"Rename Channel…"
                                          action:@selector(renameFromMenu:)
                                   keyEquivalent:@""];
@@ -311,6 +320,24 @@ enum class RackDrag { none, volume, paintSteps };
     remove.representedObject = @(channelId.value());
 
     [NSMenu popUpContextMenu:menu withEvent:event forView:self];
+}
+
+- (void)loadSampleFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId channelId{[item.representedObject unsignedLongLongValue]};
+
+    NSOpenPanel* panel            = [NSOpenPanel openPanel];
+    panel.canChooseFiles          = YES;
+    panel.canChooseDirectories    = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.allowedContentTypes     = @[ [UTType typeWithFilenameExtension:@"wav"] ];
+    panel.prompt                  = @"Load";
+
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+        return;
+
+    [self commit:std::make_unique<app::LoadSampleCommand>(channelId,
+                                                          panel.URL.path.UTF8String)];
 }
 
 - (void)renameFromMenu:(NSMenuItem*)item

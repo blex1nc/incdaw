@@ -48,6 +48,7 @@ add_library(incdaw_engine STATIC
     engine/midi/NoteSequence.cpp
     engine/instrument/Instrument.cpp
     engine/instrument/Sampler.cpp
+    engine/instrument/SamplerStream.cpp
     engine/instrument/SimpleSynth.cpp
     engine/instrument/InstrumentNode.cpp
     engine/audio/SampleCache.cpp
@@ -117,6 +118,7 @@ add_library(incdaw_app STATIC
     app/PlaylistModel.cpp
     app/commands/NoteCommands.cpp
     app/commands/ChannelCommands.cpp
+    app/commands/SamplerCommands.cpp
     app/commands/PatternCommands.cpp
     app/commands/StepCommands.cpp
     app/commands/TrackCommands.cpp
@@ -150,7 +152,8 @@ if(APPLE)
         PRIVATE incdaw_app incdaw_plugins incdaw_warnings
                 "-framework Cocoa"
                 "-framework Metal"
-                "-framework QuartzCore")
+                "-framework QuartzCore"
+                "-framework UniformTypeIdentifiers")
     # ARC for the Objective-C++ shell. The C++ core is manually managed and
     # unaffected; only the UI layer holds Objective-C objects.
     target_compile_options(INCDAW PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
