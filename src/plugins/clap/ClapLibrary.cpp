@@ -293,6 +293,18 @@ std::unique_ptr<ClapInstance> ClapLibrary::create(const std::string& pluginId,
         return nullptr;
     }
 
+    // Latency is queried while activated, as the extension demands. Hostile
+    // input: an absurd report would make delay compensation build a giant
+    // delay line on every parallel path, so it is capped at ten seconds.
+    const auto* latency = static_cast<const clap_plugin_latency_t*>(
+        instance->plugin_->get_extension(instance->plugin_, CLAP_EXT_LATENCY));
+
+    if (latency != nullptr && latency->get != nullptr) {
+        const std::uint32_t reported = latency->get(instance->plugin_);
+        const auto          cap      = static_cast<std::uint32_t>(sampleRate * 10.0);
+        instance->latency_           = reported <= cap ? reported : cap;
+    }
+
     instance->processing_ = true;
     return instance;
 }

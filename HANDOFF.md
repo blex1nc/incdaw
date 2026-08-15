@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  398 test cases, 168,719 assertions, green in both Debug and Release.
+  401 test cases, 169,249 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1205,10 +1205,16 @@ recording and the Audio Logger all work. What remains in it is polish):
   no save/open action (the standing "largest gap"), so state capture is
   wired and tested at library level only.
 
+  Phase 13 part 7 is DONE: latency -> PDC. ClapInstance snapshots
+  CLAP_EXT_LATENCY at creation (while activated, capped at 10 s against
+  hostile reports); PluginNode::latencyFrames surfaces it into the engine's
+  EXISTING delay compensation (built in Phase 10 — insertDelayCompensation
+  was already there; part 7 only had to feed it). Proven against
+  tests/plugins/TestLatencyPlugin.cpp, a true 64-frame delay that reports
+  itself. NOT done: clap_host_latency.changed (mid-life latency change ->
+  recompile) and the manual per-instance offset — both in PLUGIN_HOST §8.
+
   Phase 13 continues, in dependency order:
-    - latency reporting -> PDC (Node::latencyFrames already exists; a
-      hosted plugin must report CLAP_EXT_LATENCY through it, and the graph
-      compiler must start compensating parallel paths)
     - editor hosting (§7), then AU, then VST3 (D-007 order). The editor
       bridge is also where params->flush() lands: today a value queued
       while the engine is idle waits for the next process call (D-029

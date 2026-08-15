@@ -8,6 +8,27 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 7) — Hosted plugin latency joins delay compensation — 2026-08-15
+
+**Added**
+
+- `ClapInstance` queries CLAP_EXT_LATENCY once, while activated, at creation
+  (capped at ten seconds against hostile reports); `PluginNode::latencyFrames`
+  surfaces it, and the graph's existing PDC (Phase 10) does the rest — no
+  plugin-specific code in the engine.
+- `tests/plugins/TestLatencyPlugin.cpp` — the suite's third CLAP plugin: a
+  TRUE 64-frame delay that also reports 64, so compensation is tested against
+  a plugin that behaves like a real look-ahead processor.
+
+**Tests**
+
+- 3 new cases (401 total, 169,249 assertions, green in Debug and Release):
+  the instance reports its latency (and none means zero); the exit criterion —
+  an impulse split between a hosted latent path and a direct path arrives
+  once, aligned, at the plugin's latency, with the un-compensated comb shown
+  first; a project whose master insert is latent reports the graph's total
+  latency.
+
 ### Phase 13 (part 6) — Plugin state: capture, the package, and restore — 2026-08-15
 
 **Added**

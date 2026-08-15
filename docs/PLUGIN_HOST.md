@@ -210,12 +210,25 @@ Rules:
 
 ## 8. Latency reporting
 
-- Each instance reports its latency in frames.
-- Latency feeds PDC at graph-compile time (docs/AUDIO_ENGINE.md §7).
-- A plugin that changes its latency while loaded triggers a background graph
-  recompile and atomic swap.
-- Plugins that report **wrong** latency are a known real-world problem; a manual
-  per-instance latency offset is provided as an escape hatch.
+Implemented:
+
+- Each instance reports its latency in frames: `ClapInstance` queries
+  CLAP_EXT_LATENCY once, while activated, at creation. Hostile input is
+  capped at ten seconds — an absurd report must not make PDC build a giant
+  delay line on every parallel path.
+- Latency feeds PDC at graph-compile time through the ordinary channel:
+  `PluginNode::latencyFrames` is just a node's latency, and the graph's
+  existing compensation (docs/AUDIO_ENGINE.md §7) aligns parallel paths with
+  no plugin-specific code in the engine. Proven end to end against the test
+  suite's own truly-latent plugin (a 64-frame delay that reports itself).
+
+Still to come:
+
+- A plugin that changes its latency while loaded (clap_host_latency.changed)
+  triggers a background graph recompile and atomic swap. Today the value is
+  a creation-time snapshot.
+- Plugins that report **wrong** latency are a known real-world problem; a
+  manual per-instance latency offset is provided as an escape hatch.
 
 ---
 

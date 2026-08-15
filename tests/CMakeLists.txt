@@ -38,7 +38,8 @@ add_executable(incdaw_tests
     unit/PluginRegistryTests.cpp
     unit/PluginInsertTests.cpp
     unit/PluginParameterTests.cpp
-    unit/PluginStateTests.cpp)
+    unit/PluginStateTests.cpp
+    unit/PluginLatencyTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.
@@ -58,17 +59,20 @@ target_compile_definitions(incdaw_tests PRIVATE
 # be tested against nothing: one well-behaved plugin, one hostile one.
 add_library(incdaw-testgain MODULE plugins/TestGainPlugin.cpp)
 add_library(incdaw-testcrash MODULE plugins/TestCrashPlugin.cpp)
+add_library(incdaw-testlatency MODULE plugins/TestLatencyPlugin.cpp)
 
-foreach(testplugin incdaw-testgain incdaw-testcrash)
+foreach(testplugin incdaw-testgain incdaw-testcrash incdaw-testlatency)
     set_target_properties(${testplugin} PROPERTIES PREFIX "" SUFFIX ".clap")
     target_include_directories(${testplugin} PRIVATE ${CMAKE_SOURCE_DIR}/third_party/clap)
 endforeach()
 
-add_dependencies(incdaw_tests incdaw-testgain incdaw-testcrash incdaw-pluginscan)
+add_dependencies(incdaw_tests incdaw-testgain incdaw-testcrash incdaw-testlatency
+                 incdaw-pluginscan)
 
 target_compile_definitions(incdaw_tests PRIVATE
     INCDAW_TESTGAIN_PLUGIN="$<TARGET_FILE:incdaw-testgain>"
     INCDAW_TESTCRASH_PLUGIN="$<TARGET_FILE:incdaw-testcrash>"
+    INCDAW_TESTLATENCY_PLUGIN="$<TARGET_FILE:incdaw-testlatency>"
     INCDAW_PLUGINSCAN_BINARY="$<TARGET_FILE:incdaw-pluginscan>")
 
 add_test(NAME unit COMMAND incdaw_tests)

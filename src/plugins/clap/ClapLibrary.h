@@ -99,6 +99,12 @@ public:
         return parameters_;
     }
 
+    /// Processing delay the plugin reported through CLAP_EXT_LATENCY at
+    /// creation, in frames. 0 for a plugin without the extension. Feeds
+    /// PluginNode::latencyFrames, and from there the graph's existing delay
+    /// compensation (docs/AUDIO_ENGINE.md §7).
+    [[nodiscard]] std::uint32_t latencyFrames() const noexcept { return latency_; }
+
     /// Captures the plugin's opaque state (CLAP_EXT_STATE). False when the
     /// plugin has no state extension, refuses, or writes beyond the size cap
     /// a hostile plugin is held to — the caller keeps its previous blob.
@@ -125,6 +131,7 @@ private:
     clap_host_t                host_{};
     bool                       processing_ = false;
     std::int64_t               steadyTime_ = 0;
+    std::uint32_t              latency_    = 0;
 
     /// 256 slots is every automatable parameter of a large plugin changing in
     /// one block — sized for the worst block, not the common one. Preallocated

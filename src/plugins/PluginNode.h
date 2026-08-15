@@ -66,6 +66,15 @@ public:
     /// through here (docs/PLUGIN_HOST.md §6).
     [[nodiscard]] engine::StateIO* stateIO() noexcept override { return instance_.get(); }
 
+    /// What the plugin reported through CLAP_EXT_LATENCY. The graph compiler
+    /// reads this like any node's latency, so a hosted plugin joins delay
+    /// compensation with no plugin-specific code in the engine.
+    [[nodiscard]] engine::FrameCount latencyFrames() const noexcept override
+    {
+        return instance_ != nullptr ? static_cast<engine::FrameCount>(instance_->latencyFrames())
+                                    : 0;
+    }
+
 private:
     std::unique_ptr<ClapInstance> instance_;
 };
