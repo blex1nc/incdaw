@@ -42,4 +42,9 @@ namespace incdaw::engine::dsp { class MixerStripNode; }
 /// Called when the user asks to start or stop playback (space bar).
 @property (nonatomic, copy) void (^onTransportToggle)(void);
 
+/// The plugins the user can add as inserts, from the registry the shell
+/// owns. Each entry: @{@"uid": ..., @"name": ...}. The view knows menus,
+/// not plugin catalogues.
+@property (nonatomic, copy) NSArray<NSDictionary*>* availableInserts;
+
 @end

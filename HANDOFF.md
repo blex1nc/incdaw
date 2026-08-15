@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  401 test cases, 169,249 assertions, green in both Debug and Release.
+  405 test cases, 169,280 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1213,6 +1213,14 @@ recording and the Audio Logger all work. What remains in it is polish):
   tests/plugins/TestLatencyPlugin.cpp, a true 64-frame delay that reports
   itself. NOT done: clap_host_latency.changed (mid-life latency change ->
   recompile) and the manual per-instance offset — both in PLUGIN_HOST §8.
+
+  Phase 13 part 8 is DONE: plugins reach the user. PluginCommands
+  (add/remove/bypass as undoable commands; the slot id survives redo, a
+  removed slot returns in place WITH its stateFile), the mixer context
+  menu's insert chain, File > Scan Plugins… through the bundled
+  out-of-process scanner (incdaw-pluginscan is copied into
+  INCDAW.app/Contents/MacOS at build). Insert reordering is NOT yet a
+  command; the chain order can only be built by add order today.
 
   Phase 13 continues, in dependency order:
     - editor hosting (§7), then AU, then VST3 (D-007 order). The editor

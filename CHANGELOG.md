@@ -8,6 +8,31 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 13 (part 8) — Plugins reach the user: scan, add, bypass, remove — 2026-08-15
+
+**Added**
+
+- `app/commands/PluginCommands` — AddInsertCommand (slot id minted once, so
+  redo keeps it and automation lanes stay valid), RemoveInsertCommand (the
+  whole slot comes back in PLACE with its stateFile — chain position is
+  audible order), SetInsertBypassedCommand (a no-op refuses to occupy an
+  undo step). Every insert edit is a command (CLAUDE.md §26).
+- The mixer strip's context menu grew the insert chain: Add Insert (from the
+  scanned catalogue, by display name), and per slot Bypass (checkmarked) and
+  Remove. The view knows menus, not catalogues — the shell hands it the list.
+- File > Scan Plugins…: scans a chosen directory (defaulting to the user's
+  CLAP folder) through the out-of-process scanner, persists plugins.tsv, and
+  refreshes the menu. The scanner binary now rides inside INCDAW.app, so
+  scanning works wherever the app is installed — a crashing plugin still
+  costs the child process, never the DAW.
+
+**Tests**
+
+- 4 new cases (405 total, 169,280 assertions, green in Debug and Release):
+  add/undo/redo with a stable slot id; refusal without occupying history;
+  remove restoring position and stateFile; bypass round trip and the no-op
+  refusal.
+
 ### The project as a document — Open, Save, Save As in the application — 2026-08-15
 
 **Added**

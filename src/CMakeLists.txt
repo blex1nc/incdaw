@@ -120,6 +120,7 @@ add_library(incdaw_app STATIC
     app/commands/TrackCommands.cpp
     app/commands/ClipCommands.cpp
     app/commands/MixerCommands.cpp
+    app/commands/PluginCommands.cpp
     app/commands/AutomationCommands.cpp
     app/commands/RecordingCommands.cpp
     app/commands/AudioEditCommands.cpp)
@@ -159,4 +160,13 @@ if(APPLE)
         MACOSX_BUNDLE_GUI_IDENTIFIER     "com.incdaw.INCDAW"
         MACOSX_BUNDLE_COPYRIGHT          "INCDAW"
         MACOSX_BUNDLE_INFO_PLIST         "${CMAKE_CURRENT_SOURCE_DIR}/ui/macos/Info.plist.in")
+
+    # The out-of-process scanner rides inside the bundle: scanning unknown
+    # plugins must never happen in the DAW's own process (PLUGIN_HOST §3),
+    # so the app needs the child binary wherever it is installed.
+    add_dependencies(INCDAW incdaw-pluginscan)
+    add_custom_command(TARGET INCDAW POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:incdaw-pluginscan>
+                $<TARGET_BUNDLE_CONTENT_DIR:INCDAW>/MacOS/incdaw-pluginscan)
 endif()

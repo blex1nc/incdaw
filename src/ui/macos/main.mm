@@ -158,6 +158,9 @@ std::filesystem::path incdawSupportDirectory()
     /// Where the project lives on disk. Empty until the first Save As or
     /// Open; Save falls back to Save As while it is.
     std::filesystem::path _projectPath;
+
+    /// The scanned plugin catalogue as menu fodder, built once at launch.
+    NSArray<NSDictionary*>* _availableInserts;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -177,6 +180,18 @@ std::filesystem::path incdawSupportDirectory()
 
     _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
     _parameters      = project::ParameterRegistry::withBuiltins();
+
+    // What the mixer's Add Insert menu offers: every scanned, non-blacklisted
+    // plugin, by display name. The view knows menus, not catalogues.
+    NSMutableArray<NSDictionary*>* available = [NSMutableArray array];
+    for (const plugins::PluginRegistry::Located& located : _pluginRegistry.plugins()) {
+        [available addObject:@{
+            @"uid":  @(located.plugin->id.c_str()),
+            @"name": @(located.plugin->name.empty() ? located.plugin->id.c_str()
+                                                    : located.plugin->name.c_str()),
+        }];
+    }
+    _availableInserts = available;
 
     const project::EntityId channelId = _project->addChannel("Channel 1").id;
     const project::EntityId patternId = _project->addPattern("Pattern 1").id;
@@ -274,6 +289,7 @@ std::filesystem::path incdawSupportDirectory()
 
     self.mixer.selectedChannelIdValue = channelId.value();
     self.mixer.hidden                 = YES;
+    self.mixer.availableInserts       = _availableInserts;
 
     self.audioEditor = [[INCDAWAudioEditorView alloc]
         initWithFrame:editorFrame
@@ -882,6 +898,61 @@ std::filesystem::path incdawSupportDirectory()
     _live = std::move(compiled);
 }
 
+// ── Plugins as a catalogue ───────────────────────────────────────────────────
+
+/// Scans a directory of .clap plugins through the out-of-process scanner
+/// bundled next to the executable, persists the catalogue, and refreshes the
+/// mixer's Add Insert menu. Scanning never runs a plugin in THIS process
+/// (docs/PLUGIN_HOST.md §3) — a crashing plugin costs the child, not the DAW.
+- (void)scanPlugins:(id)sender
+{
+    (void)sender;
+
+    NSString* scanner = [NSBundle.mainBundle pathForAuxiliaryExecutable:@"incdaw-pluginscan"];
+
+    if (scanner == nil) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Plugin scanner not found";
+        alert.informativeText = @"The incdaw-pluginscan helper is missing from the bundle.";
+        [alert runModal];
+        return;
+    }
+
+    NSOpenPanel* panel            = [NSOpenPanel openPanel];
+    panel.canChooseFiles          = NO;
+    panel.canChooseDirectories    = YES;
+    panel.allowsMultipleSelection = NO;
+    panel.prompt                  = @"Scan";
+
+    NSString* clapDirectory = [@"~/Library/Audio/Plug-Ins/CLAP" stringByExpandingTildeInPath];
+    if ([NSFileManager.defaultManager fileExistsAtPath:clapDirectory])
+        panel.directoryURL = [NSURL fileURLWithPath:clapDirectory];
+
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+        return;
+
+    const std::size_t scanned = _pluginRegistry.scanDirectory(
+        std::filesystem::path{panel.URL.path.UTF8String},
+        std::filesystem::path{scanner.UTF8String});
+
+    if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty())
+        (void)_pluginRegistry.save(support / "plugins.tsv");
+
+    NSMutableArray<NSDictionary*>* available = [NSMutableArray array];
+    for (const plugins::PluginRegistry::Located& located : _pluginRegistry.plugins()) {
+        [available addObject:@{
+            @"uid":  @(located.plugin->id.c_str()),
+            @"name": @(located.plugin->name.empty() ? located.plugin->id.c_str()
+                                                    : located.plugin->name.c_str()),
+        }];
+    }
+    _availableInserts           = available;
+    self.mixer.availableInserts = available;
+
+    NSLog(@"INCDAW: plugin scan ran %zu child scans; %lu plugins known", scanned,
+          static_cast<unsigned long>(available.count));
+}
+
 // ── The project as a document ────────────────────────────────────────────────
 
 - (void)saveProject:(id)sender
@@ -1279,6 +1350,8 @@ std::filesystem::path incdawSupportDirectory()
     [fileMenu addItem:[NSMenuItem separatorItem]];
     [fileMenu addItemWithTitle:@"Save" action:@selector(saveProject:) keyEquivalent:@"s"];
     [fileMenu addItemWithTitle:@"Save As…" action:@selector(saveProjectAs:) keyEquivalent:@"S"];
+    [fileMenu addItem:[NSMenuItem separatorItem]];
+    [fileMenu addItemWithTitle:@"Scan Plugins…" action:@selector(scanPlugins:) keyEquivalent:@""];
     fileItem.submenu = fileMenu;
 
     // A View menu, so the panes are reachable by keyboard as well as by the

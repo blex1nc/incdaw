@@ -2,6 +2,7 @@
 
 #include "app/CommandRegistry.h"
 #include "app/commands/MixerCommands.h"
+#include "app/commands/PluginCommands.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "project/Model.h"
 
@@ -375,6 +376,61 @@ enum class MixerDrag { none, fader, pan };
     send.target = self;
     send.representedObject = @(nodeId.value());
 
+    // ── The insert chain ─────────────────────────────────────────────────
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* addInsertItem = [menu addItemWithTitle:@"Add Insert"
+                                                action:nil
+                                         keyEquivalent:@""];
+    NSMenu* addInsertMenu = [[NSMenu alloc] init];
+
+    for (NSDictionary* plugin in self.availableInserts) {
+        NSMenuItem* item = [addInsertMenu addItemWithTitle:plugin[@"name"]
+                                                    action:@selector(addInsertFromMenu:)
+                                             keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @{@"node": @(nodeId.value()), @"uid": plugin[@"uid"]};
+    }
+
+    if (self.availableInserts.count == 0)
+        [addInsertMenu addItemWithTitle:@"No plugins scanned" action:nil keyEquivalent:@""];
+
+    addInsertItem.submenu = addInsertMenu;
+
+    // One submenu per slot: Bypass (checkable) and Remove, in chain order —
+    // the order is the audible order.
+    const project::MixerNode* node = _project->findMixerNode(nodeId);
+
+    if (node != nullptr) {
+        for (const project::PluginSlot& slot : node->inserts) {
+            NSString* title = [NSString stringWithFormat:@"%s", slot.plugin.uid.c_str()];
+
+            for (NSDictionary* plugin in self.availableInserts)
+                if ([plugin[@"uid"] isEqualToString:@(slot.plugin.uid.c_str())])
+                    title = plugin[@"name"];
+
+            NSMenuItem* slotItem = [menu addItemWithTitle:title action:nil keyEquivalent:@""];
+            NSMenu*     slotMenu = [[NSMenu alloc] init];
+
+            NSDictionary* address = @{@"node": @(nodeId.value()), @"slot": @(slot.id.value())};
+
+            NSMenuItem* bypass = [slotMenu addItemWithTitle:@"Bypass"
+                                                     action:@selector(toggleInsertBypassFromMenu:)
+                                              keyEquivalent:@""];
+            bypass.target            = self;
+            bypass.representedObject = address;
+            bypass.state = slot.bypassed ? NSControlStateValueOn : NSControlStateValueOff;
+
+            NSMenuItem* removeSlot = [slotMenu addItemWithTitle:@"Remove"
+                                                         action:@selector(removeInsertFromMenu:)
+                                                  keyEquivalent:@""];
+            removeSlot.target            = self;
+            removeSlot.representedObject = address;
+
+            slotItem.submenu = slotMenu;
+        }
+    }
+
     if (nodeId != _project->masterMixerNode()) {
         [menu addItem:[NSMenuItem separatorItem]];
 
@@ -386,6 +442,49 @@ enum class MixerDrag { none, fader, pan };
     }
 
     [NSMenu popUpContextMenu:menu withEvent:event forView:self];
+}
+
+// ── Insert-chain edits ───────────────────────────────────────────────────────
+
+- (void)addInsertFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+
+    plugins::PluginIdentifier plugin;
+    plugin.format = plugins::Format::clap;
+    plugin.uid    = [info[@"uid"] UTF8String];
+
+    if (_registry->execute(std::make_unique<app::AddInsertCommand>(
+            project::EntityId{[info[@"node"] unsignedLongLongValue]}, std::move(plugin))))
+        [self structuralChange];
+}
+
+- (void)toggleInsertBypassFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+
+    const project::EntityId nodeId{[info[@"node"] unsignedLongLongValue]};
+    const project::EntityId slotId{[info[@"slot"] unsignedLongLongValue]};
+
+    const project::MixerNode* node = _project->findMixerNode(nodeId);
+    if (node == nullptr)
+        return;
+
+    for (const project::PluginSlot& slot : node->inserts)
+        if (slot.id == slotId)
+            if (_registry->execute(std::make_unique<app::SetInsertBypassedCommand>(
+                    nodeId, slotId, !slot.bypassed)))
+                [self structuralChange];
+}
+
+- (void)removeInsertFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+
+    if (_registry->execute(std::make_unique<app::RemoveInsertCommand>(
+            project::EntityId{[info[@"node"] unsignedLongLongValue]},
+            project::EntityId{[info[@"slot"] unsignedLongLongValue]})))
+        [self structuralChange];
 }
 
 - (void)keyDown:(NSEvent*)event
