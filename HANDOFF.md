@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.8
-Status: PHASES 0-18 COMPLETE / PHASE 19 NEXT
+Version: 2.9
+Status: PHASES 0-19 COMPLETE / PHASE 20 NEXT
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1398,6 +1398,21 @@ recording and the Audio Logger all work. What remains in it is polish):
       EQ cost 15.6 ns/frame.
     Instruments.app profiling still needs full Xcode — recorded, not
     forced (PERFORMANCE.md §6).
+
+  PHASE 19 IS COMPLETE (2026-08-16). QA:
+    - FuzzTests.cpp: deterministic (seeded) corruption + truncation of
+      project.json / manifest.json / pattern files / WAV / SMF. Contract:
+      error or succeed, never crash. No crashes found.
+    - StressTests.cpp: 96ch/24-pattern/~12k-note/192-clip project ->
+      save/load identity, full compile, finite non-silent render; 400
+      edit-rebuild-process cycles stay exact.
+    - Crash matrix: scan crashes isolated out-of-process + blacklisted
+      (Phase 13). In-process PROCESSING crashes are unsurvivable BY
+      DESIGN until sandboxed hosting — open item, recorded, not a
+      defect class with a known trigger.
+    - EXIT CRITERION met: whole suite green (483 cases / 1,335,729
+      assertions, Debug + Release); no known crash-class defects open.
+    TESTING.md status updated to reality.
 
 Things to be careful about:
 

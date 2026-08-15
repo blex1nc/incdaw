@@ -8,6 +8,33 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 19 — QA — PHASE 19 COMPLETE — 2026-08-16
+
+**Added**
+
+- Deterministic fuzzing (`FuzzTests.cpp`) of every reader that touches
+  outside bytes: seeded random corruption and systematic truncation of
+  project.json, manifest.json, pattern files, WAV and Standard MIDI
+  Files. The contract under fuzz: error or succeed, never crash. Fixed
+  seeds make any future failure an instant permanent regression test.
+- Stress (`StressTests.cpp`): a 96-channel / 24-pattern / ~12k-note /
+  192-clip project survives save → load (identity), compiles with every
+  channel present, and renders finite, non-silent audio; and a
+  long-session loop of 400 edit-rebuild-process cycles (undo-shaped
+  edits included) stays finite and lands on the exact expected note
+  count.
+- The plugin crash matrix stands from Phase 13: a crashing plugin kills
+  the out-of-process scanner and lands on the blacklist with its
+  reason; the host survives. In-process processing crashes remain
+  unsurvivable BY DESIGN until sandboxed hosting exists — recorded, not
+  hidden.
+
+**Exit criterion (docs/ROADMAP.md Phase 19) — MET**
+
+- The whole suite is green — 483 cases, 1,335,729 assertions, Debug and
+  Release — and no crash-class defects are open: the fuzzers found none
+  to file.
+
 ### Phase 18 — Performance — PHASE 18 COMPLETE — 2026-08-16
 
 **Added**

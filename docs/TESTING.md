@@ -1,8 +1,11 @@
 # INCDAW — Testing Strategy
 
-Status: **Phase 0 — strategy defined. No tests exist yet.**
-Test infrastructure is built in **Phase 1, before the audio engine**, so that
-every subsequent phase has a place to put its proof.
+Status: **Phase 19 — the suite is live: 483 cases, ~1.34M assertions, green
+in Debug and Release.** It includes per-phase exit-criterion tests, permanent
+format fixtures (v1.0–v1.4), deterministic fuzzing of every byte-level reader
+(project package, WAV, SMF), large-project stress, and a long-session
+edit-rebuild-process loop (tests/unit/FuzzTests.cpp, StressTests.cpp).
+The strategy below is the standing contract each phase built against.
 
 ---
 
