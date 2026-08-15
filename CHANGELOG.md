@@ -6,7 +6,27 @@ public version yet.
 
 ---
 
-## [Unreleased]
+## [0.9.0] — 2026-08-16 — the core is complete
+
+Every engineering phase of the roadmap (0–20) is done: the first
+versioned release of INCDAW's core. Release notes and the install/update
+procedure live in docs/RELEASE.md.
+
+### Phase 20 — Release engineering — PHASE 20 COMPLETE — 2026-08-16
+
+**Added**
+
+- Version 0.9.0, stamped once in CMake and mirrored in `app/Version` —
+  the binary, the bundle and the DMG name cannot disagree.
+- docs/RELEASE.md: what a release is, how to cut one, the documented
+  first-launch procedure on another Mac (ad-hoc signature vs Gatekeeper,
+  D-009), the update process and the project-format compatibility rules
+  it leans on, and the 0.9.0 release notes.
+- `dist/INCDAW-0.9.0.dmg` builds, signs ad hoc, verifies its signature
+  and its checksum, and carries FIRST LAUNCH.txt — the exit criterion's
+  documented procedure. (Installing on a second Mac is the one step a
+  test suite cannot perform; the procedure it would follow is written
+  and verified to the edge of this machine.)
 
 ### Phase 19 — QA — PHASE 19 COMPLETE — 2026-08-16
 

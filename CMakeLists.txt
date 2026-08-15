@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(INCDAW
-    VERSION 0.1.0
+    VERSION 0.9.0
     DESCRIPTION "INCDAW — professional digital audio workstation"
     LANGUAGES C CXX)
 

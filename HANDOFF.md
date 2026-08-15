@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.9
-Status: PHASES 0-19 COMPLETE / PHASE 20 NEXT
+Version: 3.0
+Status: ALL PHASES 0-20 COMPLETE — CORE DONE, v0.9.0 — UI BUILD-OUT NEXT
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1413,6 +1413,28 @@ recording and the Audio Logger all work. What remains in it is polish):
     - EXIT CRITERION met: whole suite green (483 cases / 1,335,729
       assertions, Debug + Release); no known crash-class defects open.
     TESTING.md status updated to reality.
+
+  PHASE 20 IS COMPLETE (2026-08-16). Release engineering:
+    - Version 0.9.0 (CMakeLists project VERSION + app/Version.cpp, one
+      source of truth stamped into binary/bundle/DMG).
+    - docs/RELEASE.md: cutting a release, first-launch on another Mac
+      (Gatekeeper vs ad-hoc signature, D-009), update process, 0.9.0
+      release notes with the honest known-limits list.
+    - dist/INCDAW-0.9.0.dmg built, ad-hoc signed, signature and
+      checksum verified. The literal exit criterion (a teammate installs
+      on a DIFFERENT Mac) is the one step this machine cannot execute;
+      the documented procedure it would follow is complete.
+
+  ALL TWENTY PHASES ARE COMPLETE. What comes next, per the user's
+  stated plan (2026-08-16): the UI BUILD-OUT — FL-Studio-class
+  workspaces over the finished core. The engine-side surface the UI
+  will bind to is ready: CompiledProjectGraph handles (strips, meters,
+  instruments, insert state), the command registry, ParameterRegistry
+  (every builtin + hosted parameter), MIDI learn plumbing, the offline
+  renderer, SMF exchange, and the sample cache. Known engine-side gaps
+  a UI pass will surface first: builtin effect/instrument parameter
+  panels, an export options dialog, a zone-mapping editor, mapping
+  list UI, dirty-prompt on quit, autosave, recent projects.
 
 Things to be careful about:
 

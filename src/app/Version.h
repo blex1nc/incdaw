@@ -4,7 +4,7 @@ namespace incdaw::app {
 
 struct Version {
     static constexpr int major = 0;
-    static constexpr int minor = 1;
+    static constexpr int minor = 9;
     static constexpr int patch = 0;
 
     /// e.g. "0.1.0"
