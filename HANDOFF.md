@@ -1170,7 +1170,27 @@ recording and the Audio Logger all work. What remains in it is polish):
   after the fader.
 
   Phase 13 continues, in dependency order:
-    - parameter discovery -> ParameterRegistry (generic automation, §5)
+    - parameter discovery -> ParameterRegistry (generic automation, §5).
+      Two things were established while wiring part 4 and are worth not
+      rediscovering:
+        (a) ParameterRegistry::StripApplier binds a normalised value onto a
+            MixerStripNode&. A plugin parameter has a DIFFERENT target — a
+            hosted instance, not a strip — so the registry's Entry has to
+            generalise (a target variant, or a second applier kind) before
+            plugin parameters can be automated. This is the design decision
+            that gates the rest; the roadmap's Phase 11 exit criterion
+            ("no parameter-specific code anywhere else") is the constraint
+            it must not break.
+        (b) CLAP parameter changes are DELIVERED AS EVENTS, not setters:
+            clap_event_param_value in the process input event list, or
+            params->flush() when not processing. ClapInstance::process
+            currently passes no event lists at all — it takes (left, right,
+            frames). Automating a plugin parameter therefore needs
+            ClapInstance to carry an input event queue, filled off the audio
+            thread and drained sample-accurately inside process. Do not add
+            a setter that calls into the plugin directly; that is the
+            concurrency bug the extension is designed to prevent
+            (params.h: flush must not run concurrently with process).
     - state save/load into the project (§6), latency reporting -> PDC
     - editor hosting (§7), then AU, then VST3 (D-007 order)
     - the browser/UI story: pick a plugin from the registry onto a strip
