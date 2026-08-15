@@ -1269,10 +1269,27 @@ recording and the Audio Logger all work. What remains in it is polish):
 
   Phase 14 continues, in dependency order:
     - the model/wiring story: how a Channel declares "I am a sampler with
-      these zones" (today only the instrument PluginIdentifier exists;
-      zones need project-model representation + serialization + a format
-      bump if fields are added), the InstrumentFactory mapping, and a
-      minimal UI to load a sample onto a channel
+      these zones". Design notes from part 2's session, worth not
+      rediscovering:
+        (a) Channel needs a zone list in the MODEL (asset EntityId + the
+            SamplerZone numbers), serialized additively -> format 1.2 ->
+            1.3 bump + a hand-written v1.3 fixture (PROJECT_FORMAT §2).
+        (b) Which instrument a channel gets: today empty
+            Channel.instrument means SimpleSynth via the default factory.
+            A built-in identity convention is needed (e.g. a builtin
+            format value in plugins::Format, uid "incdaw.sampler") —
+            check what Format offers before inventing one.
+        (c) The InstrumentFactory receives only (const Channel&); zones
+            name assets by EntityId, so the factory needs the Project
+            too (signature change ripples tests) OR the compiler
+            resolves zones into decoded samples before calling it.
+        (d) Decoding a WAV per rebuild is unacceptable for big samples:
+            decoded AudioFileData must be CACHED across rebuilds, keyed
+            like the plugin registry caches (path,size,mtime) — or
+            samplers persist across rebuilds the way plugin instances
+            now do (D-031 precedent). Decide deliberately; record as
+            D-032.
+    - a minimal UI to load a sample onto a channel
     - per-zone envelopes, filters, LFOs (roadmap order)
     - disk streaming for long samples (DiskStreamer exists from Phase 12)
     - the multisample exit criterion run: velocity layers streaming from
