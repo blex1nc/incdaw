@@ -8,6 +8,39 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 18 — Performance — PHASE 18 COMPLETE — 2026-08-16
+
+**Added**
+
+- `incdaw-bench` (tools/bench): the reproducible measurement harness the
+  phase is built on — graph rebuild latency, offline render throughput,
+  per-effect block cost, resampler throughput. Baseline recorded in
+  docs/PERFORMANCE.md §7.
+
+**Measured, then changed**
+
+- Resampler: the windowed-sinc kernel evaluated two transcendentals per
+  tap per output frame. Now precomputed into a 512-phase × 64-tap table
+  with linear phase interpolation. **547.9 ms → 18.6 ms for 10 s stereo
+  (18.3× → 537.2× realtime, 29× faster)**; the −60 dB quality regression
+  test passes unchanged.
+- The bench itself was measuring the EQ's *bypass* (midpoint parameters
+  put its gains at 0 dB, which is a skipped band). Parameters now sit at
+  75 % of range; the honest EQ number is 15.6 ns/frame — no optimisation
+  warranted.
+
+**Measured, deliberately left alone (CLAUDE.md §27)**
+
+- Rebuild latency: 0.20 ms at 64 sampler channels + master chain.
+- Offline render: ~70× realtime at 64 channels.
+- Every builtin effect: < 0.1 % of the 512-frame block budget.
+
+**Exit criterion (docs/ROADMAP.md Phase 18) — MET**
+
+- Every optimisation has a documented before/after measurement
+  (docs/PERFORMANCE.md §7); everything not optimised has the measurement
+  that justified leaving it alone.
+
 ### Phase 17 — Rendering and export — PHASE 17 COMPLETE — 2026-08-16
 
 **Added**

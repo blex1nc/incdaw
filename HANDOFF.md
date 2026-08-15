@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.7
-Status: PHASES 0-17 COMPLETE / PHASE 18 NEXT
+Version: 2.8
+Status: PHASES 0-18 COMPLETE / PHASE 19 NEXT
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1382,6 +1382,22 @@ recording and the Audio Logger all work. What remains in it is polish):
     AIFF reading; SMF CC/pitch-bend import; export options UI (the menu
     renders master/float32/WAV at the engine rate — stems and formats
     are library-ready but have no dialog).
+
+  PHASE 18 IS COMPLETE (2026-08-16). Performance, measured first:
+    - tools/bench (incdaw-bench target): rebuild latency, render
+      throughput, per-effect cost, resampler throughput. Reproducible;
+      numbers in docs/PERFORMANCE.md §7.
+    - Baseline: rebuilds 0.2 ms @ 64 channels, render ~70x realtime,
+      effects < 0.1% of block budget each — measured and deliberately
+      NOT optimised (§27).
+    - ONE optimisation, with before/after: the resampler kernel is now
+      a 512-phase table (was per-tap transcendentals): 547.9 -> 18.6 ms
+      for 10 s stereo, 29x. Quality regression test unchanged.
+    - Bench bug found and fixed: midpoint parameters measured the EQ's
+      BYPASS (0 dB mid gain = skipped band); now 75%-of-range. Honest
+      EQ cost 15.6 ns/frame.
+    Instruments.app profiling still needs full Xcode — recorded, not
+    forced (PERFORMANCE.md §6).
 
 Things to be careful about:
 

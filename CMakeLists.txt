@@ -50,6 +50,9 @@ add_subdirectory(src)
 add_executable(incdaw-audiocheck tools/audiocheck/main.cpp)
 target_link_libraries(incdaw-audiocheck PRIVATE incdaw_project incdaw_warnings)
 
+add_executable(incdaw-bench tools/bench/main.cpp)
+target_link_libraries(incdaw-bench PRIVATE incdaw_project incdaw_plugins incdaw_warnings)
+
 # The out-of-process plugin scanner: disposable by design (PLUGIN_HOST.md §3).
 add_executable(incdaw-pluginscan tools/pluginscan/main.cpp)
 target_link_libraries(incdaw-pluginscan PRIVATE incdaw_plugins incdaw_warnings)

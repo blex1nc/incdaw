@@ -114,3 +114,63 @@ line. **Instruments.app requires full Xcode, which is not installed** — only
 Command Line Tools. If deep GPU or system-level profiling proves necessary in
 Phase 18, installing Xcode becomes a dependency decision at that point. It is
 not required before then, and this document does not assume it.
+
+---
+
+## 7. Phase 18 — measured baseline and optimisations
+
+Measured with `incdaw-bench` (tools/bench, Release, Apple M5, 48 kHz). The
+tool is committed; every number below is reproducible with
+`./build/incdaw-bench`. Medians over 20 runs for compile, single runs for
+the throughput lines (variance is small; the block-cost lines average 4,000
+blocks).
+
+### Baseline, 2026-08-16
+
+| Measurement | Result | Budget/context |
+|---|---|---|
+| Graph rebuild, 16 sampler channels + master chain | 0.049 ms | per edit; imperceptible |
+| Graph rebuild, 64 sampler channels + master chain | 0.158 ms | per edit; imperceptible |
+| Offline render, 64 channels, 4 s song | 63.4 ms | 63× realtime |
+| Every builtin effect, 512-frame stereo block | 0.2–8.6 ns/frame | all < 0.05 % of block budget |
+| Resample 10 s stereo 48 → 44.1 kHz | **547.9 ms** | 18.3× realtime |
+| Piano Roll culling, 10,000 notes (Phase 6 record) | 0.012 ms/frame | 16.6 ms budget |
+
+Reading of the baseline: rebuild latency and the realtime path have head
+room everywhere — no optimisation is justified there (CLAUDE.md §27). Two
+findings demanded action:
+
+1. **The benchmark itself lied about the EQ.** Parameters were set to
+   range midpoints; the EQ's mid gain midpoint is 0 dB, which the effect
+   skips as identity — so 0.2 ns/frame was the cost of a bypass. Fixed by
+   setting parameters to 75 % of range. Honest EQ cost: **15.6 ns/frame**
+   (0.07 % of budget) — fine, no optimisation needed.
+2. **The resampler evaluated `sinc` and a 4-term window per tap per
+   frame** — two transcendental calls × 64 taps × every output sample.
+
+### Optimisation: table-driven resampler kernel, 2026-08-16
+
+The windowed-sinc kernel is now precomputed into a 512-phase × 64-tap
+table per `resample` call, with linear interpolation between adjacent
+phase rows. Phase-interpolation error sits far below the window's own
+−92 dB sidelobes; the quality regression test (RMS error of a converted
+1 kHz tone < −60 dB, RenderTests.cpp) passes unchanged.
+
+| | Before | After | Change |
+|---|---|---|---|
+| Resample 10 s stereo 48 → 44.1 kHz | 547.9 ms (18.3×) | **18.6 ms (537.2×)** | **29× faster** |
+
+Bench numbers after the change (unchanged elsewhere, within noise):
+compile 64ch 0.197 ms, render 69.9× realtime, effects 0.5–15.6 ns/frame.
+
+### Not optimised, deliberately
+
+- Rebuild latency (0.2 ms at 64 channels): three orders of magnitude
+  inside "instant"; any work here is speculative.
+- Builtin effects (< 0.1 % of budget each): the mix bus would need
+  hundreds of inserts before this shows on a meter.
+- The Sampler's per-frame LFO/filter path: gated off unless depths are
+  set; at 64 held voices the render bench shows 70× realtime headroom.
+- UI frame profiling beyond the Phase 6 culling record needs
+  Instruments.app (full Xcode) — a dependency decision recorded in §6,
+  still not forced.
