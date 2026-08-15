@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.4
-Status: PHASES 0-14 COMPLETE / PHASE 15 NEXT
+Version: 2.5
+Status: PHASES 0-15 COMPLETE / PHASE 16 NEXT
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1313,6 +1313,31 @@ recording and the Audio Logger all work. What remains in it is polish):
     envelopes/filters/LFOs, more LFO waveforms, streamed-zone loops
     (requires resident loop span), a zone-mapping editor UI, filter/LFO
     parameter UI + automation registration (ParameterRegistry).
+
+  PHASE 15 IS COMPLETE (2026-08-16). The builtin DSP suite (D-033):
+    - engine/dsp/effects/: BuiltinEffect base (Node + ParameterSink +
+      StateIO; atomic params; versioned id-keyed state blob) and ten
+      effects: Utility, Filter (SVF), EQ 3-Band (RBJ), Saturator,
+      Compressor, Limiter, Gate, Delay, Reverb (Schroeder), Analyzer.
+    - Builtin effects ARE inserts: PluginSlot{builtin, "incdaw.<uid>"}.
+      ONE compiler branch builds them from the catalogue
+      (BuiltinEffects.cpp); everything downstream — chains, bypass,
+      state files, automation, PDC, mixer UI — is the hosted-plugin
+      machinery untouched. Mixer context menu: "Add Built-in Effect".
+    - ParameterRegistry::registerBuiltinEffects() registers every
+      catalogued parameter under the plugin key scheme; the shell calls
+      it once at launch.
+    - Exit criterion met: bit-exact null tests at transparent settings
+      + independent reference implementations per effect
+      (BuiltinEffectTests.cpp) + no-special-casing proofs
+      (BuiltinInsertTests.cpp). A real limiter ordering defect was
+      caught by its reference test and fixed (recover-then-clamp).
+    - 461 cases / 286,163 assertions green in Debug and Release.
+    Not yet: builtin effect UIs (parameters editable only via state/
+    automation today — a generic parameter panel is the natural Phase
+    16/UI-phase companion), spectrum analyzer (level analyzer only),
+    lookahead limiting (would need latency reporting, which the insert
+    machinery already supports when it comes).
 
 Things to be careful about:
 

@@ -194,6 +194,10 @@ std::filesystem::path incdawSupportDirectory()
     _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
     _parameters      = project::ParameterRegistry::withBuiltins();
 
+    // Builtin effect parameters register once at launch through the same
+    // path a scanned plugin's discovery does; there is nothing to rescan.
+    _parameters.registerBuiltinEffects();
+
     // What the mixer's Add Insert menu offers: every scanned, non-blacklisted
     // plugin, by display name. The view knows menus, not catalogues.
     NSMutableArray<NSDictionary*>* available = [NSMutableArray array];

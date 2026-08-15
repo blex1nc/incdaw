@@ -42,6 +42,12 @@ add_library(incdaw_engine STATIC
     engine/dsp/GainNode.cpp
     engine/dsp/DelayLineNode.cpp
     engine/dsp/MixerStripNode.cpp
+    engine/dsp/effects/BuiltinEffect.cpp
+    engine/dsp/effects/BuiltinEffects.cpp
+    engine/dsp/effects/DynamicsEffects.cpp
+    engine/dsp/effects/SpaceEffects.cpp
+    engine/dsp/effects/ToneEffects.cpp
+    engine/dsp/effects/UtilityEffects.cpp
     engine/dsp/MetronomeNode.cpp
     engine/midi/MidiInput.cpp
     engine/midi/MidiRecorder.cpp

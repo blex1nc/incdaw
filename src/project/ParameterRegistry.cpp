@@ -1,5 +1,7 @@
 #include "project/ParameterRegistry.h"
 
+#include "engine/dsp/effects/BuiltinEffects.h"
+
 #include <cmath>
 
 namespace incdaw::project {
@@ -62,6 +64,29 @@ void ParameterRegistry::registerPluginParameters(
 
                               sink.setParameter(id, plain);
                           }});
+    }
+}
+
+void ParameterRegistry::registerBuiltinEffects()
+{
+    for (const engine::dsp::BuiltinEffectInfo& info : engine::dsp::builtinEffects()) {
+        std::vector<plugins::PluginParameterInfo> parameters;
+        parameters.reserve(info.parameterCount);
+
+        for (std::size_t index = 0; index < info.parameterCount; ++index) {
+            const engine::dsp::EffectParameter& parameter = info.parameters[index];
+
+            plugins::PluginParameterInfo converted;
+            converted.id           = parameter.id;
+            converted.name         = parameter.name;
+            converted.minValue     = parameter.minValue;
+            converted.maxValue     = parameter.maxValue;
+            converted.defaultValue = parameter.defaultValue;
+            converted.stepped      = parameter.stepped;
+            parameters.push_back(std::move(converted));
+        }
+
+        registerPluginParameters(info.uid, parameters);
     }
 }
 

@@ -66,6 +66,11 @@ public:
     void registerPluginParameters(const std::string& pluginUid,
                                   const std::vector<plugins::PluginParameterInfo>& parameters);
 
+    /// Registers every parameter of every builtin effect, from the engine's
+    /// own catalogue, through exactly the same path hosted plugins use. The
+    /// shell calls this once at launch; builtins never rescan.
+    void registerBuiltinEffects();
+
     [[nodiscard]] const Entry* find(const std::string& key) const noexcept;
 
     [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }

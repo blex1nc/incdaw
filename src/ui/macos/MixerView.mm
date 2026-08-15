@@ -4,6 +4,7 @@
 #include "app/commands/MixerCommands.h"
 #include "app/commands/PluginCommands.h"
 #include "engine/dsp/MixerStripNode.h"
+#include "engine/dsp/effects/BuiltinEffects.h"
 #include "project/Model.h"
 
 #include <algorithm>
@@ -397,6 +398,23 @@ enum class MixerDrag { none, fader, pan };
 
     addInsertItem.submenu = addInsertMenu;
 
+    // Builtin effects, from the engine's own catalogue — always present,
+    // never scanned.
+    NSMenuItem* addBuiltinItem = [menu addItemWithTitle:@"Add Built-in Effect"
+                                                 action:nil
+                                          keyEquivalent:@""];
+    NSMenu* addBuiltinMenu = [[NSMenu alloc] init];
+
+    for (const engine::dsp::BuiltinEffectInfo& info : engine::dsp::builtinEffects()) {
+        NSMenuItem* item = [addBuiltinMenu addItemWithTitle:@(info.displayName)
+                                                     action:@selector(addBuiltinInsertFromMenu:)
+                                              keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @{@"node": @(nodeId.value()), @"uid": @(info.uid)};
+    }
+
+    addBuiltinItem.submenu = addBuiltinMenu;
+
     // One submenu per slot: Bypass (checkable) and Remove, in chain order —
     // the order is the audible order.
     const project::MixerNode* node = _project->findMixerNode(nodeId);
@@ -404,6 +422,9 @@ enum class MixerDrag { none, fader, pan };
     if (node != nullptr) {
         for (const project::PluginSlot& slot : node->inserts) {
             NSString* title = [NSString stringWithFormat:@"%s", slot.plugin.uid.c_str()];
+
+            if (const auto* builtin = engine::dsp::findBuiltinEffect(slot.plugin.uid))
+                title = @(builtin->displayName);
 
             for (NSDictionary* plugin in self.availableInserts)
                 if ([plugin[@"uid"] isEqualToString:@(slot.plugin.uid.c_str())])
@@ -466,6 +487,19 @@ enum class MixerDrag { none, fader, pan };
 
     plugins::PluginIdentifier plugin;
     plugin.format = plugins::Format::clap;
+    plugin.uid    = [info[@"uid"] UTF8String];
+
+    if (_registry->execute(std::make_unique<app::AddInsertCommand>(
+            project::EntityId{[info[@"node"] unsignedLongLongValue]}, std::move(plugin))))
+        [self structuralChange];
+}
+
+- (void)addBuiltinInsertFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+
+    plugins::PluginIdentifier plugin;
+    plugin.format = plugins::Format::builtin;
     plugin.uid    = [info[@"uid"] UTF8String];
 
     if (_registry->execute(std::make_unique<app::AddInsertCommand>(

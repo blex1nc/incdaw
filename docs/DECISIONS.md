@@ -1085,3 +1085,41 @@ same-size same-mtime rewrite, the standard and accepted blind spot.
 
 **Date:** 2026-08-16
 **Status:** ACCEPTED
+
+## D-033 — Builtin effects are inserts with the plugin identity, built by the compiler
+
+**Context:** Phase 15 needs an initial effect suite, and CLAUDE.md §14
+requires effects to share one DSP/plugin interface. The insert machinery
+from Phase 13 already carries chain wiring, bypass, state files, parameter
+sinks, latency compensation and the automation registry.
+
+**Options:**
+
+1. A separate builtin-effect subsystem: its own slot type on MixerNode, its
+   own state store, its own parameter scheme.
+2. Builtin effects ARE plugin slots: `PluginIdentifier{builtin,
+   "incdaw.<effect>"}` in the same `inserts` list, constructed by the
+   compiler (the branch mirrors builtin instruments), with `BuiltinEffect`
+   implementing the Node + ParameterSink + StateIO trio that hosted plugins
+   already present. Parameters register through
+   `registerPluginParameters`, state rides plugins/<slot>.state, and the
+   catalogue (`engine/dsp/effects/BuiltinEffects.cpp`) is the single table
+   everything derives from.
+
+**Chosen:** option 2.
+
+**Reason:** the exit criterion literally forbids special-casing, and every
+insert capability was already generic. One branch in the compiler (builtin
+→ catalogue, else → factory) is the entire difference; downstream nothing
+can tell a builtin from a hosted plugin — automation, save/load, bypass,
+PDC and the mixer UI all came for free and are tested through the same
+paths.
+
+**Tradeoffs:** the plugins/ scan and registry never see builtins (they are
+not scanned, deliberately), so UI code listing "plugins" must consult the
+catalogue too — the mixer menu now does. A builtin's parameters serialize
+as a state blob rather than as readable JSON; acceptable because the blob
+is versioned, id-keyed and forward-tolerant.
+
+**Date:** 2026-08-16
+**Status:** ACCEPTED

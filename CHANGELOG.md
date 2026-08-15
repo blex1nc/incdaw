@@ -8,6 +8,44 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 15 — The builtin DSP suite — PHASE 15 COMPLETE — 2026-08-16
+
+**Added**
+
+- `engine/dsp/effects/`: ten builtin effects on one shared base
+  (`BuiltinEffect` = Node + ParameterSink + StateIO): Utility (gain, pan,
+  width, polarity, mono), Filter (SVF LP/HP/BP), EQ 3-Band (RBJ shelves +
+  peak), Saturator (tanh, dry/wet), Compressor (linked peak detector,
+  log-domain gain computer, GR meter), Limiter (zero-lookahead, exact
+  ceiling), Gate (attack/hold/release), Delay (feedback line, dry/wet),
+  Reverb (Schroeder: 4 damped combs + 2 allpasses, stereo spread),
+  Analyzer (bit-exact pass-through publishing peak/RMS).
+- One catalogue (`BuiltinEffects.cpp`) drives everything: the compiler
+  (a builtin slot is constructed exactly where a hosted plugin's factory
+  would run — D-033), the automation registry
+  (`ParameterRegistry::registerBuiltinEffects`, same key scheme and
+  applier as scanned plugins), the mixer's new "Add Built-in Effect"
+  menu, and slot naming.
+- Builtin parameters persist through the existing plugins/<slot>.state
+  path via a versioned, id-keyed blob; unknown ids are skipped on load.
+
+**Exit criterion (docs/ROADMAP.md Phase 15) — MET and measured**
+
+- Every effect passes a null test at its transparent settings (bit-exact,
+  not approximate) AND matches an independent straight-line reference
+  implementation of its own formula in `BuiltinEffectTests.cpp`. The
+  no-special-casing half is proven in `BuiltinInsertTests.cpp`: a builtin
+  slot compiles with no plugin host, carries StateIO, registers every
+  parameter, and an unknown uid degrades to a warning and pass-through.
+- The reference test caught and fixed a real limiter defect: release
+  recovery applied after the ceiling check let a recovering gain push a
+  sample ~0.004 dB over the ceiling; recovery now precedes the clamp and
+  the ceiling holds exactly.
+
+**Tests**
+
+- 461 cases, 286,163 assertions, green in Debug and Release.
+
 ### Phase 14 (parts 4–6) — Loading, filter/LFO, disk streaming — PHASE 14 COMPLETE — 2026-08-16
 
 **Added**

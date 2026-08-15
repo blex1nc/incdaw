@@ -4,6 +4,7 @@
 #include "engine/audio/InputMonitorNode.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
+#include "engine/dsp/effects/BuiltinEffects.h"
 #include "engine/graph/ParameterSink.h"
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
@@ -158,15 +159,26 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             if (slot.bypassed)
                 continue;   // bypass is absence, not a node multiplying by one
 
-            if (!options.insertFactory) {
+            std::string insertError;
+            std::unique_ptr<engine::Node> insertNode;
+
+            // Builtin effects are the engine's own: the compiler constructs
+            // them directly, exactly as it does builtin instruments, and the
+            // factory stays what it has always been — the seam hosted
+            // formats plug into (docs/DECISIONS.md D-028). Downstream of
+            // this branch nothing distinguishes the two.
+            if (slot.plugin.format == plugins::Format::builtin) {
+                insertNode = engine::dsp::makeBuiltinEffect(slot.plugin.uid);
+                if (insertNode == nullptr)
+                    insertError = "unknown builtin effect";
+            } else if (!options.insertFactory) {
                 compiled.warnings.push_back("insert \"" + slot.plugin.toString() + "\" on \""
                                             + node.name + "\" is silent: this build has no "
                                             + "plugin host");
                 continue;
+            } else {
+                insertNode = options.insertFactory(slot, insertError);
             }
-
-            std::string insertError;
-            auto insertNode = options.insertFactory(slot, insertError);
 
             if (insertNode == nullptr) {
                 // Pass-through, not silence and not a failed compile: a
