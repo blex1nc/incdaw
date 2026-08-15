@@ -142,7 +142,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  421 test cases, 170,123 assertions, green in both Debug and Release.
+  424 test cases, 170,135 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1261,9 +1261,13 @@ recording and the Audio Logger all work. What remains in it is polish):
   zones. setZones is build-time-only by contract (a zone edit is a graph
   rebuild, like inserts). 10 tests in tests/unit/SamplerTests.cpp.
 
+  Phase 14 part 2 is DONE: sustain loops (loopStart/loopEnd within the
+  slice, cycling through release; the envelope ends the voice) and the
+  crossfaded seam (last N frames blend toward the pre-loopStart material
+  the wrap lands on — continuous by construction). Unfit loops are
+  ignored, not repaired; reverse zones do not loop yet.
+
   Phase 14 continues, in dependency order:
-    - loop points + crossfade looping in the voice (roadmap: loop, then
-      crossfade; the Slice machinery is where they land)
     - the model/wiring story: how a Channel declares "I am a sampler with
       these zones" (today only the instrument PluginIdentifier exists;
       zones need project-model representation + serialization + a format

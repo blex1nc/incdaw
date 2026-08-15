@@ -31,6 +31,20 @@ struct SamplerZone {
     FrameCount start = 0;
     FrameCount end   = 0;
 
+    /// Sustain loop, in source frames within the slice. loopEnd == 0 means
+    /// no loop; a loop that does not fit the slice is ignored rather than
+    /// clamped into something the user did not draw. A held note cycles
+    /// loopStart..loopEnd forever, through release too — that is what a
+    /// sampler's sustain loop means. Reverse zones do not loop (yet).
+    FrameCount loopStart = 0;
+    FrameCount loopEnd   = 0;
+
+    /// Crossfade at the loop seam, in source frames: the last N frames of
+    /// the loop blend into the material just before loopStart, which is what
+    /// removes the click a hard seam makes. Clamped to what fits — the loop
+    /// length, and the material available before loopStart.
+    FrameCount loopCrossfade = 0;
+
     bool   reverse = false;
     double gain    = 1.0;
 

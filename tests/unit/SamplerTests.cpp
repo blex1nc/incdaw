@@ -315,6 +315,92 @@ TEST_CASE("a stereo sample keeps its channels; a mono one feeds both")
     CHECK(mono.right[10] == doctest::Approx(0.5));
 }
 
+TEST_CASE("a sustain loop cycles forever and survives release")
+{
+    Sampler sampler;
+    sampler.prepare(48000.0, blockSize);
+    makeEnvelopeTransparent(sampler);
+
+    SamplerZone zone = zoneOf(rampSample(4096, 0.001f));
+    zone.loopStart   = 100;
+    zone.loopEnd     = 200;
+    sampler.setZones({zone});
+
+    MidiBuffer midi;
+    midi.insert(MidiMessage::noteOn(0, 60, 127, 0));
+
+    // 8 blocks = 2048 frames, far past the loop end at 200: the voice must
+    // still be sounding, and the values must cycle 100..199.
+    const auto rendered = render(sampler, midi, 8);
+    CHECK(sampler.activeVoiceCount() == 1);
+
+    // Frame 200 wrapped to source frame 100; frame 250 reads source 150.
+    CHECK(rendered.left[200] == doctest::Approx(0.100));
+    CHECK(rendered.left[250] == doctest::Approx(0.150));
+    CHECK(rendered.left[2000] == doctest::Approx(
+        static_cast<double>(100 + (2000 - 100) % 100) * 0.001));
+
+    // Release ends the voice through the envelope, not the loop.
+    sampler.setReleaseSeconds(32.0 / 48000.0);
+
+    MidiBuffer off;
+    off.insert(MidiMessage::noteOff(0, 60, 64, 0));
+    (void)render(sampler, off, 1);
+    CHECK(sampler.activeVoiceCount() == 0);
+}
+
+TEST_CASE("the loop crossfade blends the seam toward the pre-loop material")
+{
+    Sampler sampler;
+    sampler.prepare(48000.0, blockSize);
+    makeEnvelopeTransparent(sampler);
+
+    SamplerZone zone   = zoneOf(rampSample(4096, 0.001f));
+    zone.loopStart     = 100;
+    zone.loopEnd       = 200;
+    zone.loopCrossfade = 40;
+    sampler.setZones({zone});
+
+    MidiBuffer midi;
+    midi.insert(MidiMessage::noteOn(0, 60, 127, 0));
+
+    const auto rendered = render(sampler, midi, 2);
+
+    // Before the crossfade region: verbatim.
+    CHECK(rendered.left[150] == doctest::Approx(0.150));
+
+    // Halfway through the fade at source frame 180: half of 180, half of 80.
+    CHECK(rendered.left[180] == doctest::Approx(0.180 * 0.5 + 0.080 * 0.5).epsilon(0.02));
+
+    // After the wrap the values continue from the loop start region, and the
+    // seam is continuous: frame 199 blends almost entirely into 99.
+    CHECK(rendered.left[199] == doctest::Approx(0.099).epsilon(0.02));
+    CHECK(rendered.left[200] == doctest::Approx(0.100));
+}
+
+TEST_CASE("a loop that does not fit its slice does not play as one")
+{
+    Sampler sampler;
+    sampler.prepare(48000.0, blockSize);
+    makeEnvelopeTransparent(sampler);
+
+    SamplerZone zone = zoneOf(rampSample(1024, 0.001f));
+    zone.end         = 200;
+    zone.loopStart   = 150;
+    zone.loopEnd     = 400;   // beyond the slice: not what the user drew
+    sampler.setZones({zone});
+
+    MidiBuffer midi;
+    midi.insert(MidiMessage::noteOn(0, 60, 127, 0));
+
+    const auto rendered = render(sampler, midi, 1);
+
+    // No loop: the voice ends where the slice does.
+    CHECK(rendered.left[199] == doctest::Approx(0.199));
+    CHECK(rendered.left[200] == doctest::Approx(0.0));
+    CHECK(sampler.activeVoiceCount() == 0);
+}
+
 TEST_CASE("a sample at another rate is resampled to the engine's")
 {
     Sampler sampler;

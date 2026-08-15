@@ -1,5 +1,6 @@
 #include "engine/instrument/Sampler.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace incdaw::engine {
@@ -182,6 +183,23 @@ void Sampler::renderVoice(Voice& voice, const AudioBufferView& output,
 
     const FrameCount lastFrame = slice.end - 1;
 
+    // The sustain loop, validated rather than repaired: a loop that does not
+    // fit the slice is not a loop the user drew, so it does not play.
+    const bool looping = !zone.reverse && zone.loopEnd > zone.loopStart
+                      && zone.loopStart >= slice.start && zone.loopEnd <= slice.end;
+
+    const double loopEnd    = static_cast<double>(zone.loopEnd);
+    const double loopLength = static_cast<double>(zone.loopEnd - zone.loopStart);
+
+    // The crossfade needs pre-loop material to blend with: clamp to the loop
+    // length and to what exists between the slice start and loopStart.
+    double crossfade = 0.0;
+    if (looping && zone.loopCrossfade > 0) {
+        crossfade = static_cast<double>(zone.loopCrossfade);
+        crossfade = std::min(crossfade, loopLength);
+        crossfade = std::min(crossfade, static_cast<double>(zone.loopStart - slice.start));
+    }
+
     // Envelope increments, computed once per block like the reference synth.
     // A zero-or-less time means "immediately".
     const double attack  = attack_.load(std::memory_order_relaxed);
@@ -240,20 +258,38 @@ void Sampler::renderVoice(Voice& voice, const AudioBufferView& output,
 
         const double amplitude = voice.level * gain;
 
+        // Inside the crossfade region the seam blends toward the material
+        // just before loopStart — the exact content the wrap lands on, so
+        // the junction is continuous by construction.
+        double blend = 0.0;
+        if (crossfade > 0.0 && voice.position >= loopEnd - crossfade)
+            blend = (voice.position - (loopEnd - crossfade)) / crossfade;
+
         for (std::size_t channel = 0; channel < outputChannels; ++channel) {
             // A mono sample feeds every output channel; a multichannel one
             // maps channel for channel and repeats its last for the rest.
             const std::size_t sourceChannel =
                 channel < sample.channelCount ? channel : sample.channelCount - 1;
 
-            const Sample value =
-                interpolate(sample.channels[sourceChannel], voice.position, lastFrame);
+            const std::vector<Sample>& source = sample.channels[sourceChannel];
+
+            Sample value = interpolate(source, voice.position, lastFrame);
+
+            if (blend > 0.0) {
+                const Sample early =
+                    interpolate(source, voice.position - loopLength, lastFrame);
+                value = static_cast<Sample>(static_cast<double>(value) * (1.0 - blend)
+                                            + static_cast<double>(early) * blend);
+            }
 
             output.channel(channel)[frame] += static_cast<Sample>(amplitude)
                                             * value;
         }
 
         voice.position += voice.rate;
+
+        if (looping && voice.position >= loopEnd)
+            voice.position -= loopLength;
     }
 }
 

@@ -8,6 +8,26 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 14 (part 2) — Sustain loops and the crossfaded seam — 2026-08-15
+
+**Added**
+
+- `SamplerZone` gained `loopStart`/`loopEnd`/`loopCrossfade`. A held note
+  cycles the loop forever — through release too, which is what a sustain
+  loop means; the envelope ends the voice, not the loop. The crossfade
+  blends the loop's last N frames toward the material just before
+  loopStart — the exact content the wrap lands on, so the junction is
+  continuous by construction. A loop that does not fit its slice is ignored
+  rather than repaired into something the user did not draw; reverse zones
+  do not loop yet.
+
+**Tests**
+
+- 3 new cases (424 total, 170,135 assertions, green in Debug and Release):
+  the loop cycles across thousands of frames and survives into release;
+  the seam blends with exact midpoints and lands continuously; an unfit
+  loop plays as none.
+
 ### Phase 14 (part 1) — The sampler core — 2026-08-15
 
 **Added**
