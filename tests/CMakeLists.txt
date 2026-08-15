@@ -21,6 +21,8 @@ add_executable(incdaw_tests
     unit/BuiltinEffectTests.cpp
     unit/BuiltinInsertTests.cpp
     unit/MidiMappingTests.cpp
+    unit/RenderTests.cpp
+    unit/SmfTests.cpp
     unit/SamplerStreamingTests.cpp
     unit/SamplerTests.cpp
     unit/SamplerWiringTests.cpp

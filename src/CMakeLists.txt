@@ -41,6 +41,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/SineOscillatorNode.cpp
     engine/dsp/GainNode.cpp
     engine/dsp/DelayLineNode.cpp
+    engine/dsp/Resampler.cpp
     engine/dsp/MixerStripNode.cpp
     engine/dsp/effects/BuiltinEffect.cpp
     engine/dsp/effects/BuiltinEffects.cpp
@@ -50,6 +51,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/effects/UtilityEffects.cpp
     engine/dsp/MetronomeNode.cpp
     engine/midi/MidiInput.cpp
+    engine/midi/SmfFile.cpp
     engine/midi/MidiRecorder.cpp
     engine/midi/NoteSequence.cpp
     engine/instrument/Instrument.cpp
@@ -58,6 +60,7 @@ add_library(incdaw_engine STATIC
     engine/instrument/SamplerStream.cpp
     engine/instrument/SimpleSynth.cpp
     engine/instrument/InstrumentNode.cpp
+    engine/audio/AiffFile.cpp
     engine/audio/SampleCache.cpp
     engine/audio/WavFile.cpp
     engine/audio/WavStreamWriter.cpp
@@ -108,6 +111,8 @@ add_library(incdaw_project STATIC
     project/ParameterRegistry.cpp
     project/PatternCompiler.cpp
     project/PluginStateFiles.cpp
+    project/MidiFile.cpp
+    project/OfflineRender.cpp
     project/ProjectGraphCompiler.cpp
     project/RecordingSession.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

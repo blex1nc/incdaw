@@ -8,6 +8,45 @@ public version yet.
 
 ## [Unreleased]
 
+### Phase 17 — Rendering and export — PHASE 17 COMPLETE — 2026-08-16
+
+**Added**
+
+- `project::renderProject` / `renderProjectToFile`: offline rendering with
+  NO separate offline DSP — the same compiler, the same graph, the same
+  block loop the audio callback runs, captured instead of played. Assets
+  always preload (never stream) offline, because determinism is the
+  contract. Master mix, stems (solo a mixer node), individual tracks
+  (solo a channel), regions, tail seconds, normalization to exactly 1.0,
+  deterministic TPDF dither at 16-bit, pcm16/24/float32.
+- `engine::dsp::resample`: offline windowed-sinc sample-rate conversion
+  (Blackman-Harris, 32 taps/side, correct anti-alias cutoff when
+  downsampling). Measured < −60 dB RMS error on a 1 kHz tone 48 → 44.1.
+- `engine::AiffFile`: big-endian PCM 16/24 AIFF writer (80-bit extended
+  rate and all).
+- `engine::SmfFile` + `project::exportArrangement` / `importAsPattern`:
+  Standard MIDI File format-1 write and read (running status, foreign
+  PPQN rescale, orphan note-off handling); export flattens the
+  arrangement through the same pattern compiler playback uses; import
+  lands as an editable pattern with a channel per track.
+- File menu: Export Audio… (WAV/AIFF), Export MIDI…, Import MIDI…
+
+**Exit criterion (docs/ROADMAP.md Phase 17) — MET and measured**
+
+- `RenderTests.cpp`: the offline render equals a captured realtime-style
+  drive of the same compiled graph EXACTLY — float-for-float equality on
+  every sample of both channels, the criterion's "byte-identical".
+
+**Deferred, recorded**
+
+- FLAC needs libFLAC (or an encoder of our own) — a dependency decision
+  the constitution reserves for the user (§41). MP3 likewise. CC/pitch
+  bend lanes in SMF import; AIFF reading.
+
+**Tests**
+
+- 478 cases, 1,136,905 assertions, green in Debug and Release.
+
 ### Phase 16 — MIDI hardware and controller linking — PHASE 16 COMPLETE — 2026-08-16
 
 **Added**

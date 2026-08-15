@@ -14,6 +14,7 @@
 // law belongs to the mixer.
 
 #import <Cocoa/Cocoa.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "app/AutomationWriteSession.h"
 #include "app/CommandRegistry.h"
@@ -24,7 +25,9 @@
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
 #include "plugins/PluginRegistry.h"
+#include "project/MidiFile.h"
 #include "project/Model.h"
+#include "project/OfflineRender.h"
 #include "project/PatternCompiler.h"
 #include "project/PluginStateFiles.h"
 #include "project/ProjectFile.h"
@@ -1141,6 +1144,102 @@ std::filesystem::path incdawSupportDirectory()
     [self writeProjectToPath];
 }
 
+- (void)exportAudio:(id)sender
+{
+    (void)sender;
+
+    if (!_audioReady)
+        return;
+
+    NSSavePanel* panel = [NSSavePanel savePanel];
+    panel.nameFieldStringValue = @"Master.wav";
+    panel.canCreateDirectories = YES;
+    panel.allowedContentTypes  = @[
+        [UTType typeWithFilenameExtension:@"wav"], [UTType typeWithFilenameExtension:@"aiff"]
+    ];
+
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+        return;
+
+    project::RenderOptions options;
+    options.sampleRate  = _audio->sampleRate();
+    options.sampleCache = _sampleCache.get();
+    options.parameters  = &_parameters;
+
+    const auto rendered = project::renderProjectToFile(
+        *_project, _audio->transport().tempoMap(), options,
+        std::filesystem::path{panel.URL.path.UTF8String});
+
+    if (!rendered) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Could not export audio";
+        alert.informativeText = @(rendered.error.c_str());
+        [alert runModal];
+        return;
+    }
+
+    for (const std::string& warning : rendered.warnings)
+        NSLog(@"INCDAW: export: %s", warning.c_str());
+}
+
+- (void)exportMidi:(id)sender
+{
+    (void)sender;
+
+    NSSavePanel* panel = [NSSavePanel savePanel];
+    panel.nameFieldStringValue = @"Arrangement.mid";
+    panel.canCreateDirectories = YES;
+    panel.allowedContentTypes  = @[ [UTType typeWithFilenameExtension:@"mid"] ];
+
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+        return;
+
+    const auto written = project::exportArrangement(
+        *_project, std::filesystem::path{panel.URL.path.UTF8String});
+
+    if (!written) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Could not export MIDI";
+        alert.informativeText = @(written.error.c_str());
+        [alert runModal];
+    }
+}
+
+- (void)importMidi:(id)sender
+{
+    (void)sender;
+
+    NSOpenPanel* panel            = [NSOpenPanel openPanel];
+    panel.canChooseFiles          = YES;
+    panel.canChooseDirectories    = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.allowedContentTypes     = @[
+        [UTType typeWithFilenameExtension:@"mid"], [UTType typeWithFilenameExtension:@"midi"]
+    ];
+
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+        return;
+
+    const auto imported = project::importAsPattern(
+        *_project, std::filesystem::path{panel.URL.path.UTF8String});
+
+    if (!imported) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Could not import MIDI";
+        alert.informativeText = @(imported.error.c_str());
+        [alert runModal];
+        return;
+    }
+
+    // Not a command, deliberately: the import creates fresh entities and the
+    // undo story for "un-importing" channels a later edit may reference is
+    // its own project. Recorded in HANDOFF; the redraws below make the
+    // result visible immediately.
+    [self.patternList setNeedsDisplay:YES];
+    [self.channelRack setNeedsDisplay:YES];
+    [self rebuildGraph];
+}
+
 /// The save itself. Live plugin state is captured FIRST, so the stateFile
 /// paths land in the project.json this save writes (docs/PLUGIN_HOST.md §6).
 - (void)writeProjectToPath
@@ -1574,6 +1673,12 @@ std::filesystem::path incdawSupportDirectory()
     [fileMenu addItem:[NSMenuItem separatorItem]];
     [fileMenu addItemWithTitle:@"Save" action:@selector(saveProject:) keyEquivalent:@"s"];
     [fileMenu addItemWithTitle:@"Save As…" action:@selector(saveProjectAs:) keyEquivalent:@"S"];
+    [fileMenu addItem:[NSMenuItem separatorItem]];
+    [fileMenu addItemWithTitle:@"Export Audio…"
+                        action:@selector(exportAudio:)
+                 keyEquivalent:@"e"];
+    [fileMenu addItemWithTitle:@"Export MIDI…" action:@selector(exportMidi:) keyEquivalent:@""];
+    [fileMenu addItemWithTitle:@"Import MIDI…" action:@selector(importMidi:) keyEquivalent:@""];
     [fileMenu addItem:[NSMenuItem separatorItem]];
     [fileMenu addItemWithTitle:@"Scan Plugins…" action:@selector(scanPlugins:) keyEquivalent:@""];
     fileItem.submenu = fileMenu;

@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 2.6
-Status: PHASES 0-16 COMPLETE / PHASE 17 NEXT
+Version: 2.7
+Status: PHASES 0-17 COMPLETE / PHASE 18 NEXT
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1361,6 +1361,27 @@ recording and the Audio Logger all work. What remains in it is polish):
     Deferred, recorded: MIDI clock/sync and hardware feedback need MIDI
     OUTPUT in platform/ (only input exists); channel-strip learn is
     mixer-menu only (channel rack learn later); mapping list UI.
+
+  PHASE 17 IS COMPLETE (2026-08-16). Rendering and export:
+    - project/OfflineRender: same compiler, same graph, same block loop
+      as the callback — no offline DSP fork to drift. Master / stems
+      (mixer-node solo on a model copy) / tracks (channel solo) /
+      regions; tail, normalize (peak -> exactly 1.0), deterministic TPDF
+      dither, pcm16/24/float32. Offline NEVER streams (determinism).
+    - engine/dsp/Resampler: offline windowed-sinc SRC, measured < -60 dB
+      error. engine/audio/AiffFile: PCM 16/24 writer.
+    - engine/midi/SmfFile + project/MidiFile: SMF-1 write/read; export
+      flattens the ARRANGEMENT via the same PatternCompiler playback
+      uses (seeded probability included); import creates a pattern +
+      channel per track. File menu: Export Audio/Export MIDI/Import MIDI
+      (import is deliberately NOT undoable yet — recorded).
+    - EXIT CRITERION met in RenderTests.cpp: offline render equals a
+      captured realtime-style drive float-for-float, every sample.
+    - 478 cases / 1,136,905 assertions green in Debug and Release.
+    Deferred, recorded: FLAC/MP3 need a dependency decision (§41);
+    AIFF reading; SMF CC/pitch-bend import; export options UI (the menu
+    renders master/float32/WAV at the engine rate — stems and formats
+    are library-ready but have no dialog).
 
 Things to be careful about:
 
