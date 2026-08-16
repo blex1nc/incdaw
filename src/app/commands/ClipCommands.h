@@ -161,6 +161,35 @@ private:
     bool              minted_ = false;
 };
 
+/// Splits one clip in two at a timeline tick.
+///
+/// The left half keeps the clip's identity, fade-in and start; the right half
+/// is a new clip whose source offset advances by the left half's length, so
+/// both halves keep playing exactly what they played before the cut. Audio
+/// clips split on the frame the tick lands on — sample-accurate, and undone
+/// from a snapshot because tick→frame does not invert exactly.
+class SplitClipCommand final : public Command {
+public:
+    SplitClipCommand(EntityId clip, Tick splitTick) : clip_(clip), splitTick_(splitTick) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.split"; }
+    [[nodiscard]] std::string name() const override { return "Split Clip"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    /// The created right half, valid after the first execute.
+    [[nodiscard]] EntityId rightClipId() const noexcept { return right_.id; }
+
+private:
+    EntityId clip_;
+    Tick     splitTick_ = 0;
+
+    Clip     previous_;        ///< the unsplit original, for undo
+    Clip     right_;           ///< the created half; id minted once, stable across redo
+    bool     minted_ = false;
+};
+
 class SetClipMutedCommand final : public Command {
 public:
     SetClipMutedCommand(ClipIds clips, bool muted) : clips_(std::move(clips)), muted_(muted) {}

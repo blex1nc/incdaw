@@ -3,6 +3,7 @@
 #include "app/CommandRegistry.h"
 #include "app/PlaylistModel.h"
 #include "app/commands/ClipCommands.h"
+#include "app/commands/MarkerCommands.h"
 #include "app/commands/TrackCommands.h"
 #include "engine/audio/WaveformOverview.h"
 #include "project/PatternCompiler.h"
@@ -186,6 +187,32 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
         drawText([NSString stringWithFormat:@"%lld", static_cast<long long>(tick / barTicks) + 1],
                  NSMakeRect(x + 3.0, 4.0, 40.0, 14.0), grey(0.55), 10.0);
+    }
+
+    // Markers and regions live on the ruler: a region shades its span, a
+    // marker plants a flag, and both carry their name.
+    for (const project::TimelineMarker& marker : _project->markers()) {
+        const CGFloat x = headerWidth + _model->tickToX(marker.tick);
+
+        if (marker.length > 0) {
+            const CGFloat right = headerWidth + _model->tickToX(marker.tick + marker.length);
+            const CGFloat clippedLeft  = std::max(x, headerWidth);
+            const CGFloat clippedRight = std::min(right, self.bounds.size.width);
+
+            if (clippedRight > clippedLeft) {
+                [[colourFrom(marker.colour) colorWithAlphaComponent:0.22] setFill];
+                NSRectFillUsingOperation(NSMakeRect(clippedLeft, 0, clippedRight - clippedLeft,
+                                                    rulerHeight),
+                                         NSCompositingOperationSourceOver);
+            }
+        }
+
+        if (x < headerWidth || x > self.bounds.size.width)
+            continue;
+
+        fillRect(NSMakeRect(x, 0, 2.0, rulerHeight), colourFrom(marker.colour));
+        drawText(@(marker.name.c_str()), NSMakeRect(x + 4.0, 4.0, 90.0, 14.0),
+                 colourFrom(marker.colour, 1.2), 9.0);
     }
 }
 
@@ -509,6 +536,16 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     const project::Clip&    clicked = _project->clips()[index];
     const project::EntityId clipId  = clicked.id;
 
+    // Option-click cuts the clip where the mouse is — the slice gesture.
+    if ((event.modifierFlags & NSEventModifierFlagOption) != 0) {
+        const Tick cut = _model->snapTick(_model->xToTick(grid.x));
+        if (_registry->execute(std::make_unique<app::SplitClipCommand>(clipId, cut)))
+            _model->setSelection({clipId});
+
+        [self changed];
+        return;
+    }
+
     // Double-clicking an audio clip opens its asset in the audio editor —
     // the clip is the handle, the recording is the thing being edited.
     if (event.clickCount == 2 && clicked.type == project::ClipType::audio) {
@@ -667,6 +704,24 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
     if (command && character == 'd' && !_model->selection().empty()) {
         [self duplicateSelection];
+        return;
+    }
+
+    // M drops a marker at the playhead (or the viewport's left edge when the
+    // transport has never rolled); Shift+M makes it a one-bar region.
+    if (!command && (character == 'm' || character == 'M')) {
+        const Tick tick   = _playheadTick >= 0 ? static_cast<Tick>(_playheadTick)
+                                               : _model->viewport().firstTick;
+        const Tick length = shift ? ticksPerQuarterNote * 4 : 0;
+
+        const std::size_t count = _project->markers().size() + 1;
+        NSString* name = [NSString stringWithFormat:@"%s %lu", shift ? "Region" : "Marker",
+                                                    static_cast<unsigned long>(count)];
+
+        if (_registry->execute(std::make_unique<app::AddMarkerCommand>(
+                tick, std::string(name.UTF8String), length)))
+            [self changed];
+
         return;
     }
 
@@ -901,6 +956,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     if (self.onChange != nil)
         self.onChange();
 }
+
 
 - (void)setPatternIdValue:(unsigned long long)value
 {

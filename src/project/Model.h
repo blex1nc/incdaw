@@ -375,6 +375,23 @@ struct MidiMapping {
     [[nodiscard]] friend bool operator==(const MidiMapping&, const MidiMapping&) = default;
 };
 
+// ── Timeline markers ──────────────────────────────────────────────────────────
+
+/// A named point or span on the arrangement timeline.
+///
+/// One type covers both: `length` 0 is a point marker, anything longer is a
+/// region. Markers are musical positions — a marker on the drop stays on the
+/// drop through a tempo change, exactly like a pattern clip (D-013).
+struct TimelineMarker {
+    EntityId      id;
+    Tick          tick   = 0;
+    Tick          length = 0;        ///< 0 = point marker, > 0 = region
+    std::string   name;
+    std::uint32_t colour = 0xFFCC8844u;
+
+    [[nodiscard]] friend bool operator==(const TimelineMarker&, const TimelineMarker&) = default;
+};
+
 // ── Project ───────────────────────────────────────────────────────────────────
 
 struct ProjectMetadata {
@@ -410,6 +427,7 @@ public:
     AudioAsset&        addAudioAsset(std::string path);
     MidiMapping&       addMidiMapping(int controller, std::string parameterKey,
                                       EntityId target);
+    TimelineMarker&    addMarker(Tick tick, std::string name);
     RoutingConnection& connect(EntityId source, EntityId destination);
 
     /// Puts an existing entity back where it was, keeping its id.
@@ -426,6 +444,7 @@ public:
     MixerNode& insertMixerNode(std::size_t index, MixerNode node);
     AudioAsset& insertAudioAsset(std::size_t index, AudioAsset asset);
     MidiMapping& insertMidiMapping(std::size_t index, MidiMapping mapping);
+    TimelineMarker& insertMarker(std::size_t index, TimelineMarker marker);
     RoutingConnection& insertRouting(std::size_t index, RoutingConnection connection);
 
     /// Removes an entity by id. False when there is nothing to remove.
@@ -440,6 +459,7 @@ public:
     bool removeMixerNode(EntityId id) noexcept;
     bool removeAudioAsset(EntityId id) noexcept;
     bool removeMidiMapping(EntityId id) noexcept;
+    bool removeMarker(EntityId id) noexcept;
     bool removeRouting(EntityId id) noexcept;
 
     static constexpr std::size_t notFound = static_cast<std::size_t>(-1);
@@ -451,6 +471,7 @@ public:
     [[nodiscard]] std::size_t indexOfMixerNode(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfAudioAsset(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfMidiMapping(EntityId id) const noexcept;
+    [[nodiscard]] std::size_t indexOfMarker(EntityId id) const noexcept;
     [[nodiscard]] std::size_t indexOfRouting(EntityId id) const noexcept;
 
     [[nodiscard]] std::vector<Track>&             tracks()      noexcept { return tracks_; }
@@ -461,6 +482,7 @@ public:
     [[nodiscard]] std::vector<AutomationLane>&    automation()  noexcept { return automation_; }
     [[nodiscard]] std::vector<AudioAsset>&        audioAssets() noexcept { return audioAssets_; }
     [[nodiscard]] std::vector<MidiMapping>&       midiMappings() noexcept { return midiMappings_; }
+    [[nodiscard]] std::vector<TimelineMarker>&    markers()     noexcept { return markers_; }
     [[nodiscard]] std::vector<RoutingConnection>& routing()     noexcept { return routing_; }
 
     [[nodiscard]] const std::vector<Track>&             tracks()      const noexcept { return tracks_; }
@@ -471,6 +493,7 @@ public:
     [[nodiscard]] const std::vector<AutomationLane>&    automation()  const noexcept { return automation_; }
     [[nodiscard]] const std::vector<AudioAsset>&        audioAssets() const noexcept { return audioAssets_; }
     [[nodiscard]] const std::vector<MidiMapping>&       midiMappings() const noexcept { return midiMappings_; }
+    [[nodiscard]] const std::vector<TimelineMarker>&    markers()     const noexcept { return markers_; }
     [[nodiscard]] const std::vector<RoutingConnection>& routing()     const noexcept { return routing_; }
 
     [[nodiscard]] EntityId masterMixerNode() const noexcept { return master_; }
@@ -487,6 +510,8 @@ public:
     [[nodiscard]] MixerNode*       findMixerNode(EntityId id) noexcept;
     [[nodiscard]] const RoutingConnection* findRouting(EntityId id) const noexcept;
     [[nodiscard]] RoutingConnection*       findRouting(EntityId id) noexcept;
+    [[nodiscard]] const TimelineMarker*    findMarker(EntityId id) const noexcept;
+    [[nodiscard]] TimelineMarker*          findMarker(EntityId id) noexcept;
 
     /// Assets whose file cannot be found. A project with missing media still
     /// opens (docs/PROJECT_FORMAT.md §4); this is what the relink dialog lists.
@@ -507,6 +532,7 @@ private:
     std::vector<AutomationLane>    automation_;
     std::vector<AudioAsset>        audioAssets_;
     std::vector<MidiMapping>       midiMappings_;
+    std::vector<TimelineMarker>    markers_;
     std::vector<RoutingConnection> routing_;
 
     EntityId master_;

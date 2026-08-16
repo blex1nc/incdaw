@@ -80,7 +80,7 @@ every item tested; CLAUDE.md §44 definition of done):
 |---|---|---|
 | P1 | Piano Roll chord toolkit: chord detection (Chord Panel equiv.), Chord Stamp with top-down/bottom-up voice-leading, progression nudge | **DONE** — `app::music`, `ChordCommands`, wired: Option-click stamps, `1`–`8` pick the shape, `V` flips voicing, `C` names the selection, `[`/`]` nudge diatonically |
 | P2 | Piano Roll note tools: strum, arpeggiate, legato; note labels | **DONE** — `NoteToolCommands`, wired: `S` strum (+Shift down), `P` arpeggiate (+Shift up-down), `L` legato, F2 rename |
-| P3 | Playlist: clip split; timeline markers + regions | pending |
+| P3 | Playlist: clip split; timeline markers + regions | **DONE** — `SplitClipCommand` (tick-exact for pattern/automation clips, frame-exact for audio, source offsets advance), `TimelineMarker` model + format v1.5 + `MarkerCommands`; wired: Option-click slices a clip, `M` / Shift+`M` drop a marker / one-bar region at the playhead, ruler draws both |
 | P4 | Sidechain routing made functional: compressor external key input, compiled sidechain edges | pending |
 | P5 | LUFS meter (EBU R128), stereo separation, true pre-fader sends | pending |
 | P6 | Chorus, flanger, phaser; transient/sustain splitter (Transmitter equivalent) | pending |

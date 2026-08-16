@@ -33,6 +33,7 @@ add_executable(incdaw_tests
     unit/PatternTests.cpp
     unit/ChannelRackTests.cpp
     unit/PlaylistTests.cpp
+    unit/MarkerAndSplitTests.cpp
     unit/MixerTests.cpp
     unit/AutomationTests.cpp
     unit/WavFileTests.cpp

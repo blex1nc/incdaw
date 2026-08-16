@@ -30,7 +30,11 @@ inline constexpr int projectFormatMajor = 1;
 /// 1.4 (Phase 16): the project carries MIDI controller mappings — hardware
 /// controls bound to parameters by registry key. Additive: earlier files
 /// have none.
-inline constexpr int projectFormatMinor = 4;
+///
+/// 1.5 (FL2026 P3): the project carries timeline markers and regions — named
+/// musical positions with an optional length. Additive: earlier files have
+/// none.
+inline constexpr int projectFormatMinor = 5;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

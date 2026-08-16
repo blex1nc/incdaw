@@ -385,6 +385,18 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
     }
     document.set("midiMappings", std::move(mappings));
 
+    Json markers = Json::array();
+    for (const TimelineMarker& marker : project.markers()) {
+        Json json = Json::object();
+        json.set("id", toJson(marker.id));
+        json.set("tick", static_cast<std::int64_t>(marker.tick));
+        json.set("length", static_cast<std::int64_t>(marker.length));
+        json.set("name", marker.name);
+        json.set("colour", static_cast<std::int64_t>(marker.colour));
+        markers.append(std::move(json));
+    }
+    document.set("markers", std::move(markers));
+
     Json routing = Json::array();
     for (const RoutingConnection& connection : project.routing()) {
         Json json = Json::object();
@@ -740,6 +752,16 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         project.midiMappings().push_back(std::move(mapping));
     }
 
+    for (const Json& json : document["markers"].elements()) {
+        TimelineMarker marker;
+        marker.id     = idFrom(json["id"]);
+        marker.tick   = json["tick"].asInt(0);
+        marker.length = json["length"].asInt(0);
+        marker.name   = json["name"].asString();
+        marker.colour = static_cast<std::uint32_t>(json["colour"].asInt(0xFFCC8844));
+        project.markers().push_back(std::move(marker));
+    }
+
     for (const Json& json : document["routing"].elements()) {
         RoutingConnection connection;
         connection.id          = idFrom(json["id"]);
@@ -872,6 +894,13 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // document and reads back empty — those projects had no controller
     // bindings.
     if (major == 1 && minor == 3) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.4 -> 1.5. Purely additive: `markers` is absent from a 1.4 document and
+    // reads back empty — those projects had no timeline markers.
+    if (major == 1 && minor == 4) {
         result.succeeded = true;
         return result;
     }
