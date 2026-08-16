@@ -1450,7 +1450,11 @@ recording and the Audio Logger all work. What remains in it is polish):
   true pre-fader sends, chorus/flanger/phaser with the transient
   splitter, the WSOLA time-stretch subsystem, and the slicer.
 
-  P9 — THE BROWSER — IS HALF DONE (2026-08-16):
+  P9 (THE BROWSER) AND P10 (AUDIO UNITS) ARE COMPLETE (2026-08-17).
+  docs/FL2026_GAP.md holds the closed table; the notes below are what the
+  next session should know about how they were built.
+
+  P9 — THE BROWSER — in four parts:
 
     - Part 1, app::Browser: classification (a project package and a
       .clap bundle are items, never folders to walk into), folders-first
@@ -1472,28 +1476,39 @@ recording and the Audio Logger all work. What remains in it is polish):
       recents live in Application Support/INCDAW/browser.json beside
       plugins.tsv — installation state, never project state.
 
-    - PART 3, PREVIEW, IS THE NEXT STEP. The engine already implies the
-      design: an engine-owned audition source summed into the master by
-      a node every compiled graph includes — InputMonitorNode (ring
-      owned by the engine, drained by a node in the graph) is the
-      precedent for the plumbing, and the retired-graph block-counter
-      grace in AudioEngine::collectRetiredGraphs is the precedent for
-      handing a decoded buffer to the audio thread and releasing it on
-      the UI thread. Decode through the shell's SampleCache (D-032);
-      repitch cross-rate files the way SamplerZone does. Gates: it
-      renders the file, it stops at the end, it allocates nothing on the
-      audio thread under the realtime guard, and it works while the
-      transport is stopped.
+    - Part 3, engine::AuditionPlayer: the preview is mixed by the ENGINE
+      after the project graph, not compiled into it — it sounds with the
+      transport stopped and costs no rebuild. The audio thread reads a
+      raw pointer; the shared_ptr is released by collect() only after
+      the block counter passes the swap (the retired-graph grace). play()
+      silences first and re-arms last, so a file swapped mid-flight can
+      never be read at the previous playhead. NaN containment moved out
+      of the graph branch to cover it.
 
-    - PART 4, DRAG INTO THE PROJECT: a .wav dropped on the Channel Rack
-      (LoadSampleCommand exists, is undoable and shares an asset when
-      the file is already in the project) and on the Playlist (needs an
-      add-audio-clip command; the asset-creation logic to reuse is in
-      SamplerCommands and SlicerCommands).
+    - Part 4, the drops: LoadSampleCommand onto a channel,
+      ImportSampleAsChannelCommand onto empty rack space,
+      ImportAudioClipCommand onto a playlist lane (tick -> frame
+      conversion lives in the command, D-013). Asset import is one
+      shared helper now, app::AudioAssetImport — probe before mutating,
+      share a file already in the project, keep the created asset's id
+      and index so redo cannot orphan what was written above it.
 
-    - P10, AU HOSTING, is last. AudioUnit is a system framework rather
-      than a vendored SDK, but do not start a second plugin format
-      without asking: it is a standing commitment, not a small one.
+  P10 — AUDIO UNITS — and the interface it forced:
+
+    - plugins::HostedPlugin is now what PluginNode, the instance
+      manager, PDC, plugin state files and the editor windows are
+      written against. ClapInstance and AudioUnitInstance implement it.
+      A third format implements it and nothing else.
+    - platform::AudioUnitHost holds everything CoreAudio (the layering
+      checker is right: plugins/ must not know its OS). Enumeration runs
+      no plugin code, so AUs need NO scan and appear in Add Insert
+      immediately; instantiation is in-process, like CLAP hosting.
+    - Deliberately not in it, and the natural next steps: AU instruments
+      (the insert path is stereo effects), custom Cocoa views
+      (kAudioUnitProperty_CocoaUI — the generic view is what ships
+      today), out-of-process AU instantiation, and an AU-specific test
+      of automation and of state through a project save (both travel the
+      shared seams, which are tested for CLAP).
 
 Things to be careful about:
 
