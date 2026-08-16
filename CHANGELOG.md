@@ -12,6 +12,30 @@ The twenty engineering phases produced a complete core; what follows is
 the UI build-out — FL-Studio-class workspaces over that core, in
 increments. Each increment ships working, tested behaviour.
 
+### UI build-out, increment 3 — export options dialog — 2026-08-16
+
+File > Export Audio… stops hardcoding master/float32/WAV/engine-rate.
+
+**Added**
+
+- An options dialog fronting everything `project::OfflineRender` already
+  implemented: target (master, stems — one file per non-master mixer
+  track, tracks — one file per channel), WAV or AIFF, 16/24-bit PCM or
+  32-bit float, target sample rate (44.1/48/88.2/96 k through the
+  windowed-sinc resampler), tail seconds, normalize, TPDF dither, and an
+  "only the loop range" region export taken from the transport's loop.
+- Stems and tracks export into a chosen directory, one file per source,
+  named by the mixer track or channel with path-hostile characters
+  replaced and case-insensitive collisions suffixed
+  (`app::session::exportFileName`, tested). The first failing file stops
+  the run with its name; finished files stay.
+
+**Known limitation (recorded)**
+
+- The render loop runs synchronously on the main thread — no progress
+  bar, no cancel. Fine at ~70x realtime; a progress sheet is recorded
+  polish for a later increment.
+
 ### UI build-out, increment 2 — generic insert parameter panel — 2026-08-16
 
 The ten builtin effects finally have a UI, and "Open Editor" never dead-ends.

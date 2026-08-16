@@ -106,6 +106,17 @@ TEST_CASE("autosavePathFor is empty when there is nowhere to aim")
     CHECK(app::session::autosavePathFor({}, {}).empty());
 }
 
+TEST_CASE("exportFileName sanitises, dedupes case-insensitively, and never returns nothing")
+{
+    CHECK(app::session::exportFileName("Kick", ".wav", {}) == "Kick.wav");
+    CHECK(app::session::exportFileName("Bus: A/B", ".wav", {}) == "Bus_ A_B.wav");
+    CHECK(app::session::exportFileName("", ".wav", {}) == "Untitled.wav");
+    CHECK(app::session::exportFileName("...", ".aiff", {}) == "Untitled.aiff");
+
+    const std::vector<std::string> taken{"kick.wav", "Kick 2.wav"};
+    CHECK(app::session::exportFileName("Kick", ".wav", taken) == "Kick 3.wav");
+}
+
 TEST_CASE("autosaveIsNewer requires both packages and a strictly newer autosave")
 {
     SessionFixture temp;

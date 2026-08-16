@@ -36,4 +36,12 @@ std::filesystem::path autosavePathFor(const std::filesystem::path& projectPath,
 bool autosaveIsNewer(const std::filesystem::path& projectPackage,
                      const std::filesystem::path& autosavePackage);
 
+/// A filesystem-safe file name for one exported render: `name` with path
+/// separators and control characters replaced, `extension` (".wav")
+/// appended, and a " 2", " 3"… suffix when the result is already in `taken`
+/// (compared case-insensitively — APFS is). An unusable name becomes
+/// "Untitled". The caller adds the result to `taken` between calls.
+std::string exportFileName(const std::string& name, const std::string& extension,
+                           const std::vector<std::string>& taken);
+
 } // namespace incdaw::app::session

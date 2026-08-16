@@ -431,11 +431,19 @@ filter/LFO, synth ADSR). Instruments have sinks but no StateIO — a panel
 value would silently vanish at save/load. They join increment 4, where
 instrument-parameter persistence gets designed alongside the zone editor.
 
-### Increment 3 — export options dialog (planned)
+### Increment 3 — export options dialog — DONE 2026-08-16
 
-Master/stems/tracks/region, format, bit depth, dither, normalize — the
-options `project::OfflineRender` already implements, reachable from File >
-Export Audio.
+File > Export Audio… now fronts everything `project::OfflineRender` already
+implemented: master / stems (one file per non-master mixer track) / tracks
+(one file per channel), WAV or AIFF, 16/24-bit PCM or 32-bit float, target
+sample rate through the windowed-sinc resampler, tail seconds, normalize,
+TPDF dither, and a loop-range-only region. Multi-file targets export into a
+chosen directory with sanitised, deduplicated names
+(`app::session::exportFileName`, tested).
+
+**Exit criterion (met):** every RenderOptions field is reachable from the
+dialog; stems and tracks land as separate files without overwriting each
+other.
 
 ### Increment 4 — mapping, zone and instrument editors (planned)
 

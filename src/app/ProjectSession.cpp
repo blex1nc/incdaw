@@ -1,6 +1,7 @@
 #include "app/ProjectSession.h"
 
 #include <algorithm>
+#include <cctype>
 #include <system_error>
 
 namespace incdaw::app::session {
@@ -32,6 +33,38 @@ std::filesystem::path autosavePathFor(const std::filesystem::path& projectPath,
         return supportDirectory / "Autosave" / "Untitled.autosave.incdaw";
 
     return {};
+}
+
+std::string exportFileName(const std::string& name, const std::string& extension,
+                           const std::vector<std::string>& taken)
+{
+    std::string base;
+    for (const char character : name)
+        base += (character == '/' || character == '\\' || character == ':'
+                 || static_cast<unsigned char>(character) < 0x20)
+                    ? '_'
+                    : character;
+
+    if (base.find_first_not_of("_ .") == std::string::npos)
+        base = "Untitled";
+
+    const auto lowered = [](std::string text) {
+        std::transform(text.begin(), text.end(), text.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return text;
+    };
+
+    const auto isTaken = [&](const std::string& candidate) {
+        const std::string needle = lowered(candidate);
+        return std::any_of(taken.begin(), taken.end(),
+                           [&](const std::string& held) { return lowered(held) == needle; });
+    };
+
+    std::string candidate = base + extension;
+    for (int suffix = 2; isTaken(candidate); ++suffix)
+        candidate = base + " " + std::to_string(suffix) + extension;
+
+    return candidate;
 }
 
 bool autosaveIsNewer(const std::filesystem::path& projectPackage,

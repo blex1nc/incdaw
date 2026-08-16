@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 3.2
-Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT IN PROGRESS (increments 1-2 done)
+Version: 3.3
+Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT IN PROGRESS (increments 1-3 done)
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1516,10 +1516,27 @@ recording and the Audio Logger all work. What remains in it is polish):
     the editor window can outlive the instance it was opened on.
     Recheck when editor lifecycle is next touched.
 
-  NEXT: increment 3 — the export options dialog (ROADMAP "After the
-  phases" §Increment 3): master/stems/tracks/region, format, bit
-  depth, dither, normalize — project::OfflineRender already implements
-  all of it; only the dialog is missing.
+  UI BUILD-OUT INCREMENT 3 IS DONE (2026-08-16): the export options
+  dialog. File > Export Audio… fronts every RenderOptions field:
+  master / stems (per non-master mixer node, stemMixerNode) / tracks
+  (per channel, soloChannel), WAV/AIFF, pcm16/24/float32, target rate
+  44.1-96k (resampler), tail seconds, normalize, dither, loop-range
+  region (transport loopStart/loopEnd). Multi-file targets go into a
+  chosen directory via app::session::exportFileName (sanitise +
+  case-insensitive dedupe, tested — 496 cases green Debug + Release).
+  The render loop is synchronous main-thread, no progress/cancel —
+  recorded polish. The dialog itself is interactive and rests on the
+  library's RenderTests plus the launch/quit smoke; a scripted
+  UI-drive of the dialog was not attempted (prior sessions recorded
+  synthetic clicks landing in whatever app is frontmost).
+
+  NEXT: increment 4 — mapping, zone and instrument editors (ROADMAP
+  "After the phases" §Increment 4): the MIDI mapping list UI, the
+  sampler zone-mapping editor over Channel::samplerZones, and builtin
+  INSTRUMENT parameter persistence + panel (the increment-2 deferral:
+  instruments have sinks but no StateIO — persistence design comes
+  first, likely Channel-serialised values or an instrument StateIO
+  wired into the compiler like inserts').
 
 Things to be careful about:
 

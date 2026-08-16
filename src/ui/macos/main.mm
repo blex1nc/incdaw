@@ -1630,35 +1630,209 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if (!_audioReady)
         return;
 
-    NSSavePanel* panel = [NSSavePanel savePanel];
-    panel.nameFieldStringValue = @"Master.wav";
-    panel.canCreateDirectories = YES;
-    panel.allowedContentTypes  = @[
-        [UTType typeWithFilenameExtension:@"wav"], [UTType typeWithFilenameExtension:@"aiff"]
-    ];
+    // ── The options dialog: everything the renderer already implements ──────
+    constexpr CGFloat labelWidth   = 110.0;
+    constexpr CGFloat controlWidth = 190.0;
+    constexpr CGFloat rowStep      = 30.0;
+    constexpr int     rowCount     = 8;
 
-    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+    NSView* accessory = [[NSView alloc]
+        initWithFrame:NSMakeRect(0, 0, labelWidth + controlWidth + 8, rowStep * rowCount)];
+
+    __block int rowIndex = rowCount;
+    NSRect (^nextControlFrame)(void) = ^NSRect {
+        rowIndex -= 1;
+        return NSMakeRect(labelWidth + 8, rowStep * rowIndex + 4, controlWidth, 24);
+    };
+    void (^addLabel)(NSString*) = ^(NSString* text) {
+        NSTextField* label = [NSTextField labelWithString:text];
+        label.frame     = NSMakeRect(0, rowStep * rowIndex + 7, labelWidth, 18);
+        label.alignment = NSTextAlignmentRight;
+        [accessory addSubview:label];
+    };
+
+    NSPopUpButton* targetPopup = [[NSPopUpButton alloc] initWithFrame:nextControlFrame()];
+    [targetPopup addItemsWithTitles:@[
+        @"Master", @"Stems — one file per mixer track", @"Tracks — one file per channel"
+    ]];
+    addLabel(@"Export");
+    [accessory addSubview:targetPopup];
+
+    NSPopUpButton* formatPopup = [[NSPopUpButton alloc] initWithFrame:nextControlFrame()];
+    [formatPopup addItemsWithTitles:@[ @"WAV", @"AIFF" ]];
+    addLabel(@"Format");
+    [accessory addSubview:formatPopup];
+
+    NSPopUpButton* depthPopup = [[NSPopUpButton alloc] initWithFrame:nextControlFrame()];
+    [depthPopup addItemsWithTitles:@[ @"32-bit float", @"24-bit PCM", @"16-bit PCM" ]];
+    addLabel(@"Bit depth");
+    [accessory addSubview:depthPopup];
+
+    NSPopUpButton* ratePopup = [[NSPopUpButton alloc] initWithFrame:nextControlFrame()];
+    [ratePopup addItemWithTitle:[NSString stringWithFormat:@"Engine rate (%.0f Hz)",
+                                                           _audio->sampleRate()]];
+    [ratePopup addItemsWithTitles:@[ @"44100 Hz", @"48000 Hz", @"88200 Hz", @"96000 Hz" ]];
+    addLabel(@"Sample rate");
+    [accessory addSubview:ratePopup];
+
+    NSTextField* tailField = [[NSTextField alloc] initWithFrame:nextControlFrame()];
+    tailField.stringValue  = @"2.0";
+    addLabel(@"Tail (seconds)");
+    [accessory addSubview:tailField];
+
+    NSButton* normalizeCheck = [NSButton checkboxWithTitle:@"Normalize peak to 1.0"
+                                                    target:nil
+                                                    action:nil];
+    normalizeCheck.frame = nextControlFrame();
+    addLabel(@"");
+    [accessory addSubview:normalizeCheck];
+
+    NSButton* ditherCheck = [NSButton checkboxWithTitle:@"TPDF dither (16-bit)"
+                                                 target:nil
+                                                 action:nil];
+    ditherCheck.frame = nextControlFrame();
+    ditherCheck.state = NSControlStateValueOn;
+    addLabel(@"");
+    [accessory addSubview:ditherCheck];
+
+    NSButton* loopCheck = [NSButton checkboxWithTitle:@"Only the loop range"
+                                               target:nil
+                                               action:nil];
+    loopCheck.frame = nextControlFrame();
+    addLabel(@"");
+    [accessory addSubview:loopCheck];
+
+    NSAlert* dialog        = [[NSAlert alloc] init];
+    dialog.messageText     = @"Export Audio";
+    dialog.informativeText = @"Rendered offline through the same graph playback uses.";
+    dialog.accessoryView   = accessory;
+    [dialog addButtonWithTitle:@"Export…"];
+    [dialog addButtonWithTitle:@"Cancel"];
+
+    if ([dialog runModal] != NSAlertFirstButtonReturn)
         return;
 
+    // ── Options out of the controls ─────────────────────────────────────────
     project::RenderOptions options;
     options.sampleRate  = _audio->sampleRate();
     options.sampleCache = _sampleCache.get();
     options.parameters  = &_parameters;
+    options.normalize   = normalizeCheck.state == NSControlStateValueOn;
+    options.dither      = ditherCheck.state == NSControlStateValueOn;
+    options.tailSeconds = std::clamp(tailField.doubleValue, 0.0, 60.0);
 
-    const auto rendered = project::renderProjectToFile(
-        *_project, _audio->transport().tempoMap(), options,
-        std::filesystem::path{panel.URL.path.UTF8String});
+    switch (depthPopup.indexOfSelectedItem) {
+        case 1: options.bitDepth = project::RenderOptions::BitDepth::pcm24; break;
+        case 2: options.bitDepth = project::RenderOptions::BitDepth::pcm16; break;
+        default: options.bitDepth = project::RenderOptions::BitDepth::float32; break;
+    }
 
-    if (!rendered) {
+    constexpr double rates[] = {0.0, 44100.0, 48000.0, 88200.0, 96000.0};
+    options.targetSampleRate = rates[ratePopup.indexOfSelectedItem];
+
+    if (loopCheck.state == NSControlStateValueOn) {
+        const auto start = _audio->transport().loopStart();
+        const auto end   = _audio->transport().loopEnd();
+        if (end > start) {
+            options.regionStart  = start;
+            options.regionLength = static_cast<engine::FrameCount>(end - start);
+        }
+    }
+
+    NSString* extension = formatPopup.indexOfSelectedItem == 1 ? @".aiff" : @".wav";
+
+    // ── Master: one file through the save panel ─────────────────────────────
+    if (targetPopup.indexOfSelectedItem == 0) {
+        NSSavePanel* panel = [NSSavePanel savePanel];
+        panel.nameFieldStringValue = [@"Master" stringByAppendingString:extension];
+        panel.canCreateDirectories = YES;
+        panel.allowedContentTypes  = @[
+            [UTType typeWithFilenameExtension:@"wav"],
+            [UTType typeWithFilenameExtension:@"aiff"]
+        ];
+
+        if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+            return;
+
+        const auto rendered = project::renderProjectToFile(
+            *_project, _audio->transport().tempoMap(), options,
+            std::filesystem::path{panel.URL.path.UTF8String});
+
+        if (!rendered) {
+            NSAlert* alert        = [[NSAlert alloc] init];
+            alert.messageText     = @"Could not export audio";
+            alert.informativeText = @(rendered.error.c_str());
+            [alert runModal];
+            return;
+        }
+
+        for (const std::string& warning : rendered.warnings)
+            NSLog(@"INCDAW: export: %s", warning.c_str());
+        return;
+    }
+
+    // ── Stems or tracks: one file per source into a chosen directory ────────
+    const bool stems = targetPopup.indexOfSelectedItem == 1;
+
+    std::vector<std::pair<std::string, project::EntityId>> sources;
+
+    if (stems) {
+        for (const project::MixerNode& node : _project->mixerNodes())
+            if (node.id != _project->masterMixerNode())
+                sources.emplace_back(node.name, node.id);
+    } else {
+        for (const project::Channel& channel : _project->channels())
+            sources.emplace_back(channel.name, channel.id);
+    }
+
+    if (sources.empty()) {
         NSAlert* alert        = [[NSAlert alloc] init];
-        alert.messageText     = @"Could not export audio";
-        alert.informativeText = @(rendered.error.c_str());
+        alert.messageText     = @"Nothing to export";
+        alert.informativeText = stems ? @"The project has no mixer tracks besides the master."
+                                      : @"The project has no channels.";
         [alert runModal];
         return;
     }
 
-    for (const std::string& warning : rendered.warnings)
-        NSLog(@"INCDAW: export: %s", warning.c_str());
+    NSOpenPanel* directoryPanel        = [NSOpenPanel openPanel];
+    directoryPanel.canChooseFiles      = NO;
+    directoryPanel.canChooseDirectories = YES;
+    directoryPanel.canCreateDirectories = YES;
+    directoryPanel.prompt              = @"Export Here";
+
+    if ([directoryPanel runModal] != NSModalResponseOK || directoryPanel.URL == nil)
+        return;
+
+    const std::filesystem::path directory{directoryPanel.URL.path.UTF8String};
+
+    std::vector<std::string> taken;
+
+    for (const auto& [name, entity] : sources) {
+        project::RenderOptions perSource = options;
+        if (stems)
+            perSource.stemMixerNode = entity;
+        else
+            perSource.soloChannel = entity;
+
+        const std::string fileName =
+            app::session::exportFileName(name, extension.UTF8String, taken);
+        taken.push_back(fileName);
+
+        const auto rendered = project::renderProjectToFile(
+            *_project, _audio->transport().tempoMap(), perSource, directory / fileName);
+
+        if (!rendered) {
+            NSAlert* alert    = [[NSAlert alloc] init];
+            alert.messageText = [NSString
+                stringWithFormat:@"Could not export “%s”", fileName.c_str()];
+            alert.informativeText = @(rendered.error.c_str());
+            [alert runModal];
+            return;   // what rendered so far stays on disk; the error names the rest
+        }
+
+        for (const std::string& warning : rendered.warnings)
+            NSLog(@"INCDAW: export %s: %s", fileName.c_str(), warning.c_str());
+    }
 }
 
 - (void)exportMidi:(id)sender
