@@ -34,6 +34,8 @@
 #include "project/ProjectGraphCompiler.h"
 #include "project/RecordingSession.h"
 #include "app/commands/AudioEditCommands.h"
+#include "app/commands/SlicerCommands.h"
+#include "engine/audio/OnsetDetection.h"
 #include "ui/macos/AudioEditorView.h"
 #include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PatternListView.h"
@@ -705,6 +707,41 @@ std::filesystem::path incdawSupportDirectory()
                                           initial:@"0"];
     if (!std::isnan(semitones) && semitones != 0.0 && std::fabs(semitones) <= 24.0)
         [self applyStretchWithRatio:1.0 semitones:semitones];
+}
+
+/// Slices the editor's asset onto a new sampler channel: every detected hit
+/// on its own key, and the current pattern replaying the loop's timing.
+- (void)sliceToNewChannel:(id)sender
+{
+    (void)sender;
+
+    if (self.audioEditor.assetIdValue == 0)
+        return;
+
+    const project::EntityId assetId{self.audioEditor.assetIdValue};
+
+    const project::AudioAsset* asset = nullptr;
+    for (const project::AudioAsset& candidate : _project->audioAssets())
+        if (candidate.id == assetId)
+            asset = &candidate;
+    if (asset == nullptr)
+        return;
+
+    engine::AudioFileData data;
+    const std::string path =
+        !asset->absolutePath.empty() ? asset->absolutePath : asset->relativePath;
+    if (!engine::WavFile::read(path, data))
+        return;
+
+    const std::vector<engine::FrameCount> onsets = engine::audio::detectOnsets(data);
+    if (onsets.empty())
+        return;
+
+    if (_registry->execute(std::make_unique<app::SliceAssetCommand>(
+            assetId, project::EntityId{self.pianoRoll.patternIdValue}, onsets))) {
+        [self.channelRack setNeedsDisplay:YES];
+        [self audioAssetChanged];
+    }
 }
 
 // ── Automation write mode ────────────────────────────────────────────────────
@@ -1842,6 +1879,7 @@ std::filesystem::path incdawSupportDirectory()
         {@"Gain -3 dB",        @selector(editGainDown:)},
         {@"Time Stretch…",     @selector(editTimeStretch:)},
         {@"Pitch Shift…",      @selector(editPitchShift:)},
+        {@"Slice to New Channel", @selector(sliceToNewChannel:)},
     };
 
     for (const auto& verb : verbs) {

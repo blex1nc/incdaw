@@ -6,6 +6,57 @@ public version yet.
 
 ---
 
+## [Unreleased] — FL Studio 2026 feature parity, wave 1 — 2026-08-16
+
+Eight feature blocks closing gaps against the FL Studio 2026 functional
+reference (docs/FL2026_GAP.md holds the full analysis and status table).
+
+**Added**
+
+- **Piano Roll chord toolkit** (`app::music`, `ChordCommands`): chord
+  detection with inversion naming (Chord Panel equivalent), Chord Stamp
+  with bottom-up/top-down voicings, movement-minimising voice-leading,
+  diatonic progression nudge. Wired: Option-click stamps, `1`–`8` pick
+  the shape, `V` flips voicing, `C` names the selection, `[`/`]` nudge.
+- **Note tools** (`NoteToolCommands`): strum with anchored ends,
+  arpeggiate (up/down/up-down), legato to the next start, note labels
+  (F2) on the per-note property that has serialized since Phase 5.
+- **Clip splitting and timeline markers** (format v1.5): frame-exact
+  audio splits with advancing source offsets, tick-exact pattern and
+  automation splits, compile-equivalence asserted; `TimelineMarker`
+  (region = marker with length) with add/edit/remove commands, ruler
+  drawing, Option-click slice and `M`/Shift+`M` gestures.
+- **Sidechain routing**: sidechain edges now compile into detector-only
+  key inputs on the destination's compressor inserts, PDC-aligned,
+  never summed into audio; "Sidechain Into" in the mixer strip menu.
+- **EBU R128 loudness** (`incdaw.loudness`): BS.1770-4 K-weighting
+  designed per sample rate, momentary/short-term/gated integrated via a
+  constant-memory histogram, calibrated to the −3.01 LUFS reference.
+- **Stereo separation** on every strip (mid/side, −1 mono … +1 wide,
+  click-free ramp, automation key `stereoSeparation`) and **true
+  pre-fader sends** through a unity tap spliced ahead of the fader.
+- **Modulation effects**: chorus, flanger, phaser — bit-exact null at
+  defaults; **Transient Split** (Transmitter equivalent): fast/slow
+  envelope race, both/transients/sustain outputs, exact reassembly.
+- **Time-stretch subsystem** (`engine::dsp::timeStretch`): offline
+  WSOLA with transient locking (clicks survive both directions exactly
+  once), stereo-coherent alignment, pitch shift via windowed-sinc;
+  editor verbs Time Stretch…/Pitch Shift… with bit-exact undo of the
+  file; Option-drag stretch at the clip edge (`StretchClipsCommand`);
+  warped clips render at compile time and play through the graph.
+- **Slicer**: `engine::audio::detectOnsets` plus `SliceAssetCommand` —
+  one undo lands a sampler channel (a zone per slice, chromatic keys)
+  and the pattern replaying the loop's timing; "Slice to New Channel"
+  in the editor's Audio menu.
+
+**Tests**
+
+- 483 → 555 cases; every feature carries its own quality gates
+  (calibrated LUFS, analytic sidechain levels, WSOLA click preservation,
+  chord-theory pins, format round-trips and the v1.5 fixture).
+
+---
+
 ## [0.9.0] — 2026-08-16 — the core is complete
 
 Every engineering phase of the roadmap (0–20) is done: the first
