@@ -12,6 +12,56 @@ The twenty engineering phases produced a complete core; what follows is
 the UI build-out — FL-Studio-class workspaces over that core, in
 increments. Each increment ships working, tested behaviour.
 
+### UI build-out, increments 5–10 — the recorded gap list, closed — 2026-08-16
+
+One session over the standing polish/gap list. Every item that needed
+neither a new dependency (§41 approval) nor hardware landed:
+
+**Added**
+
+- **Insert reordering** (`MoveInsertCommand`, mixer menu Move Up/Down):
+  chain order is signal order, no longer only add order.
+- **Live parameter panels**: open panels follow live values at 5 Hz
+  (builtin state decode, hosted `get_value`, instrument model), so
+  automation, MIDI knobs and undo are visible; drags are never fought.
+- **clap_host_latency.changed**: the CLAP host implements the latency
+  extension; changed lands on an atomic flag, housekeeping re-reads
+  under the creation-time hostile cap and recompiles. Proven end to end
+  against the latency test plugin. `params->flush()`-while-idle recorded
+  as not currently applicable (no code path can queue into an instance
+  whose process is not running) in PLUGIN_HOST §5.
+- **Export progress and cancel**: RenderOptions.progress (coarse, false
+  cancels); the shell renders on a background thread over a copy of the
+  project behind a modal progress window, polling shared atomics.
+- **Touch and latch automation** (the 11b deferral): write spans the
+  pass, touch closes a segment per drag (mixer mouse-up reports gesture
+  ends) so existing envelope survives between drags, latch holds the
+  last value to the stop tick. Menu: Record Automation > Off/Write/
+  Touch/Latch; switching modes lands the pass first.
+- **Audio editor Cut/Copy/Paste/Delete**: three pure verbs
+  (extractRegion/deleteRegion/insertAudio — mismatched rate or channels
+  refused, never resampled silently) and two commands with bit-exact
+  undo; paste carries its piece so redo replays recorded bytes; copy is
+  deliberately not a command. App-local audio clipboard.
+- **Limiter (Lookahead)**: a new catalogued effect — fixed 2 ms window
+  (a parameter would leave PDC stale between rebuilds), sliding-maximum
+  gain so attenuation lands before the transient, latency reported into
+  the graph's existing compensation through the hosted plugins' door.
+  The classic limiter is untouched; Phase 15's node-level null holds.
+  The catalogue factory now takes the sample rate.
+- **Spectrum analyzer**: `engine/dsp/Fft` (own radix-2, allocation-free,
+  proven against a naive DFT), the Analyzer accumulating a Hann-windowed
+  mono downmix and publishing dBFS bins seqlock-style; "Open Editor" on
+  an analyzer opens a log-frequency spectrum view. The compiled graph
+  exposes insert nodes by slot for effect-specific surfaces.
+
+**Remaining, with their gates** (recorded in HANDOFF): AU then VST3 and
+FLAC/MP3 need dependency approval (§41); MIDI output/clock/sync needs a
+platform MIDI-out subsystem and hardware verification; sandboxed plugin
+processing is its own architectural program; graphical zone view,
+per-zone envelopes/filters/LFOs, and plugin out_events → recordable
+automation are future increments.
+
 ### UI build-out, increment 4 — mapping, zone and instrument editors — 2026-08-16
 
 The last of the recorded engine-side gaps a UI pass surfaces: instruments

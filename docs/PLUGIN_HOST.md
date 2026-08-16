@@ -145,10 +145,13 @@ Implemented (docs/DECISIONS.md D-029):
 
 Still to come:
 
-- Parameter changes from the UI reach the audio thread through the same
-  lock-free command queue as everything else; `params->flush()` when the
-  engine is idle (today a value queued while no audio runs waits for the next
-  process call).
+- `params->flush()` while idle — RECORDED AS NOT CURRENTLY APPLICABLE
+  (2026-08-16): every code path that writes a hosted instance's parameters
+  (panel, automation, MIDI map) resolves through the compiled graph, and a
+  slot without a live node in the graph has no sink to write through — so a
+  value can never sit in the queue of an instance whose process() is not
+  running. The case returns if a future surface writes to a BYPASSED slot's
+  persisted instance directly; implement flush then, not before.
 - Plugin-originated parameter changes (a user turning a knob in the plugin's
   own editor) flow back through the output event list and are recordable as
   automation (§7).
@@ -240,9 +243,12 @@ Implemented:
 
 Still to come:
 
-- A plugin that changes its latency while loaded (clap_host_latency.changed)
-  triggers a background graph recompile and atomic swap. Today the value is
-  a creation-time snapshot.
+- DONE (2026-08-16, UI build-out increment 5): clap_host_latency.changed
+  lands on an atomic flag on the instance; the shell's housekeeping consumes
+  the flags (PluginInstanceManager::refreshChangedLatencies), re-reads the
+  figure under the creation-time hostile cap, and recompiles — the same
+  atomic swap every edit uses. Proven end to end against the latency test
+  plugin, whose state load doubles its report and rings the callback.
 - Plugins that report **wrong** latency are a known real-world problem; a
   manual per-instance latency offset is provided as an escape hatch.
 

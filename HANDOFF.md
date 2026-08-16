@@ -1,7 +1,8 @@
 # INCDAW — HANDOFF
 
-Version: 3.4
-Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT increments 1-4 done
+Version: 3.5
+Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT increments 1-10 done;
+        remaining work is gated (see ROADMAP "Remaining, by gate")
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1579,17 +1580,59 @@ recording and the Audio Logger all work. What remains in it is polish):
     covers builtins only; panel value rows do not live-refresh while
     automation moves the same parameter.
 
-  NEXT: the increment list in ROADMAP "After the phases" is complete
-  (1-4). Remaining recorded polish/gaps to draw from: progress/cancel
-  for long exports, insert reordering as a command, live-refreshing
-  panels, graphical zone view, per-zone envelopes/filters/LFOs,
-  automation point-editor surface + touch/latch modes, editor markers/
-  regions/cut-copy-paste, MIDI output (clock/sync/feedback), AU then
-  VST3 hosting (dependency-gated, §41), FLAC/MP3 export (dependency-
-  gated), spectrum analyzer, lookahead limiting, plugin params->flush
-  while idle + out_events -> recordable automation +
-  clap_host_latency.changed, sandboxed plugin processing. Pick by
-  user priority.
+  UI BUILD-OUT INCREMENTS 5-10 ARE DONE (2026-08-16, one session;
+  commits 77e6b90, 9670a15, bce6766, 40a4a8f, 3e9e902, 4654f1e):
+    5. MoveInsertCommand + mixer Move Up/Down; live panel refresh at
+       5 Hz (builtin decode / hosted readParameter / instrument model,
+       never during a drag); clap_host_latency.changed implemented
+       end to end (host ext -> atomic flag ->
+       PluginInstanceManager::refreshChangedLatencies in housekeeping
+       -> recompile; latency test plugin's state load rings it).
+       flush-while-idle recorded NOT APPLICABLE in PLUGIN_HOST §5 —
+       no code path can queue into an instance whose process is not
+       running (bypassed slots have no sink in the graph).
+    6. RenderOptions.progress (every 32 blocks; false = "cancelled");
+       shell exports on a background thread over COPIES of project +
+       tempo map behind a modal progress window polling shared atomics
+       (modal runloop does not reliably drain the main GCD queue).
+    7. Touch/latch (the 11b deferral): session-level segment closing.
+       Write = one segment first-to-last move; touch = segment per
+       drag (MixerView mouseUp -> onParameterGestureEnded); latch =
+       hold last value to finish(endTick). Menu: Record Automation >
+       Off/Write/Touch/Latch; mode switch lands the pass first.
+    8. Editor clipboard: edits::extractRegion/deleteRegion/insertAudio
+       (rate/channel mismatch refused); DeleteAudioRegionCommand +
+       InsertAudioCommand (piece carried for redo); copy is not a
+       command; _audioClipboard app-local. Audio menu Cut/Copy/Paste/
+       Delete Selection.
+    9. LookaheadLimiterEffect "incdaw.limiterla": NEW catalogued
+       effect, classic limiter untouched (Phase 15 node-null intact).
+       Fixed 2 ms window BY DESIGN (latency read at topology, before
+       prepare; a knob-driven latency would stale PDC between
+       rebuilds) -> makeBuiltinEffect now takes sampleRate. Sliding
+       max via preallocated monotonic deque. Proven: transparent =
+       pure delay of exactly the window; step never exceeds ceiling;
+       insert reports 96 frames @48k into graph latency.
+   10. Spectrum: engine/dsp/Fft (radix-2, tables in setSize, transform
+       allocation-free, proven vs naive DFT); AnalyzerEffect
+       accumulates 2048-sample Hann mono downmix, publishes dBFS bins
+       via seqlock double buffer, readSpectrum on the UI thread;
+       CompiledProjectGraph::insertNodeFor (built insert NODES by
+       slot); ui/macos/SpectrumView (log-f path, decade gridlines),
+       opened by "Open Editor" on an analyzer slot, repainted at the
+       full housekeeping rate.
+    514 cases green Debug + Release; launch/quit smoke clean.
+
+  REMAINING — BY GATE (ROADMAP "Remaining, by gate" is authoritative):
+    - §41 DEPENDENCY APPROVAL REQUIRED: AU then VST3 hosting; FLAC/MP3
+      export. DO NOT start without the user's explicit approval.
+    - PLATFORM+HARDWARE: MIDI output/clock/sync/feedback (platform/
+      has input only; correctness claims need hardware).
+    - OWN PROGRAM: sandboxed plugin processing (crash matrix's open
+      item since Phase 19).
+    - UNGATED FUTURE INCREMENTS: graphical zone view, per-zone
+      envelopes/filters/LFOs, out_events -> recordable automation,
+      editor markers/regions, sample-accurate intra-block automation.
 
 Things to be careful about:
 

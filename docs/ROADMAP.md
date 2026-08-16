@@ -462,8 +462,25 @@ undoably.
 save/load and rebuilds; a zone edit is one undo entry; a mapping removed
 from the list stops driving its parameter.
 
-Later increments are drawn from the same recorded gap list as needed
-(docs/RELEASE.md known limits, HANDOFF §22).
+### Increments 5–10 — the recorded gap list — DONE 2026-08-16
+
+In one session: insert reordering as a command; live-refreshing parameter
+panels; clap_host_latency.changed → recompile (and flush-while-idle
+recorded as not applicable, PLUGIN_HOST §5); export progress with cancel
+on a background render; touch and latch automation modes; audio editor
+cut/copy/paste/delete with bit-exact undo; the lookahead limiter (new
+catalogued effect, fixed window, latency into the existing PDC); the
+spectrum analyzer (own FFT, seqlock publication, log-frequency view).
+
+### Remaining, by gate
+
+- **Dependency approval required (§41):** AU hosting, then VST3; FLAC and
+  MP3 export.
+- **Platform + hardware:** MIDI output, clock/sync, controller feedback.
+- **Its own program:** sandboxed (out-of-process) plugin processing.
+- **Future increments, ungated:** graphical zone-mapping view, per-zone
+  envelopes/filters/LFOs, plugin out_events → recordable automation,
+  editor markers/regions, sample-accurate intra-block automation.
 
 ---
 
