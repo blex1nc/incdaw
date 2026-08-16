@@ -1,6 +1,7 @@
 #include "engine/dsp/effects/BuiltinEffects.h"
 
 #include "engine/dsp/effects/DynamicsEffects.h"
+#include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
@@ -48,6 +49,11 @@ const std::vector<CatalogueEntry>& catalogue()
         add("incdaw.analyzer",   "Analyzer",   [] { return std::make_unique<AnalyzerEffect>(); });
         add("incdaw.loudness",   "Loudness Meter",
             [] { return std::make_unique<LoudnessMeterEffect>(); });
+        add("incdaw.chorus",     "Chorus",     [] { return std::make_unique<ChorusEffect>(); });
+        add("incdaw.flanger",    "Flanger",    [] { return std::make_unique<FlangerEffect>(); });
+        add("incdaw.phaser",     "Phaser",     [] { return std::make_unique<PhaserEffect>(); });
+        add("incdaw.transientsplit", "Transient Split",
+            [] { return std::make_unique<TransientSplitEffect>(); });
 
         return rows;
     }();

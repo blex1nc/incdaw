@@ -63,6 +63,35 @@ private:
     SampleRate sampleRate_ = 48000.0;
 };
 
+/// Splits the signal into transient and sustain components and rebalances
+/// them — the functional core of FL Studio 2026's Transmitter. A fast and a
+/// slow envelope race: where the fast one leads, the sound is a transient.
+/// `output` selects both (rebalanced), transients only, or sustain only, so
+/// two parallel strips can each take one half and shape it independently.
+/// At its defaults (both, 0 dB, 0 dB) it is exactly unity — the null test.
+class TransientSplitEffect final : public BuiltinEffect {
+public:
+    enum Param : std::uint32_t {
+        output      = 0,   ///< 0 both · 1 transients · 2 sustain
+        transientDb = 1,
+        sustainDb   = 2,
+    };
+
+    enum class Output : int { both = 0, transientsOnly = 1, sustainOnly = 2 };
+
+    TransientSplitEffect();
+
+    void prepare(SampleRate sampleRate, FrameCount maxBlockSize) override;
+    void process(const ProcessContext& context) noexcept override;
+
+    [[nodiscard]] const char* name() const noexcept override { return "Transient Split"; }
+
+private:
+    double     fast_ = 0.0;   ///< fast envelope, linked across channels
+    double     slow_ = 0.0;   ///< slow envelope
+    SampleRate sampleRate_ = 48000.0;
+};
+
 /// Downward gate: linked peak detector opens at threshold, holds, then
 /// releases. At the floor threshold the gate is always open — unity.
 class GateEffect final : public BuiltinEffect {

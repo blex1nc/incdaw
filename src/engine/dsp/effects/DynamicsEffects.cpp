@@ -165,6 +165,75 @@ void LimiterEffect::process(const ProcessContext& context) noexcept
     }
 }
 
+// ── TransientSplitEffect ──────────────────────────────────────────────────────
+
+namespace {
+constexpr EffectParameter transientSplitParameters[] = {
+    {TransientSplitEffect::output,      "Output",    0.0,   2.0,  0.0, true},
+    {TransientSplitEffect::transientDb, "Transient", -24.0, 24.0, 0.0, false},
+    {TransientSplitEffect::sustainDb,   "Sustain",   -24.0, 24.0, 0.0, false},
+};
+} // namespace
+
+TransientSplitEffect::TransientSplitEffect()
+    : BuiltinEffect(transientSplitParameters, std::size(transientSplitParameters)) {}
+
+void TransientSplitEffect::prepare(SampleRate sampleRate, FrameCount maxBlockSize)
+{
+    (void)maxBlockSize;
+    sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    fast_       = 0.0;
+    slow_       = 0.0;
+}
+
+void TransientSplitEffect::process(const ProcessContext& context) noexcept
+{
+    sumInputsInto(context);
+
+    const auto   mode          = static_cast<int>(valueAt(0) + 0.5);
+    const double transientGain = dbToGain(valueAt(1));
+    const double sustainGain   = dbToGain(valueAt(2));
+
+    // Both components at 0 dB reassemble to exactly the input.
+    if (mode == static_cast<int>(Output::both) && transientGain == 1.0 && sustainGain == 1.0)
+        return;
+
+    // A fast and a slow envelope race the same linked peak; where the fast
+    // one leads, the signal is a transient.
+    const double fastCoefficient = coefficientFor(1.0, sampleRate_);
+    const double slowCoefficient = coefficientFor(40.0, sampleRate_);
+
+    const std::size_t channels = context.output.channelCount();
+
+    for (FrameCount frame = 0; frame < context.frameCount; ++frame) {
+        const double peak = linkedPeakAt(context, frame, channels);
+
+        fast_ = peak + fastCoefficient * (fast_ - peak);
+        slow_ = peak + slowCoefficient * (slow_ - peak);
+
+        const double transientness =
+            fast_ > 1.0e-9 ? std::clamp(1.0 - slow_ / fast_, 0.0, 1.0) : 0.0;
+
+        double gain = 0.0;
+        switch (static_cast<Output>(mode)) {
+            case Output::both:
+                gain = transientness * transientGain + (1.0 - transientness) * sustainGain;
+                break;
+            case Output::transientsOnly:
+                gain = transientness * transientGain;
+                break;
+            case Output::sustainOnly:
+                gain = (1.0 - transientness) * sustainGain;
+                break;
+        }
+
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+            Sample* samples = context.output.channel(channel);
+            samples[frame] = static_cast<Sample>(static_cast<double>(samples[frame]) * gain);
+        }
+    }
+}
+
 // ── GateEffect ───────────────────────────────────────────────────────────────
 
 GateEffect::GateEffect() : BuiltinEffect(gateParameters, 4) {}
