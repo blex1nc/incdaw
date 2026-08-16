@@ -47,6 +47,7 @@
 #include "ui/macos/MixerView.h"
 #include "ui/macos/PlaylistView.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -101,6 +102,13 @@ std::filesystem::path incdawSupportDirectory()
 }
 
 } // namespace
+
+/// One export destination and the options that render it.
+struct ExportJob {
+    std::filesystem::path          destination;
+    incdaw::project::RenderOptions options;
+    std::string                    displayName;
+};
 
 /// Recent projects live in user defaults as an array of absolute paths,
 /// newest first.
@@ -230,6 +238,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// open (learn and forget change mappings from elsewhere).
     NSWindow*                  _mappingWindow;
     NSMutableArray<NSNumber*>* _mappingRowIds;
+
+    /// Export cancel flag, shared with the rendering thread. Reset per run.
+    std::shared_ptr<std::atomic<bool>> _exportCancel;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -2211,6 +2222,130 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     return [self writeProjectToPath];
 }
 
+/// Renders `jobs` in order on a background thread behind a modal progress
+/// window with Cancel. The project and tempo map are COPIED first, so edits
+/// after the panel closes cannot race the renderer; the shared sample cache
+/// is thread-safe by design. Errors are shown; a cancel is silent.
+- (void)runExportJobs:(std::vector<ExportJob>)jobs
+{
+    if (jobs.empty())
+        return;
+
+    NSWindow* progress = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(0, 0, 380, 110)
+                  styleMask:NSWindowStyleMaskTitled
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    progress.title = @"Exporting…";
+
+    NSTextField* label = [NSTextField labelWithString:@(jobs.front().displayName.c_str())];
+    label.frame         = NSMakeRect(20, 66, 340, 18);
+    label.lineBreakMode = NSLineBreakByTruncatingTail;
+    [progress.contentView addSubview:label];
+
+    NSProgressIndicator* bar =
+        [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(20, 44, 340, 16)];
+    bar.indeterminate = NO;
+    bar.minValue      = 0.0;
+    bar.maxValue      = 1.0;
+    [progress.contentView addSubview:bar];
+
+    NSButton* cancel = [NSButton buttonWithTitle:@"Cancel"
+                                          target:self
+                                          action:@selector(exportCancelPressed:)];
+    cancel.frame = NSMakeRect(280, 8, 80, 28);
+    [progress.contentView addSubview:cancel];
+
+    _exportCancel = std::make_shared<std::atomic<bool>>(false);
+
+    // Shared with the renderer thread; the modal loop below only polls.
+    auto fraction = std::make_shared<std::atomic<double>>(0.0);
+    auto jobIndex = std::make_shared<std::atomic<std::size_t>>(0);
+    auto done     = std::make_shared<std::atomic<bool>>(false);
+    auto failed   = std::make_shared<std::atomic<bool>>(false);
+    auto errorBox = std::make_shared<std::string>();   // written before `done`
+
+    auto projectCopy = std::make_shared<project::Project>(*_project);
+    auto tempoCopy = std::make_shared<engine::TempoMap>(_audio->transport().tempoMap());
+    auto jobList   = std::make_shared<std::vector<ExportJob>>(std::move(jobs));
+    auto cancelled = _exportCancel;
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        for (std::size_t index = 0; index < jobList->size(); ++index) {
+            jobIndex->store(index, std::memory_order_relaxed);
+
+            ExportJob& job = (*jobList)[index];
+
+            job.options.progress = [&](double f) {
+                fraction->store((static_cast<double>(index) + f)
+                                    / static_cast<double>(jobList->size()),
+                                std::memory_order_relaxed);
+                return !cancelled->load(std::memory_order_relaxed);
+            };
+
+            const auto rendered = project::renderProjectToFile(
+                *projectCopy, *tempoCopy, job.options, job.destination);
+
+            for (const std::string& warning : rendered.warnings)
+                NSLog(@"INCDAW: export %s: %s", job.displayName.c_str(), warning.c_str());
+
+            if (!rendered) {
+                if (rendered.error != "cancelled") {
+                    *errorBox = job.displayName + ": " + rendered.error;
+                    failed->store(true, std::memory_order_release);
+                }
+                break;
+            }
+        }
+
+        done->store(true, std::memory_order_release);
+    });
+
+    [progress center];
+    [progress makeKeyAndOrderFront:nil];
+
+    // Poll rather than dispatch to the main queue: the modal runloop mode is
+    // not guaranteed to drain it, and atomics have no such dependency.
+    NSModalSession session = [NSApp beginModalSessionForWindow:progress];
+
+    while (!done->load(std::memory_order_acquire)) {
+        if ([NSApp runModalSession:session] != NSModalResponseContinue)
+            break;
+
+        bar.doubleValue = fraction->load(std::memory_order_relaxed);
+
+        const std::size_t index = jobIndex->load(std::memory_order_relaxed);
+        if (index < jobList->size())
+            label.stringValue = @((*jobList)[index].displayName.c_str());
+
+        [NSThread sleepForTimeInterval:1.0 / 30.0];
+    }
+
+    // The window closes only after the renderer thread is done with the
+    // shared state — cancel makes that quick.
+    while (!done->load(std::memory_order_acquire))
+        [NSThread sleepForTimeInterval:1.0 / 100.0];
+
+    [NSApp endModalSession:session];
+    [progress close];
+    _exportCancel.reset();
+
+    if (failed->load(std::memory_order_acquire)) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Could not export audio";
+        alert.informativeText = @(errorBox->c_str());
+        [alert runModal];
+    }
+}
+
+- (void)exportCancelPressed:(id)sender
+{
+    (void)sender;
+
+    if (_exportCancel != nullptr)
+        _exportCancel->store(true, std::memory_order_relaxed);
+}
+
 - (void)exportAudio:(id)sender
 {
     (void)sender;
@@ -2342,20 +2477,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
             return;
 
-        const auto rendered = project::renderProjectToFile(
-            *_project, _audio->transport().tempoMap(), options,
-            std::filesystem::path{panel.URL.path.UTF8String});
-
-        if (!rendered) {
-            NSAlert* alert        = [[NSAlert alloc] init];
-            alert.messageText     = @"Could not export audio";
-            alert.informativeText = @(rendered.error.c_str());
-            [alert runModal];
-            return;
-        }
-
-        for (const std::string& warning : rendered.warnings)
-            NSLog(@"INCDAW: export: %s", warning.c_str());
+        std::vector<ExportJob> jobs;
+        jobs.push_back({std::filesystem::path{panel.URL.path.UTF8String}, options, "Master"});
+        [self runExportJobs:std::move(jobs)];
         return;
     }
 
@@ -2394,6 +2518,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     const std::filesystem::path directory{directoryPanel.URL.path.UTF8String};
 
     std::vector<std::string> taken;
+    std::vector<ExportJob>   jobs;
 
     for (const auto& [name, entity] : sources) {
         project::RenderOptions perSource = options;
@@ -2406,21 +2531,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
             app::session::exportFileName(name, extension.UTF8String, taken);
         taken.push_back(fileName);
 
-        const auto rendered = project::renderProjectToFile(
-            *_project, _audio->transport().tempoMap(), perSource, directory / fileName);
-
-        if (!rendered) {
-            NSAlert* alert    = [[NSAlert alloc] init];
-            alert.messageText = [NSString
-                stringWithFormat:@"Could not export “%s”", fileName.c_str()];
-            alert.informativeText = @(rendered.error.c_str());
-            [alert runModal];
-            return;   // what rendered so far stays on disk; the error names the rest
-        }
-
-        for (const std::string& warning : rendered.warnings)
-            NSLog(@"INCDAW: export %s: %s", fileName.c_str(), warning.c_str());
+        jobs.push_back({directory / fileName, perSource, fileName});
     }
+
+    // The first failure stops the run with its name; finished files stay.
+    [self runExportJobs:std::move(jobs)];
 }
 
 - (void)exportMidi:(id)sender

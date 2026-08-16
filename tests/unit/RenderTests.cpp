@@ -156,6 +156,38 @@ TEST_CASE("EXIT CRITERION: offline render is byte-identical to a realtime captur
     CHECK(peak > 0.01f);
 }
 
+TEST_CASE("progress reports a rising fraction, and returning false cancels")
+{
+    project::Project       projectModel = makeArrangedProject();
+    const engine::TempoMap map{120.0, 48000.0};
+
+    project::RenderOptions options;
+    options.sampleRate = 48000.0;
+
+    int    calls = 0;
+    double last  = 0.0;
+
+    options.progress = [&](double fraction) {
+        ++calls;
+        CHECK(fraction >= last);
+        CHECK(fraction <= 1.0);
+        last = fraction;
+        return true;
+    };
+
+    const auto full = project::renderProject(projectModel, map, options);
+    REQUIRE(full);
+    CHECK(calls > 0);
+
+    // Cancelling mid-render fails with the sentinel, never a crash or a
+    // half-written success.
+    options.progress = [](double) { return false; };
+
+    const auto cancelled = project::renderProject(projectModel, map, options);
+    CHECK_FALSE(cancelled);
+    CHECK(cancelled.error == "cancelled");
+}
+
 TEST_CASE("a region renders exactly its frames plus the tail")
 {
     project::Project       projectModel = makeArrangedProject();

@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace incdaw::project {
@@ -56,6 +57,11 @@ struct RenderOptions {
 
     engine::SampleCache*     sampleCache = nullptr;
     const ParameterRegistry* parameters  = nullptr;
+
+    /// Called periodically with the completed fraction (0..1) on the
+    /// rendering thread. Returning false cancels: the render stops and
+    /// fails with "cancelled". Null is never called — and costs nothing.
+    std::function<bool(double)> progress;
 };
 
 struct RenderResult {

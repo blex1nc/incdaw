@@ -149,6 +149,8 @@ RenderResult renderProject(const Project& project, const engine::TempoMap& tempo
                                  std::vector<engine::Sample>(
                                      static_cast<std::size_t>(totalFrames)));
 
+    std::size_t blocksSinceProgress = 0;
+
     for (engine::FrameCount rendered = 0; rendered < totalFrames;) {
         const engine::FrameCount count =
             std::min<engine::FrameCount>(options.blockSize, totalFrames - rendered);
@@ -162,6 +164,18 @@ RenderResult renderProject(const Project& project, const engine::TempoMap& tempo
                             + static_cast<std::ptrdiff_t>(rendered));
 
         rendered += count;
+
+        // Coarse on purpose: at ~70x realtime a per-block callback would be
+        // mostly callback.
+        if (options.progress && ++blocksSinceProgress >= 32) {
+            blocksSinceProgress = 0;
+
+            if (!options.progress(static_cast<double>(rendered)
+                                  / static_cast<double>(totalFrames))) {
+                result.error = "cancelled";
+                return result;
+            }
+        }
     }
 
     // ── Normalize ────────────────────────────────────────────────────────
