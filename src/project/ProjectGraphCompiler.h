@@ -3,6 +3,7 @@
 #include "engine/audio/AudioStream.h"
 #include "engine/audio/SampleCache.h"
 #include "engine/core/SampleRingBuffer.h"
+#include "engine/graph/ParameterSink.h"
 #include "engine/graph/RenderGraph.h"
 #include "engine/graph/StateIO.h"
 #include "engine/instrument/Instrument.h"
@@ -161,6 +162,13 @@ struct CompiledProjectGraph {
     std::vector<EntityId>         insertSlots;
     std::vector<engine::StateIO*> insertStates;
 
+    /// Insert parameter sinks, same population rule (a slot whose node has no
+    /// sink is absent) — what a parameter panel writes through. Owned by
+    /// `graph`; the compiler's own automation and MIDI bindings resolve
+    /// against the same sinks, so a panel and a lane cannot disagree.
+    std::vector<EntityId>               sinkSlots;
+    std::vector<engine::ParameterSink*> insertSinks;
+
     std::string error;
 
     /// Non-fatal compile notes: an asset file that could not be read, an
@@ -181,6 +189,9 @@ struct CompiledProjectGraph {
 
     /// State carrier for an insert slot, or nullptr if it is not in the graph.
     [[nodiscard]] engine::StateIO* insertStateFor(EntityId slot) const noexcept;
+
+    /// Parameter sink for an insert slot, or nullptr if it is not in the graph.
+    [[nodiscard]] engine::ParameterSink* insertSinkFor(EntityId slot) const noexcept;
 };
 
 /// Compiles `project` against `tempoMap`, which must outlive the returned graph

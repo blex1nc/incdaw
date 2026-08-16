@@ -151,4 +151,37 @@ std::vector<std::string> restorePluginState(const Project& project,
     return warnings;
 }
 
+std::vector<CarriedInsertState> captureBuiltinInsertState(const Project& project,
+                                                          const CompiledProjectGraph& graph)
+{
+    std::vector<CarriedInsertState> carried;
+
+    for (const MixerNode& node : project.mixerNodes()) {
+        for (const PluginSlot& slot : node.inserts) {
+            if (slot.plugin.format != plugins::Format::builtin)
+                continue;
+
+            engine::StateIO* state = graph.insertStateFor(slot.id);
+            if (state == nullptr)
+                continue;   // bypassed or unbuilt: nothing live to carry
+
+            CarriedInsertState entry;
+            entry.slot = slot.id;
+
+            if (state->saveState(entry.blob))
+                carried.push_back(std::move(entry));
+        }
+    }
+
+    return carried;
+}
+
+void restoreBuiltinInsertState(const std::vector<CarriedInsertState>& carried,
+                               const CompiledProjectGraph& graph)
+{
+    for (const CarriedInsertState& entry : carried)
+        if (engine::StateIO* state = graph.insertStateFor(entry.slot))
+            (void)state->loadState(entry.blob.data(), entry.blob.size());
+}
+
 } // namespace incdaw::project

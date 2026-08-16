@@ -12,6 +12,50 @@ The twenty engineering phases produced a complete core; what follows is
 the UI build-out — FL-Studio-class workspaces over that core, in
 increments. Each increment ships working, tested behaviour.
 
+### UI build-out, increment 2 — generic insert parameter panel — 2026-08-16
+
+The ten builtin effects finally have a UI, and "Open Editor" never dead-ends.
+
+**Added**
+
+- `ui/macos/InsertParameterPanel`: every parameter of an insert slot as a
+  labelled slider (stepped parameters snap to ticks). The panel holds row
+  data and a write block, never an engine pointer — sinks die with their
+  graph, so each slider move re-resolves the slot against the live graph.
+- "Open Editor" on a mixer insert now opens the plugin's own GUI when it
+  has one, and the generic panel otherwise (builtin effects, hosted
+  plugins without editors, bypassed slots). Panel writes mark the
+  document dirty and persist through the existing state capture at save.
+- `CompiledProjectGraph::insertSinkFor(slot)`: the compiler now exports
+  the same per-slot parameter sinks its own automation and MIDI bindings
+  resolve against.
+- `BuiltinEffect::decodeState`: the id-keyed blob decoder factored out of
+  `loadState` and shared with the panel's value display — one decoder,
+  no second opinion about the layout.
+- `ClapInstance::readParameter` (CLAP `params.get_value`, main-thread):
+  hosted plugins report their current values to the panel; defaults fill
+  in for plugins that cannot answer.
+
+**Fixed**
+
+- Builtin insert state now survives graph rebuilds. Every compile
+  recreates builtin nodes at their defaults, so any value set on the live
+  node (a MIDI-mapped knob, and now the panel) silently reset on the next
+  note edit. `captureBuiltinInsertState`/`restoreBuiltinInsertState`
+  carry the id-keyed blobs across the swap in memory; hosted instances
+  already persisted (D-031) and are deliberately not touched. Open/New
+  clear the live handle table first, so carry-over can never leak values
+  across projects whose entity ids collide.
+
+**Known limitation (recorded)**
+
+- Panel writes are not undoable (insert parameter values live in engine
+  state, not the model — same as turning the knob in a plugin's own GUI).
+- An open panel does not live-refresh while automation moves the same
+  parameters; it shows values as of opening.
+
+---
+
 ### UI build-out, increment 1 — project lifecycle safety — 2026-08-16
 
 Unsaved work is no longer lost silently. The gaps this closes were the

@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace incdaw::engine::dsp {
@@ -60,6 +61,14 @@ public:
     /// that gains parameters still loads yesterday's state.
     [[nodiscard]] bool saveState(std::vector<std::uint8_t>& out) const override;
     [[nodiscard]] bool loadState(const std::uint8_t* data, std::size_t size) override;
+
+    /// Decodes an id-keyed state blob into {id, value} pairs — the one
+    /// decoder loadState itself applies, exposed so the UI can read a live
+    /// effect's current values through its StateIO without a second,
+    /// disagreeing idea of the layout.
+    [[nodiscard]] static bool
+    decodeState(const std::uint8_t* data, std::size_t size,
+                std::vector<std::pair<std::uint32_t, double>>& out);
 
     // ── Introspection (build/UI side) ────────────────────────────────────
     [[nodiscard]] const EffectParameter* parameters() const noexcept { return parameters_; }

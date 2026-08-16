@@ -241,6 +241,11 @@ std::unique_ptr<ClapInstance> ClapLibrary::create(const std::string& pluginId,
     const auto* params = static_cast<const clap_plugin_params_t*>(
         instance->plugin_->get_extension(instance->plugin_, CLAP_EXT_PARAMS));
 
+    // Kept for the lifetime of the instance: readParameter (the UI's value
+    // display) asks the plugin through it. get_value is validated at the
+    // call, so a half-implemented extension degrades to "no reading".
+    instance->params_ = params;
+
     if (params != nullptr && params->count != nullptr && params->get_info != nullptr) {
         const uint32_t parameterCount = params->count(instance->plugin_);
 
@@ -426,6 +431,14 @@ void ClapInstance::setParameter(std::uint32_t parameterId, double plainValue) no
     // A failed push is a full queue; dropping is safe because automation
     // writes every block, so the value arrives one block late at worst.
     (void)paramEvents_.push({parameterId, plainValue});
+}
+
+bool ClapInstance::readParameter(std::uint32_t parameterId, double& out) const noexcept
+{
+    if (plugin_ == nullptr || params_ == nullptr || params_->get_value == nullptr)
+        return false;
+
+    return params_->get_value(plugin_, parameterId, &out);
 }
 
 bool ClapInstance::process(float* left, float* right, std::uint32_t frames) noexcept

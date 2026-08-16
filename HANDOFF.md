@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 3.1
-Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT IN PROGRESS (increment 1 done)
+Version: 3.2
+Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT IN PROGRESS (increments 1-2 done)
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1470,10 +1470,56 @@ recording and the Audio Logger all work. What remains in it is polish):
     dirty — invisible to the shell until clap_host_state.mark_dirty
     lands (PLUGIN_HOST §6 host-callback work).
 
-  NEXT: increment 2 — the generic parameter panel (ROADMAP "After the
-  phases" §Increment 2): every automatable parameter of a selected
-  builtin effect / builtin instrument / hosted plugin, listed and
-  editable, driven by ParameterRegistry + PluginParameterInfo.
+  UI BUILD-OUT INCREMENT 2 IS DONE (2026-08-16): the generic insert
+  parameter panel — the ten builtin effects have a UI, and "Open
+  Editor" never dead-ends.
+    - ui/macos/InsertParameterPanel.{h,mm}: label + slider + value per
+      parameter (stepped -> tick marks), scrolls past 420 pt. Holds row
+      DATA and a write block only; every write re-resolves the slot
+      against _live, because sinks die with their graph.
+    - Shell: "Open Editor" opens the CLAP GUI when hasEditor(), else
+      the panel (builtins, editor-less or bypassed hosted slots).
+      _panelWindows/_panelObservers mirror the editor tables; vanished
+      slots close their panels in the rebuild sweep; writes markDirty.
+    - CompiledProjectGraph::insertSinkFor(slot) — the compiler's own
+      insertSinks map (lanes/knobs resolution) exported per slot.
+    - BuiltinEffect::decodeState — loadState's decoder factored out;
+      the panel reads current builtin values via StateIO::saveState +
+      this decoder (one decoder, no drift).
+    - ClapInstance::readParameter — CLAP params.get_value, main-thread,
+      params_ extension pointer now retained on the instance; hosted
+      panels show live values, defaults when a plugin cannot answer.
+    - FIXED (was latent since Phase 15/16): builtin insert nodes are
+      recreated at defaults by EVERY compile, so values set on the live
+      node (MIDI-mapped knobs; now the panel) reset on any note edit.
+      project::captureBuiltinInsertState/restoreBuiltinInsertState
+      (PluginStateFiles) carry the blobs in memory across the swap in
+      rebuildGraph. Hosted instances persist via D-031 and are NOT
+      re-fed their blobs. adoptLoadedProjectRestoringStateFrom clears
+      _live and closes all panels FIRST — entity ids restart per
+      project, and a stale handle table could alias a new slot id onto
+      an old node (values would leak across projects).
+    - Tests: 4 new cases — sink exposure + write lands (decoded through
+      the shared decoder), rebuild carry-over (fresh node proves the
+      reset, restore proves the fix, vanished-slot restore is a no-op),
+      hosted readParameter (default, after a processed change, unknown
+      id refused). 495 cases green Debug + Release. Launch + clean-quit
+      smoke verified live.
+    DEFERRED to increment 4 (recorded in ROADMAP): builtin INSTRUMENT
+    parameters — instruments have sinks but no StateIO, so a panel
+    value would silently vanish at save/load; persistence first.
+    NOT undoable (recorded): panel writes, same as a plugin's own GUI.
+    OBSERVED, NOT FIXED (pre-existing, out of scope §40): an open CLAP
+    editor window survives a slot whose uid changes in place (the
+    rebuild sweep only closes windows whose slot KEY vanished, but a
+    changed uid recreates the instance under the same key, D-031) —
+    the editor window can outlive the instance it was opened on.
+    Recheck when editor lifecycle is next touched.
+
+  NEXT: increment 3 — the export options dialog (ROADMAP "After the
+  phases" §Increment 3): master/stems/tracks/region, format, bit
+  depth, dither, normalize — project::OfflineRender already implements
+  all of it; only the dialog is missing.
 
 Things to be careful about:
 

@@ -283,6 +283,34 @@ TEST_CASE("a created instance reports the plugin's parameters in plain terms")
     CHECK(!gain.stepped);
 }
 
+TEST_CASE("readParameter reports the plugin's current value, before and after a change")
+{
+    plugins::ClapLibrary library;
+    std::string          error;
+
+    REQUIRE(library.open(INCDAW_TESTGAIN_PLUGIN, error));
+
+    auto instance = library.create(testGainUid, 48000.0, blockSize, error);
+    REQUIRE(instance != nullptr);
+
+    double value = -1.0;
+    REQUIRE(instance->readParameter(gainParamId, value));
+    CHECK(value == doctest::Approx(0.5));   // the default, untouched
+
+    // A queued value only lands inside process — reading is asking the
+    // plugin, not the queue.
+    instance->setParameter(gainParamId, 1.5);
+
+    std::vector<float> left(blockSize, 0.0f);
+    std::vector<float> right(blockSize, 0.0f);
+    REQUIRE(instance->process(left.data(), right.data(), blockSize));
+
+    REQUIRE(instance->readParameter(gainParamId, value));
+    CHECK(value == doctest::Approx(1.5));
+
+    CHECK_FALSE(instance->readParameter(424242, value));   // a parameter it does not have
+}
+
 TEST_CASE("the instance manager caches discovery per plugin type")
 {
     ScratchDir folder{"incdaw-param-discovery"};

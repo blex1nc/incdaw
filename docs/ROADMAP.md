@@ -410,12 +410,26 @@ recovery and newer-autosave offer on open, Open Recent. Headless decisions in
 **Exit criterion (met):** quitting, opening over, or replacing a dirty
 project always asks first; a crash loses at most the autosave interval.
 
-### Increment 2 — generic parameter panel (planned)
+### Increment 2 — generic insert parameter panel — DONE 2026-08-16
 
-A surface listing every automatable parameter of a selected builtin effect,
-builtin instrument, or hosted plugin, driven by ParameterRegistry and
-PluginParameterInfo — the ten Phase 15 effects and the sampler's filter/LFO
-become editable without automation lanes.
+"Open Editor" on any insert now always opens something: a hosted plugin's
+own GUI when it has one, and otherwise the generic panel — every parameter
+of the slot as a slider, rows from the builtin catalogue or CLAP discovery,
+current values read live (builtin state decoded by the loadState decoder;
+hosted plugins asked via `params.get_value`), writes through the same
+`ParameterSink` a lane automates. Enabling fix, tested: builtin insert
+state now survives graph rebuilds (in-memory carry-over — without it every
+note edit reset a builtin's knobs, which also silently affected
+MIDI-mapped values).
+
+**Exit criterion (met):** the ten Phase 15 effects are editable from the
+mixer with no per-effect UI code, and a value set on a builtin survives an
+unrelated edit's rebuild.
+
+**Deliberately deferred:** builtin INSTRUMENT parameters (sampler
+filter/LFO, synth ADSR). Instruments have sinks but no StateIO — a panel
+value would silently vanish at save/load. They join increment 4, where
+instrument-parameter persistence gets designed alongside the zone editor.
 
 ### Increment 3 — export options dialog (planned)
 
@@ -423,10 +437,11 @@ Master/stems/tracks/region, format, bit depth, dither, normalize — the
 options `project::OfflineRender` already implements, reachable from File >
 Export Audio.
 
-### Increment 4 — mapping and zone editors (planned)
+### Increment 4 — mapping, zone and instrument editors (planned)
 
 MIDI mapping list UI; a sampler zone-mapping editor over
-`Channel::samplerZones`.
+`Channel::samplerZones`; instrument parameter persistence + panel (the
+increment-2 deferral).
 
 Later increments are drawn from the same recorded gap list as needed
 (docs/RELEASE.md known limits, HANDOFF §22).

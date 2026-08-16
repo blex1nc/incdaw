@@ -113,6 +113,23 @@ bool BuiltinEffect::saveState(std::vector<std::uint8_t>& out) const
 
 bool BuiltinEffect::loadState(const std::uint8_t* data, std::size_t size)
 {
+    std::vector<std::pair<std::uint32_t, double>> decoded;
+    if (!decodeState(data, size, decoded))
+        return false;
+
+    // Unknown ids are skipped, not errors: yesterday's build may have
+    // saved a parameter this one no longer has.
+    for (const auto& [id, value] : decoded)
+        setParameter(id, value);
+
+    return true;
+}
+
+bool BuiltinEffect::decodeState(const std::uint8_t* data, std::size_t size,
+                                std::vector<std::pair<std::uint32_t, double>>& out)
+{
+    out.clear();
+
     std::uint32_t version = 0;
     std::uint32_t count   = 0;
     if (!readU32(data, size, version) || version != stateVersion
@@ -125,9 +142,7 @@ bool BuiltinEffect::loadState(const std::uint8_t* data, std::size_t size)
         if (!readU32(data, size, id) || !readF64(data, size, value))
             return false;
 
-        // Unknown ids are skipped, not errors: yesterday's build may have
-        // saved a parameter this one no longer has.
-        setParameter(id, value);
+        out.emplace_back(id, value);
     }
 
     return true;

@@ -11,9 +11,11 @@
 #include "engine/transport/TempoMap.h"
 #include "project/Model.h"
 #include "project/ParameterRegistry.h"
+#include "project/PluginStateFiles.h"
 #include "project/ProjectGraphCompiler.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 using namespace incdaw;
@@ -147,4 +149,91 @@ TEST_CASE("every catalogued effect constructs, prepares and carries the shared i
     }
 
     CHECK(engine::dsp::makeBuiltinEffect("incdaw.nope") == nullptr);
+}
+
+namespace {
+
+/// Current value of one parameter of a live insert, read the way the panel
+/// reads it: StateIO -> blob -> the shared decoder.
+double decodedValue(engine::StateIO& state, std::uint32_t parameterId)
+{
+    std::vector<std::uint8_t> blob;
+    REQUIRE(state.saveState(blob));
+
+    std::vector<std::pair<std::uint32_t, double>> decoded;
+    REQUIRE(engine::dsp::BuiltinEffect::decodeState(blob.data(), blob.size(), decoded));
+
+    for (const auto& [id, value] : decoded)
+        if (id == parameterId)
+            return value;
+
+    FAIL("parameter not in decoded state");
+    return 0.0;
+}
+
+} // namespace
+
+TEST_CASE("the compiled graph exposes an insert's parameter sink, and writes land")
+{
+    project::EntityId slotId;
+    project::Project  project = projectWithMasterInsert("incdaw.utility", slotId);
+    project.addPattern("P");
+
+    const engine::TempoMap map{120.0, 48000.0};
+
+    const auto compiled =
+        project::compileProjectGraph(project, map, project::GraphCompileOptions{});
+    REQUIRE(compiled);
+
+    engine::ParameterSink* sink = compiled.insertSinkFor(slotId);
+    REQUIRE(sink != nullptr);
+    CHECK(compiled.insertSinkFor(project::EntityId{999999}) == nullptr);
+
+    sink->setParameter(engine::dsp::UtilityEffect::gainDb, -6.0);
+
+    engine::StateIO* state = compiled.insertStateFor(slotId);
+    REQUIRE(state != nullptr);
+    CHECK(decodedValue(*state, engine::dsp::UtilityEffect::gainDb)
+          == doctest::Approx(-6.0));
+}
+
+TEST_CASE("builtin insert state survives a rebuild through the carry-over")
+{
+    project::EntityId slotId;
+    project::Project  project = projectWithMasterInsert("incdaw.utility", slotId);
+    project.addPattern("P");
+
+    const engine::TempoMap map{120.0, 48000.0};
+
+    const auto first =
+        project::compileProjectGraph(project, map, project::GraphCompileOptions{});
+    REQUIRE(first);
+
+    // A value automation, a MIDI mapping, or the panel set on the live node —
+    // nothing in the model records it.
+    first.insertSinkFor(slotId)->setParameter(engine::dsp::UtilityEffect::gainDb, -9.0);
+
+    const auto carried = project::captureBuiltinInsertState(project, first);
+    REQUIRE(carried.size() == 1);
+
+    // The rebuild constructs a fresh node, which starts at its defaults —
+    // this is the reset the carry-over exists to undo.
+    const auto second =
+        project::compileProjectGraph(project, map, project::GraphCompileOptions{});
+    REQUIRE(second);
+
+    engine::StateIO* fresh = second.insertStateFor(slotId);
+    REQUIRE(fresh != nullptr);
+    CHECK(decodedValue(*fresh, engine::dsp::UtilityEffect::gainDb) == doctest::Approx(0.0));
+
+    project::restoreBuiltinInsertState(carried, second);
+
+    CHECK(decodedValue(*fresh, engine::dsp::UtilityEffect::gainDb) == doctest::Approx(-9.0));
+
+    // A slot that vanished between capture and restore is skipped, not an error.
+    project::Project emptyProject;
+    emptyProject.addPattern("P");
+    const auto third =
+        project::compileProjectGraph(emptyProject, map, project::GraphCompileOptions{});
+    project::restoreBuiltinInsertState(carried, third);
 }

@@ -157,7 +157,8 @@ if(APPLE)
         ui/macos/PatternListView.mm
         ui/macos/PlaylistView.mm
         ui/macos/MixerView.mm
-        ui/macos/AudioEditorView.mm)
+        ui/macos/AudioEditorView.mm
+        ui/macos/InsertParameterPanel.mm)
     # incdaw_plugins is linked directly: the shell owns the plugin registry and
     # the instance manager, and injects the insert factory into the graph
     # compiler (docs/DECISIONS.md D-028). project/ deliberately does not link

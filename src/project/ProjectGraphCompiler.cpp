@@ -80,6 +80,15 @@ engine::StateIO* CompiledProjectGraph::insertStateFor(EntityId slot) const noexc
     return nullptr;
 }
 
+engine::ParameterSink* CompiledProjectGraph::insertSinkFor(EntityId slot) const noexcept
+{
+    for (std::size_t index = 0; index < sinkSlots.size(); ++index)
+        if (sinkSlots[index] == slot)
+            return insertSinks[index];
+
+    return nullptr;
+}
+
 CompiledProjectGraph compileProjectGraph(const Project& project, const engine::TempoMap& tempoMap,
                                          const GraphCompileOptions& options)
 {
@@ -828,6 +837,14 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     compiled.automation    = automationHandle;
     compiled.insertSlots   = std::move(insertSlotIds);
     compiled.insertStates  = std::move(insertStateHandles);
+
+    // The same sinks the automation and MIDI bindings above resolved against,
+    // exported by slot so the parameter panel writes where a lane would.
+    for (const auto& [slot, sink] : insertSinks) {
+        compiled.sinkSlots.push_back(slot);
+        compiled.insertSinks.push_back(sink);
+    }
+
     return compiled;
 }
 

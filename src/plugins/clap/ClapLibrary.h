@@ -99,6 +99,11 @@ public:
         return parameters_;
     }
 
+    /// Current plain value straight from the plugin (params.get_value).
+    /// Main-thread only, like every lifecycle call. False for a plugin
+    /// without the extension, or a parameter it refuses to report.
+    [[nodiscard]] bool readParameter(std::uint32_t parameterId, double& out) const noexcept;
+
     /// Processing delay the plugin reported through CLAP_EXT_LATENCY at
     /// creation, in frames. 0 for a plugin without the extension. Feeds
     /// PluginNode::latencyFrames, and from there the graph's existing delay
@@ -144,9 +149,10 @@ private:
         double        value = 0.0;
     };
 
-    const clap_plugin_t*       plugin_ = nullptr;
-    const clap_plugin_state_t* state_  = nullptr;   ///< CLAP_EXT_STATE, or null
-    const clap_plugin_gui_t*   gui_    = nullptr;   ///< CLAP_EXT_GUI, or null
+    const clap_plugin_t*        plugin_ = nullptr;
+    const clap_plugin_state_t*  state_  = nullptr;  ///< CLAP_EXT_STATE, or null
+    const clap_plugin_gui_t*    gui_    = nullptr;  ///< CLAP_EXT_GUI, or null
+    const clap_plugin_params_t* params_ = nullptr;  ///< CLAP_EXT_PARAMS, or null
     clap_host_t                host_{};
     bool                       processing_ = false;
     bool                       editorOpen_ = false;

@@ -44,4 +44,27 @@ namespace incdaw::project {
                                                           const CompiledProjectGraph& graph,
                                                           const std::filesystem::path& packageDir);
 
+/// One captured insert state, held in memory across a graph rebuild.
+struct CarriedInsertState {
+    EntityId                  slot;
+    std::vector<std::uint8_t> blob;
+};
+
+/// Captures the state of every live BUILTIN insert — the nodes the compiler
+/// recreates from scratch on every rebuild, which would otherwise reset any
+/// value a panel or a MIDI mapping had set. Hosted instances persist across
+/// rebuilds (docs/DECISIONS.md D-031) and are deliberately not captured:
+/// re-feeding a live plugin its own opaque blob every rebuild is waste at
+/// best and undefined at worst.
+[[nodiscard]] std::vector<CarriedInsertState>
+captureBuiltinInsertState(const Project& project, const CompiledProjectGraph& graph);
+
+/// Hands each carried blob to the matching slot of a freshly compiled graph.
+/// A slot that left the project, or a blob the node refuses, is skipped —
+/// carrying state must never fail a rebuild. (A slot whose builtin uid
+/// changed mid-rebuild decodes to unknown parameter ids, which loadState
+/// skips by contract.)
+void restoreBuiltinInsertState(const std::vector<CarriedInsertState>& carried,
+                               const CompiledProjectGraph& graph);
+
 } // namespace incdaw::project

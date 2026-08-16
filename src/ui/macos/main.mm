@@ -35,8 +35,10 @@
 #include "project/ProjectGraphCompiler.h"
 #include "project/RecordingSession.h"
 #include "app/commands/AudioEditCommands.h"
+#include "engine/dsp/effects/BuiltinEffects.h"
 #include "ui/macos/AudioEditorView.h"
 #include "ui/macos/ChannelRackView.h"
+#include "ui/macos/InsertParameterPanel.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
 #include "ui/macos/MixerView.h"
@@ -205,6 +207,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// window's death must reach the plugin while the plugin is still alive.
     NSMutableDictionary<NSNumber*, NSWindow*>* _editorWindows;
     NSMutableDictionary<NSNumber*, id>*        _editorObservers;
+
+    /// Generic parameter panels, by slot key — what "Open Editor" opens for a
+    /// builtin effect, or a hosted plugin without an editor of its own. The
+    /// panels hold no engine pointers (sinks die with their graph); writes
+    /// re-resolve through _live on every move.
+    NSMutableDictionary<NSNumber*, NSWindow*>* _panelWindows;
+    NSMutableDictionary<NSNumber*, id>*        _panelObservers;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -245,6 +254,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     _availableInserts = available;
     _editorWindows    = [NSMutableDictionary dictionary];
     _editorObservers  = [NSMutableDictionary dictionary];
+    _panelWindows     = [NSMutableDictionary dictionary];
+    _panelObservers   = [NSMutableDictionary dictionary];
 
     [self seedStarterProject];
 
@@ -934,6 +945,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if (!_audioReady || (_project->patterns().empty() && !_songMode))
         return;
 
+    // Builtin insert nodes are recreated from scratch by every compile; the
+    // values a panel or a MIDI mapping set on the live ones would reset to
+    // defaults without this. Hosted instances persist on their own (D-031).
+    const auto carriedInsertState = project::captureBuiltinInsertState(*_project, _live);
+
     project::GraphCompileOptions options;
     options.sampleRate   = _audio->sampleRate();
 
@@ -1004,6 +1020,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     // to the graph the engine now owns.
     _live = std::move(compiled);
 
+    project::restoreBuiltinInsertState(carriedInsertState, _live);
+
     // Instances whose slot left the project are disposed only now, AFTER the
     // swap: the old graph no longer processes, so destroying them cannot race
     // the audio thread (D-031). Bypassed slots keep theirs — and their state.
@@ -1020,6 +1038,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
             if (std::find(slotKeys.begin(), slotKeys.end(), key.unsignedLongLongValue)
                 == slotKeys.end())
                 [_editorWindows[key] close];
+
+        // Parameter panels over vanished slots have no instance to notify;
+        // they just close.
+        for (NSNumber* key in _panelWindows.allKeys)
+            if (std::find(slotKeys.begin(), slotKeys.end(), key.unsignedLongLongValue)
+                == slotKeys.end())
+                [_panelWindows[key] close];
 
         _pluginInstances->retainOnlyInstances(slotKeys);
     }
@@ -1099,9 +1124,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         _pluginInstances != nullptr ? _pluginInstances->instanceFor(slotKey) : nullptr;
 
     if (instance == nullptr || !instance->hasEditor()) {
-        // Bypassed or unbuilt slots have no live instance; some plugins have
-        // no editor at all. Either way there is nothing to open.
-        NSBeep();
+        // A builtin effect, a hosted plugin without an editor of its own, or
+        // a bypassed slot: the generic parameter panel is its editor.
+        [self openParameterPanelForSlotKey:slotKey];
         return;
     }
 
@@ -1128,15 +1153,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     window.contentView        = container;
 
     // Titled by what the user loaded, not by an internal key.
-    NSString* title = @"Plugin";
-    for (const project::MixerNode& node : _project->mixerNodes())
-        for (const project::PluginSlot& slot : node.inserts)
-            if (slot.id.value() == slotKey)
-                title = @(slot.plugin.uid.c_str());
-    for (NSDictionary* plugin in _availableInserts)
-        if ([plugin[@"uid"] isEqualToString:title])
-            title = plugin[@"name"];
-    window.title = title;
+    window.title = [self displayNameForSlotKey:slotKey];
 
     [window center];
     [window makeKeyAndOrderFront:nil];
@@ -1171,6 +1188,187 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if (_pluginInstances != nullptr)
         if (plugins::ClapInstance* instance = _pluginInstances->instanceFor(slotKey))
             instance->closeEditor();
+}
+
+// ── The generic parameter panel ──────────────────────────────────────────────
+
+/// What the user loaded, resolved to something a window title can show: the
+/// builtin catalogue's display name, the scanned catalogue's, or the uid.
+- (NSString*)displayNameForSlotKey:(unsigned long long)slotKey
+{
+    NSString* title = @"Plugin";
+
+    for (const project::MixerNode& node : _project->mixerNodes())
+        for (const project::PluginSlot& slot : node.inserts)
+            if (slot.id.value() == slotKey) {
+                if (slot.plugin.format == plugins::Format::builtin)
+                    if (const auto* info = engine::dsp::findBuiltinEffect(slot.plugin.uid))
+                        return @(info->displayName);
+
+                title = @(slot.plugin.uid.c_str());
+            }
+
+    for (NSDictionary* plugin in _availableInserts)
+        if ([plugin[@"uid"] isEqualToString:title])
+            return plugin[@"name"];
+
+    return title;
+}
+
+- (const project::PluginSlot*)insertSlotForKey:(unsigned long long)slotKey
+{
+    for (const project::MixerNode& node : _project->mixerNodes())
+        for (const project::PluginSlot& slot : node.inserts)
+            if (slot.id.value() == slotKey)
+                return &slot;
+
+    return nullptr;
+}
+
+/// Rows for the panel: name, range and stepping from the catalogue (builtin)
+/// or discovery (hosted); current values from the live node — the builtin's
+/// state decoded by the same decoder loadState uses, the hosted plugin asked
+/// directly. Defaults fill in where nothing live answers.
+- (NSArray<NSDictionary*>*)parameterRowsForSlot:(const project::PluginSlot&)slot
+{
+    NSMutableArray<NSDictionary*>* rows = [NSMutableArray array];
+
+    if (slot.plugin.format == plugins::Format::builtin) {
+        const auto* info = engine::dsp::findBuiltinEffect(slot.plugin.uid);
+        if (info == nullptr)
+            return rows;
+
+        std::vector<std::pair<std::uint32_t, double>> current;
+        if (engine::StateIO* state = _live.insertStateFor(slot.id)) {
+            std::vector<std::uint8_t> blob;
+            if (state->saveState(blob))
+                (void)engine::dsp::BuiltinEffect::decodeState(blob.data(), blob.size(),
+                                                              current);
+        }
+
+        for (std::size_t index = 0; index < info->parameterCount; ++index) {
+            const engine::dsp::EffectParameter& parameter = info->parameters[index];
+
+            double value = parameter.defaultValue;
+            for (const auto& [id, live] : current)
+                if (id == parameter.id)
+                    value = live;
+
+            [rows addObject:@{
+                @"id":      @(parameter.id),
+                @"name":    @(parameter.name),
+                @"min":     @(parameter.minValue),
+                @"max":     @(parameter.maxValue),
+                @"value":   @(value),
+                @"stepped": @(parameter.stepped),
+            }];
+        }
+
+        return rows;
+    }
+
+    const std::vector<plugins::PluginParameterInfo>* discovered =
+        _pluginInstances != nullptr ? _pluginInstances->parametersFor(slot.plugin.uid)
+                                    : nullptr;
+    if (discovered == nullptr)
+        return rows;
+
+    plugins::ClapInstance* instance =
+        _pluginInstances != nullptr ? _pluginInstances->instanceFor(slot.id.value()) : nullptr;
+
+    for (const plugins::PluginParameterInfo& parameter : *discovered) {
+        double value = parameter.defaultValue;
+        if (instance != nullptr)
+            (void)instance->readParameter(parameter.id, value);
+
+        [rows addObject:@{
+            @"id":      @(parameter.id),
+            @"name":    @(parameter.name.c_str()),
+            @"min":     @(parameter.minValue),
+            @"max":     @(parameter.maxValue),
+            @"value":   @(value),
+            @"stepped": @(parameter.stepped),
+        }];
+    }
+
+    return rows;
+}
+
+/// Every slider move lands here. Resolving the sink on each write is the
+/// point: sinks die with their graph, and the panel outlives rebuilds.
+- (void)writeInsertParameter:(unsigned long long)slotKey
+                 parameterId:(std::uint32_t)parameterId
+                  plainValue:(double)plainValue
+{
+    engine::ParameterSink* sink = _live.insertSinkFor(project::EntityId{slotKey});
+    if (sink == nullptr)
+        return;   // bypassed, or rebuilt away: the move has nowhere to land
+
+    sink->setParameter(parameterId, plainValue);
+
+    // The model only records this at save (state capture), but it is project
+    // state the user means to keep.
+    [self markDirty];
+}
+
+- (void)openParameterPanelForSlotKey:(unsigned long long)slotKey
+{
+    NSNumber* key = @(slotKey);
+
+    if (NSWindow* existing = _panelWindows[key]) {
+        [existing makeKeyAndOrderFront:nil];
+        return;
+    }
+
+    const project::PluginSlot* slot = [self insertSlotForKey:slotKey];
+    if (slot == nullptr) {
+        NSBeep();
+        return;
+    }
+
+    NSArray<NSDictionary*>* rows = [self parameterRowsForSlot:*slot];
+    if (rows.count == 0) {
+        // A hosted plugin that reports no parameters: nothing to show.
+        NSBeep();
+        return;
+    }
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+
+    NSWindow* window = [INCDAWInsertParameterPanel
+        makePanelWithTitle:[self displayNameForSlotKey:slotKey]
+                      rows:rows
+                   onWrite:^(std::uint32_t parameterId, double plainValue) {
+                       [weakSelf writeInsertParameter:slotKey
+                                          parameterId:parameterId
+                                           plainValue:plainValue];
+                   }];
+
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+
+    _panelWindows[key] = window;
+
+    // Self-clearing: unlike a plugin editor there is no instance to notify,
+    // so the close only removes the table entries.
+    _panelObservers[key] = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSWindowWillCloseNotification
+                    object:window
+                     queue:nil
+                usingBlock:^(NSNotification*) {
+                    [weakSelf panelWindowClosedForSlotKey:slotKey];
+                }];
+}
+
+- (void)panelWindowClosedForSlotKey:(unsigned long long)slotKey
+{
+    NSNumber* key = @(slotKey);
+
+    if (id observer = _panelObservers[key])
+        [NSNotificationCenter.defaultCenter removeObserver:observer];
+
+    [_panelObservers removeObjectForKey:key];
+    [_panelWindows removeObjectForKey:key];
 }
 
 // ── The project as a document ────────────────────────────────────────────────
@@ -1643,6 +1841,16 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 /// which is what File > New wants.
 - (void)adoptLoadedProjectRestoringStateFrom:(const std::filesystem::path&)statePackage
 {
+    // Cross-project safety: _live's handles belong to the OLD contents, and
+    // entity ids restart per project, so a stale table could alias a new
+    // slot id onto an old node — the rebuild below must start from nothing.
+    // (This is also what keeps the builtin-state carry-over from leaking
+    // values across projects.) Open parameter panels show the old project;
+    // they close rather than mislead.
+    _live = project::CompiledProjectGraph{};
+    for (NSWindow* window in [_panelWindows.allValues copy])
+        [window close];
+
     // The undo stack was cleared along with the old contents; syncing the
     // watch keeps housekeeping from reading that as an edit. The caches the
     // watch would have invalidated are invalidated here instead.
