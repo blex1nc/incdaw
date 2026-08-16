@@ -107,4 +107,43 @@ void SetInsertBypassedCommand::undo(Project& project)
             slot.bypassed = previous_;
 }
 
+bool MoveInsertCommand::execute(Project& project)
+{
+    project::MixerNode* node = findNode(project, mixerNode_);
+    if (node == nullptr || (direction_ != -1 && direction_ != 1))
+        return false;
+
+    auto& inserts = node->inserts;
+
+    for (std::size_t index = 0; index < inserts.size(); ++index) {
+        if (inserts[index].id != slotId_)
+            continue;
+
+        const std::ptrdiff_t target =
+            static_cast<std::ptrdiff_t>(index) + direction_;
+        if (target < 0 || target >= static_cast<std::ptrdiff_t>(inserts.size()))
+            return false;   // already at its end of the chain
+
+        movedFrom_ = index;
+        std::swap(inserts[index], inserts[static_cast<std::size_t>(target)]);
+        return true;
+    }
+
+    return false;
+}
+
+void MoveInsertCommand::undo(Project& project)
+{
+    project::MixerNode* node = findNode(project, mixerNode_);
+    if (node == nullptr)
+        return;
+
+    auto& inserts = node->inserts;
+
+    const std::size_t target = static_cast<std::size_t>(
+        static_cast<std::ptrdiff_t>(movedFrom_) + direction_);
+    if (movedFrom_ < inserts.size() && target < inserts.size())
+        std::swap(inserts[movedFrom_], inserts[target]);
+}
+
 } // namespace incdaw::app

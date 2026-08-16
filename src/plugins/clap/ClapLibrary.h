@@ -6,6 +6,7 @@
 #include "platform/SharedLibrary.h"
 #include "plugins/PluginParameterInfo.h"
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -110,6 +111,20 @@ public:
     /// compensation (docs/AUDIO_ENGINE.md §7).
     [[nodiscard]] std::uint32_t latencyFrames() const noexcept { return latency_; }
 
+    /// The landing point of the CLAP_HOST_LATENCY `changed` callback — also
+    /// callable directly by tests, which cannot route through the C
+    /// trampoline. Any thread; only a flag.
+    void noteLatencyChanged() noexcept
+    {
+        latencyDirty_.store(true, std::memory_order_release);
+    }
+
+    /// Consumes the changed flag; when it was set, re-reads the plugin's
+    /// reported latency (main thread, same hostile-report cap as creation)
+    /// and returns true — the caller's cue to recompile, so the new figure
+    /// reaches delay compensation.
+    [[nodiscard]] bool refreshLatencyIfChanged() noexcept;
+
     // ── The editor (CLAP_EXT_GUI, docs/PLUGIN_HOST.md §7) ────────────────
     // Main-thread only, like all lifecycle calls. `parentView` is an NSView*
     // as void*: this layer never includes Cocoa (platform containment), and
@@ -158,6 +173,10 @@ private:
     bool                       editorOpen_ = false;
     std::int64_t               steadyTime_ = 0;
     std::uint32_t              latency_    = 0;
+
+    const clap_plugin_latency_t* latencyExt_ = nullptr;
+    std::uint32_t                latencyCap_ = 0;
+    std::atomic<bool>            latencyDirty_{false};
 
     /// 256 slots is every automatable parameter of a large plugin changing in
     /// one block — sized for the worst block, not the common one. Preallocated

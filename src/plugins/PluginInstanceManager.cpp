@@ -134,4 +134,16 @@ std::size_t PluginInstanceManager::liveInstanceCount() const
     return instances_.size();
 }
 
+bool PluginInstanceManager::refreshChangedLatencies()
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+
+    bool changed = false;
+    for (auto& [slotKey, held] : instances_)
+        if (held.instance != nullptr && held.instance->refreshLatencyIfChanged())
+            changed = true;
+
+    return changed;
+}
+
 } // namespace incdaw::plugins

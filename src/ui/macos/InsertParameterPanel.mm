@@ -37,6 +37,7 @@ NSString* formattedValue(double value, BOOL stepped)
 @implementation INCDAWInsertParameterPanel {
     NSArray<NSDictionary*>*     _rows;
     NSArray<NSTextField*>*      _valueFields;
+    NSArray<NSSlider*>*         _sliders;
     void (^_onWrite)(std::uint32_t, double);
 }
 
@@ -54,6 +55,7 @@ NSString* formattedValue(double value, BOOL stepped)
         initWithFrame:NSMakeRect(0, 0, panelWidth, contentHeight)];
 
     NSMutableArray<NSTextField*>* valueFields = [NSMutableArray array];
+    NSMutableArray<NSSlider*>*    sliders     = [NSMutableArray array];
 
     [rows enumerateObjectsUsingBlock:^(NSDictionary* row, NSUInteger index, BOOL*) {
         const CGFloat y = margin + rowHeight * static_cast<CGFloat>(index);
@@ -85,6 +87,7 @@ NSString* formattedValue(double value, BOOL stepped)
         }
 
         [document addSubview:slider];
+        [sliders addObject:slider];
 
         NSTextField* valueField = [NSTextField labelWithString:formattedValue(value, stepped)];
         valueField.frame        = NSMakeRect(panelWidth - valueWidth - margin, y + 4,
@@ -97,6 +100,7 @@ NSString* formattedValue(double value, BOOL stepped)
     }];
 
     panel->_valueFields = valueFields;
+    panel->_sliders     = sliders;
 
     const CGFloat visibleHeight = std::min(contentHeight, visibleLimit);
 
@@ -118,6 +122,33 @@ NSString* formattedValue(double value, BOOL stepped)
     objc_setAssociatedObject(window, panelOwnerKey, panel,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return window;
+}
+
++ (void)refreshWindow:(NSWindow*)window
+               values:(NSDictionary<NSNumber*, NSNumber*>*)values
+{
+    INCDAWInsertParameterPanel* panel =
+        objc_getAssociatedObject(window, panelOwnerKey);
+    if (panel == nil)
+        return;
+
+    // A drag in progress owns the sliders; the next tick catches up.
+    if ((NSEvent.pressedMouseButtons & 1) != 0)
+        return;
+
+    [panel->_rows enumerateObjectsUsingBlock:^(NSDictionary* row, NSUInteger index, BOOL*) {
+        NSNumber* value = values[row[@"id"]];
+        if (value == nil || index >= panel->_sliders.count)
+            return;
+
+        const BOOL   stepped = [row[@"stepped"] boolValue];
+        const double plain   = stepped ? std::round(value.doubleValue) : value.doubleValue;
+
+        if (panel->_sliders[index].doubleValue != plain) {
+            panel->_sliders[index].doubleValue      = plain;
+            panel->_valueFields[index].stringValue = formattedValue(plain, stepped);
+        }
+    }];
 }
 
 - (void)sliderMoved:(NSSlider*)slider

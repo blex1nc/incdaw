@@ -31,6 +31,13 @@ NS_ASSUME_NONNULL_BEGIN
                            rows:(NSArray<NSDictionary*>*)rows
                         onWrite:(void (^)(std::uint32_t parameterId, double plainValue))onWrite;
 
+/// Moves the sliders of a panel window to `values` (parameter id → plain
+/// value) — how an open panel follows automation, MIDI knobs and undo.
+/// Ignored while the mouse is down, so a refresh never fights a drag; a
+/// window that is not a parameter panel is ignored entirely.
++ (void)refreshWindow:(NSWindow*)window
+               values:(NSDictionary<NSNumber*, NSNumber*>*)values;
+
 @end
 
 NS_ASSUME_NONNULL_END

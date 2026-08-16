@@ -59,6 +59,28 @@ private:
     std::size_t index_ = 0;
 };
 
+/// Moves one insert within its chain — chain order is signal order, and
+/// until this existed the order could only be built by add order. Addressed
+/// by slot id, direction as an offset (-1 up toward the signal's entry, +1
+/// down toward the fader).
+class MoveInsertCommand final : public Command {
+public:
+    MoveInsertCommand(EntityId mixerNode, EntityId slot, int direction)
+        : mixerNode_(mixerNode), slotId_(slot), direction_(direction) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "mixer.insert.move"; }
+    [[nodiscard]] std::string name() const override { return "Move Insert"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    EntityId    mixerNode_;
+    EntityId    slotId_;
+    int         direction_ = 0;
+    std::size_t movedFrom_ = 0;
+};
+
 class SetInsertBypassedCommand final : public Command {
 public:
     SetInsertBypassedCommand(EntityId mixerNode, EntityId slot, bool bypassed)

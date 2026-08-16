@@ -73,6 +73,13 @@ public:
     [[nodiscard]] const std::vector<PluginParameterInfo>* parametersFor(
         const std::string& uid) const;
 
+    /// Consumes every live instance's latency-changed flag (the
+    /// clap_host_latency callback), re-reading the changed ones. True when
+    /// any figure changed — the caller's cue to recompile, which is how the
+    /// new latency reaches delay compensation (docs/PLUGIN_HOST.md §8).
+    /// Main thread.
+    [[nodiscard]] bool refreshChangedLatencies();
+
     /// Libraries opened so far. The caching assertion in the tests.
     [[nodiscard]] std::size_t loadedLibraryCount() const;
 

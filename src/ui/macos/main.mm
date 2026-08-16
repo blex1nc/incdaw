@@ -217,6 +217,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// re-resolve through _live on every move.
     NSMutableDictionary<NSNumber*, NSWindow*>* _panelWindows;
     NSMutableDictionary<NSNumber*, id>*        _panelObservers;
+    int                                        _panelRefreshTick;
 
     /// The sampler zone editor: one window, over one channel at a time. The
     /// per-row control references live in _zoneRows so a field's action can
@@ -1405,6 +1406,61 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     [_panelObservers removeObjectForKey:key];
     [_panelWindows removeObjectForKey:key];
+}
+
+/// Open panels follow the live values at ~5 Hz, so automation, MIDI knobs
+/// and undo become visible without any panel owning an engine pointer.
+- (void)refreshOpenPanelValues
+{
+    if (_panelWindows.count == 0 || ++_panelRefreshTick % 6 != 0)
+        return;
+
+    for (NSNumber* key in _panelWindows.allKeys) {
+        const unsigned long long entityKey = key.unsignedLongLongValue;
+
+        NSMutableDictionary<NSNumber*, NSNumber*>* values = [NSMutableDictionary dictionary];
+
+        if (const project::PluginSlot* slot = [self insertSlotForKey:entityKey]) {
+            if (slot->plugin.format == plugins::Format::builtin) {
+                std::vector<std::uint8_t>                     blob;
+                std::vector<std::pair<std::uint32_t, double>> decoded;
+
+                if (engine::StateIO* state = _live.insertStateFor(slot->id))
+                    if (state->saveState(blob)
+                        && engine::dsp::BuiltinEffect::decodeState(blob.data(), blob.size(),
+                                                                   decoded))
+                        for (const auto& [parameterId, value] : decoded)
+                            values[@(parameterId)] = @(value);
+            } else if (plugins::ClapInstance* instance =
+                           _pluginInstances != nullptr
+                               ? _pluginInstances->instanceFor(entityKey)
+                               : nullptr) {
+                if (const auto* discovered =
+                        _pluginInstances->parametersFor(slot->plugin.uid))
+                    for (const plugins::PluginParameterInfo& parameter : *discovered) {
+                        double value = 0.0;
+                        if (instance->readParameter(parameter.id, value))
+                            values[@(parameter.id)] = @(value);
+                    }
+            }
+        } else if (const project::Channel* channel =
+                       _project->findChannel(project::EntityId{entityKey})) {
+            // The MODEL is the instrument panel's truth (D-034): undo and
+            // redo show up; an entry undo removed falls back to its default.
+            if (const auto* info = [self instrumentInfoForChannel:*channel]) {
+                for (std::size_t index = 0; index < info->parameterCount; ++index)
+                    values[@(info->parameters[index].id)] =
+                        @(info->parameters[index].defaultValue);
+
+                for (const project::ChannelInstrumentParameter& stored :
+                     channel->instrumentParameters)
+                    values[@(stored.parameterId)] = @(stored.value);
+            }
+        }
+
+        if (values.count > 0)
+            [INCDAWInsertParameterPanel refreshWindow:_panelWindows[key] values:values];
+    }
 }
 
 // ── The instrument panel, the zone editor, the mapping list ──────────────────
@@ -2824,6 +2880,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         return;
 
     _audio->collectRetiredGraphs();
+
+    // A plugin that changed its latency mid-life (clap_host_latency.changed)
+    // needs a recompile before delay compensation is honest again.
+    if (_pluginInstances != nullptr && _pluginInstances->refreshChangedLatencies())
+        [self rebuildGraph];
+
+    [self refreshOpenPanelValues];
 
     if (_learnArmed) {
         const std::uint64_t packed = _audio->midiInput().lastControlChange();

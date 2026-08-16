@@ -475,6 +475,18 @@ enum class MixerDrag { none, fader, pan };
             bypass.representedObject = address;
             bypass.state = slot.bypassed ? NSControlStateValueOn : NSControlStateValueOff;
 
+            NSMenuItem* moveUp = [slotMenu addItemWithTitle:@"Move Up"
+                                                     action:@selector(moveInsertUpFromMenu:)
+                                              keyEquivalent:@""];
+            moveUp.target            = self;
+            moveUp.representedObject = address;
+
+            NSMenuItem* moveDown = [slotMenu addItemWithTitle:@"Move Down"
+                                                       action:@selector(moveInsertDownFromMenu:)
+                                                keyEquivalent:@""];
+            moveDown.target            = self;
+            moveDown.representedObject = address;
+
             NSMenuItem* removeSlot = [slotMenu addItemWithTitle:@"Remove"
                                                          action:@selector(removeInsertFromMenu:)
                                                   keyEquivalent:@""];
@@ -578,6 +590,26 @@ enum class MixerDrag { none, fader, pan };
             project::EntityId{[info[@"node"] unsignedLongLongValue]},
             project::EntityId{[info[@"slot"] unsignedLongLongValue]})))
         [self structuralChange];
+}
+
+- (void)moveInsert:(NSMenuItem*)item direction:(int)direction
+{
+    NSDictionary* info = item.representedObject;
+
+    if (_registry->execute(std::make_unique<app::MoveInsertCommand>(
+            project::EntityId{[info[@"node"] unsignedLongLongValue]},
+            project::EntityId{[info[@"slot"] unsignedLongLongValue]}, direction)))
+        [self structuralChange];
+}
+
+- (void)moveInsertUpFromMenu:(NSMenuItem*)item
+{
+    [self moveInsert:item direction:-1];
+}
+
+- (void)moveInsertDownFromMenu:(NSMenuItem*)item
+{
+    [self moveInsert:item direction:1];
 }
 
 - (void)keyDown:(NSEvent*)event

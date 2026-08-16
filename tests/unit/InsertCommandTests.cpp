@@ -113,6 +113,45 @@ TEST_CASE("removing an insert brings it back in place with its state")
     CHECK(fixture.master().inserts[1].stateFile == "plugins/insert-42.state");
 }
 
+TEST_CASE("moving an insert reorders the chain, undoes, and refuses the ends")
+{
+    Fixture fixture;
+
+    auto first  = std::make_unique<app::AddInsertCommand>(fixture.project.masterMixerNode(), fixture.gain());
+    auto second = std::make_unique<app::AddInsertCommand>(fixture.project.masterMixerNode(), fixture.gain());
+
+    const app::AddInsertCommand* firstAdd  = first.get();
+    const app::AddInsertCommand* secondAdd = second.get();
+
+    REQUIRE(fixture.registry.execute(std::move(first)));
+    REQUIRE(fixture.registry.execute(std::move(second)));
+
+    const project::EntityId a = firstAdd->slotId();
+    const project::EntityId b = secondAdd->slotId();
+
+    auto& inserts = fixture.master().inserts;
+    REQUIRE(inserts.size() == 2);
+    CHECK(inserts[0].id == a);
+
+    // Up from the top and down from the bottom are refusals, not wraps.
+    CHECK_FALSE(fixture.registry.execute(
+        std::make_unique<app::MoveInsertCommand>(fixture.project.masterMixerNode(), a, -1)));
+    CHECK_FALSE(fixture.registry.execute(
+        std::make_unique<app::MoveInsertCommand>(fixture.project.masterMixerNode(), b, 1)));
+
+    REQUIRE(fixture.registry.execute(
+        std::make_unique<app::MoveInsertCommand>(fixture.project.masterMixerNode(), b, -1)));
+    CHECK(inserts[0].id == b);
+    CHECK(inserts[1].id == a);
+
+    fixture.registry.undo();
+    CHECK(inserts[0].id == a);
+    CHECK(inserts[1].id == b);
+
+    fixture.registry.redo();
+    CHECK(inserts[0].id == b);
+}
+
 TEST_CASE("bypass toggles, undoes, and refuses a no-op")
 {
     Fixture fixture;

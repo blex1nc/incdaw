@@ -121,6 +121,60 @@ std::unique_ptr<CompiledGraph> buildParallelGraph(plugins::ClapInstance* instanc
 
 } // namespace
 
+TEST_CASE("clap_host_latency.changed reaches the host and the new figure is re-read")
+{
+    plugins::ClapLibrary library;
+    std::string          error;
+
+    REQUIRE(library.open(INCDAW_TESTLATENCY_PLUGIN, error));
+
+    auto instance = library.create(latencyUid, 48000.0,
+                                   static_cast<std::uint32_t>(blockSize), error);
+    REQUIRE(instance != nullptr);
+    CHECK(instance->latencyFrames() == pluginLatency);
+
+    // Nothing changed yet: the refresh consumes nothing.
+    CHECK_FALSE(instance->refreshLatencyIfChanged());
+
+    // Loading state makes the test plugin double its REPORT and call the
+    // host's latency.changed — the real trampoline, end to end.
+    const std::uint8_t blob[4] = {0, 0, 0, 0};
+    REQUIRE(instance->loadState(blob, sizeof(blob)));
+
+    CHECK(instance->latencyFrames() == pluginLatency);   // not yet re-read
+    CHECK(instance->refreshLatencyIfChanged());
+    CHECK(instance->latencyFrames() == pluginLatency * 2);
+
+    // Consumed: a second refresh is a no-op until the plugin speaks again.
+    CHECK_FALSE(instance->refreshLatencyIfChanged());
+}
+
+TEST_CASE("the instance manager surfaces any changed latency exactly once")
+{
+    ScratchDir folder{"incdaw-latency-manager"};
+    fs::copy_file(INCDAW_TESTLATENCY_PLUGIN, folder.path / "latency.clap");
+
+    plugins::PluginRegistry registry;
+    REQUIRE(registry.scanDirectory(folder.path, INCDAW_PLUGINSCAN_BINARY) == 1);
+
+    plugins::PluginInstanceManager manager{registry};
+
+    plugins::PluginIdentifier identifier;
+    identifier.format = plugins::Format::clap;
+    identifier.uid    = latencyUid;
+
+    std::string error;
+    auto        node = manager.createInsert(1, identifier, 48000.0,
+                                            static_cast<std::uint32_t>(blockSize), error);
+    REQUIRE(node != nullptr);
+
+    CHECK_FALSE(manager.refreshChangedLatencies());
+
+    manager.instanceFor(1)->noteLatencyChanged();
+    CHECK(manager.refreshChangedLatencies());
+    CHECK_FALSE(manager.refreshChangedLatencies());
+}
+
 TEST_CASE("a created instance reports its CLAP latency, and none means zero")
 {
     plugins::ClapLibrary library;

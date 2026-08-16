@@ -8,11 +8,28 @@ namespace incdaw::plugins {
 namespace {
 
 // ── The host the plugin sees ─────────────────────────────────────────────────
-// Deliberately minimal: every callback is a safe no-op. Extensions arrive
-// with the parameter and editor bridges; a plugin asking for one it needs to
-// merely EXIST gets a truthful "not provided" rather than a lying stub.
+// Deliberately minimal: every callback is a safe no-op unless an extension is
+// genuinely implemented. A plugin asking for one that is not gets a truthful
+// "not provided" rather than a lying stub.
 
-const void* hostGetExtension(const clap_host_t*, const char*) { return nullptr; }
+void hostLatencyChanged(const clap_host_t* host)
+{
+    // Any thread, by CLAP's own rules a main-thread call — but a hostile
+    // plugin may not honour that, so the landing point is just an atomic
+    // flag the host's housekeeping consumes.
+    if (host != nullptr && host->host_data != nullptr)
+        static_cast<ClapInstance*>(host->host_data)->noteLatencyChanged();
+}
+
+const clap_host_latency_t hostLatencyExtension = {hostLatencyChanged};
+
+const void* hostGetExtension(const clap_host_t*, const char* id)
+{
+    if (id != nullptr && std::strcmp(id, CLAP_EXT_LATENCY) == 0)
+        return &hostLatencyExtension;
+
+    return nullptr;
+}
 void        hostRequestRestart(const clap_host_t*) {}
 void        hostRequestProcess(const clap_host_t*) {}
 void        hostRequestCallback(const clap_host_t*) {}
@@ -313,10 +330,13 @@ std::unique_ptr<ClapInstance> ClapLibrary::create(const std::string& pluginId,
     const auto* latency = static_cast<const clap_plugin_latency_t*>(
         instance->plugin_->get_extension(instance->plugin_, CLAP_EXT_LATENCY));
 
+    instance->latencyExt_ = latency;
+    instance->latencyCap_ = static_cast<std::uint32_t>(sampleRate * 10.0);
+
     if (latency != nullptr && latency->get != nullptr) {
         const std::uint32_t reported = latency->get(instance->plugin_);
-        const auto          cap      = static_cast<std::uint32_t>(sampleRate * 10.0);
-        instance->latency_           = reported <= cap ? reported : cap;
+        instance->latency_ = reported <= instance->latencyCap_ ? reported
+                                                               : instance->latencyCap_;
     }
 
     instance->processing_ = true;
@@ -439,6 +459,19 @@ bool ClapInstance::readParameter(std::uint32_t parameterId, double& out) const n
         return false;
 
     return params_->get_value(plugin_, parameterId, &out);
+}
+
+bool ClapInstance::refreshLatencyIfChanged() noexcept
+{
+    if (!latencyDirty_.exchange(false, std::memory_order_acq_rel))
+        return false;
+
+    if (plugin_ == nullptr || latencyExt_ == nullptr || latencyExt_->get == nullptr)
+        return false;
+
+    const std::uint32_t reported = latencyExt_->get(plugin_);
+    latency_ = reported <= latencyCap_ ? reported : latencyCap_;
+    return true;
 }
 
 bool ClapInstance::process(float* left, float* right, std::uint32_t frames) noexcept

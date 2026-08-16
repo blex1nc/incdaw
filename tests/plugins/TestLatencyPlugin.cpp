@@ -20,6 +20,13 @@ struct State {
     // out are silence, exactly like a real look-ahead.
     std::vector<float> ring[2];
     uint32_t           position = 0;
+
+    // What CLAP_EXT_LATENCY reports. Loading state bumps it and notifies the
+    // host (clap_host_latency.changed) — the report intentionally diverges
+    // from the true delay then: this half of the plugin exists to test the
+    // REPORTING plumbing, and the honest-pairing PDC test never loads state.
+    const clap_host_t* host     = nullptr;
+    uint32_t           reported = delayFrames;
 };
 
 State* stateOf(const clap_plugin_t* plugin)
@@ -44,9 +51,37 @@ const clap_plugin_descriptor_t descriptor = {
 
 // ── The latency extension ────────────────────────────────────────────────────
 
-uint32_t latencyGet(const clap_plugin_t*) { return delayFrames; }
+uint32_t latencyGet(const clap_plugin_t* plugin) { return stateOf(plugin)->reported; }
 
 const clap_plugin_latency_t latencyExtension = {latencyGet};
+
+// ── The state extension: the latency-changed trigger ─────────────────────────
+
+bool stateSave(const clap_plugin_t* plugin, const clap_ostream_t* stream)
+{
+    const uint32_t reported = stateOf(plugin)->reported;
+    return stream->write(stream, &reported, sizeof(reported))
+        == static_cast<int64_t>(sizeof(reported));
+}
+
+bool stateLoad(const clap_plugin_t* plugin, const clap_istream_t* stream)
+{
+    uint32_t ignored = 0;
+    (void)stream->read(stream, &ignored, sizeof(ignored));
+
+    State* state    = stateOf(plugin);
+    state->reported = delayFrames * 2;
+
+    if (state->host != nullptr && state->host->get_extension != nullptr)
+        if (const auto* hostLatency = static_cast<const clap_host_latency_t*>(
+                state->host->get_extension(state->host, CLAP_EXT_LATENCY)))
+            if (hostLatency->changed != nullptr)
+                hostLatency->changed(state->host);
+
+    return true;
+}
+
+const clap_plugin_state_t stateExtension = {stateSave, stateLoad};
 
 // ── The plugin ───────────────────────────────────────────────────────────────
 
@@ -76,6 +111,9 @@ const void* pluginGetExtension(const clap_plugin_t*, const char* id)
 {
     if (id != nullptr && std::strcmp(id, CLAP_EXT_LATENCY) == 0)
         return &latencyExtension;
+
+    if (id != nullptr && std::strcmp(id, CLAP_EXT_STATE) == 0)
+        return &stateExtension;
 
     return nullptr;
 }
@@ -126,9 +164,12 @@ const clap_plugin_t* factoryCreatePlugin(const clap_plugin_factory_t*, const cla
     if (host == nullptr || pluginId == nullptr || std::strcmp(pluginId, descriptor.id) != 0)
         return nullptr;
 
+    auto* state = new State{};
+    state->host = host;
+
     auto* plugin = new clap_plugin_t{};
     plugin->desc             = &descriptor;
-    plugin->plugin_data      = new State{};
+    plugin->plugin_data      = state;
     plugin->init             = pluginInit;
     plugin->destroy          = pluginDestroy;
     plugin->activate         = pluginActivate;
