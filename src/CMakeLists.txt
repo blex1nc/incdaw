@@ -42,6 +42,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/GainNode.cpp
     engine/dsp/DelayLineNode.cpp
     engine/dsp/Resampler.cpp
+    engine/dsp/TimeStretch.cpp
     engine/dsp/MixerStripNode.cpp
     engine/dsp/effects/BuiltinEffect.cpp
     engine/dsp/effects/BuiltinEffects.cpp

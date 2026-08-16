@@ -85,6 +85,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     Tick         _dragAppliedTicks;
     int          _dragAppliedTracks;
     Tick         _dragAppliedLength;
+    BOOL         _stretchResize;   ///< Option at the handle: stretch, not trim
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -562,6 +563,11 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     _drag = _model->isOverResizeHandle(*_project, index, grid.x, grid.y) ? PlaylistDrag::resize
                                                                         : PlaylistDrag::move;
 
+    // Option at the resize handle stretches the audio to the new length
+    // instead of trimming it — FL Studio 2026's resize-vs-stretch split.
+    _stretchResize = _drag == PlaylistDrag::resize
+                  && (event.modifierFlags & NSEventModifierFlagOption) != 0;
+
     [self setNeedsDisplay:YES];
 }
 
@@ -591,8 +597,14 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         if (delta == 0)
             return;
 
-        if (_registry->executeMerging(std::make_unique<app::ResizeClipsCommand>(
-                _model->selection(), delta))) {
+        const bool applied =
+            _stretchResize
+                ? _registry->executeMerging(std::make_unique<app::StretchClipsCommand>(
+                      _model->selection(), delta))
+                : _registry->executeMerging(std::make_unique<app::ResizeClipsCommand>(
+                      _model->selection(), delta));
+
+        if (applied) {
             _dragAppliedLength = wanted;
             [self changed];
         }

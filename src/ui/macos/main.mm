@@ -641,6 +641,72 @@ std::filesystem::path incdawSupportDirectory()
 - (void)editGainUp:(id)sender    { (void)sender; [self applyAudioEdit:app::AudioEditOp::gain factor:1.412538f]; }   // +3 dB
 - (void)editGainDown:(id)sender  { (void)sender; [self applyAudioEdit:app::AudioEditOp::gain factor:0.707946f]; }   // -3 dB
 
+/// One numeric prompt shared by the stretch verbs.
+- (double)promptForValue:(NSString*)title
+                 message:(NSString*)message
+                 initial:(NSString*)initial
+{
+    NSAlert* alert        = [[NSAlert alloc] init];
+    alert.messageText     = title;
+    alert.informativeText = message;
+    [alert addButtonWithTitle:@"Apply"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField* field  = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 200, 24)];
+    field.stringValue   = initial;
+    alert.accessoryView = field;
+    alert.window.initialFirstResponder = field;
+
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    return field.doubleValue;
+}
+
+/// Time stretch / pitch shift on the editor selection (or the whole file),
+/// through engine::dsp::timeStretch — offline WSOLA with transient locking.
+- (void)applyStretchWithRatio:(double)ratio semitones:(double)semitones
+{
+    if (self.audioEditor.assetIdValue == 0)
+        return;
+
+    const project::EntityId asset{self.audioEditor.assetIdValue};
+
+    engine::edits::Region region;
+    if (self.audioEditor.hasSelection) {
+        region.from = self.audioEditor.selectionFrom;
+        region.to   = self.audioEditor.selectionTo;
+    } else {
+        region.from = 0;
+        region.to   = std::numeric_limits<engine::FrameCount>::max();
+    }
+
+    (void)_registry->execute(
+        std::make_unique<app::StretchAssetCommand>(asset, region, ratio, semitones));
+
+    [self audioAssetChanged];
+}
+
+- (void)editTimeStretch:(id)sender
+{
+    (void)sender;
+    const double percent = [self promptForValue:@"Time Stretch"
+                                        message:@"New length as a percentage of the current one."
+                                        initial:@"200"];
+    if (!std::isnan(percent) && percent > 1.0 && percent < 1600.0)
+        [self applyStretchWithRatio:percent / 100.0 semitones:0.0];
+}
+
+- (void)editPitchShift:(id)sender
+{
+    (void)sender;
+    const double semitones = [self promptForValue:@"Pitch Shift"
+                                          message:@"Shift in semitones, -24 to +24."
+                                          initial:@"0"];
+    if (!std::isnan(semitones) && semitones != 0.0 && std::fabs(semitones) <= 24.0)
+        [self applyStretchWithRatio:1.0 semitones:semitones];
+}
+
 // ── Automation write mode ────────────────────────────────────────────────────
 
 - (void)automationParameterEdited:(unsigned long long)nodeId
@@ -1774,6 +1840,8 @@ std::filesystem::path incdawSupportDirectory()
         {@"Fade Out",          @selector(editFadeOut:)},
         {@"Gain +3 dB",        @selector(editGainUp:)},
         {@"Gain -3 dB",        @selector(editGainDown:)},
+        {@"Time Stretch…",     @selector(editTimeStretch:)},
+        {@"Pitch Shift…",      @selector(editPitchShift:)},
     };
 
     for (const auto& verb : verbs) {

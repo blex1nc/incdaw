@@ -76,4 +76,35 @@ private:
     bool                                     minted_ = false;
 };
 
+/// Replaces [region) of the asset with a time-stretched and/or pitch-shifted
+/// rendering of it (engine::dsp::timeStretch — WSOLA with transient locking).
+/// The file's length changes; undo restores the original samples bit-exactly
+/// and redo writes the recorded result rather than re-rendering.
+class StretchAssetCommand final : public Command {
+public:
+    StretchAssetCommand(project::EntityId asset, engine::edits::Region region, double ratio,
+                        double pitchSemitones)
+        : asset_(asset), region_(region), ratio_(ratio), pitchSemitones_(pitchSemitones) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "audio.stretch"; }
+    [[nodiscard]] std::string name() const override
+    {
+        return ratio_ != 1.0 ? "Time Stretch" : "Pitch Shift";
+    }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    project::EntityId     asset_;
+    engine::edits::Region region_;
+    double                ratio_          = 1.0;
+    double                pitchSemitones_ = 0.0;
+
+    std::vector<std::vector<engine::Sample>> before_;   ///< the original region
+    std::vector<std::vector<engine::Sample>> after_;    ///< the rendered replacement
+    engine::edits::Region                    applied_;
+    bool                                     minted_ = false;
+};
+
 } // namespace incdaw::app

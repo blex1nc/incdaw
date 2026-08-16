@@ -38,6 +38,7 @@ add_executable(incdaw_tests
     unit/SidechainTests.cpp
     unit/LoudnessAndRoutingTests.cpp
     unit/ModulationEffectTests.cpp
+    unit/TimeStretchTests.cpp
     unit/AutomationTests.cpp
     unit/WavFileTests.cpp
     unit/WavStreamWriterTests.cpp

@@ -4,6 +4,7 @@
 #include "engine/audio/InputMonitorNode.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
+#include "engine/dsp/TimeStretch.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/graph/ParameterSink.h"
@@ -637,7 +638,14 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
                 engine::AudioClipNode::PlacedClip placed;
 
-                if (shouldStream(clip.source)) {
+                // A warped clip (stretch or pitch) renders its span offline at
+                // compile time and plays the result preloaded — streaming a
+                // stretch would mean realtime WSOLA, which is a later, second
+                // implementation behind the same options (CLAUDE.md §16).
+                const bool warped =
+                    clip.stretchRatio != 1.0 || clip.pitchSemitones != 0.0;
+
+                if (!warped && shouldStream(clip.source)) {
                     placed.stream = openStream(clip.source, clip.sourceOffset);
                     if (placed.stream == nullptr)
                         continue;
@@ -653,6 +661,39 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 placed.gain          = static_cast<engine::Sample>(clip.gain);
                 placed.fadeInFrames  = clip.fadeInFrames;
                 placed.fadeOutFrames = clip.fadeOutFrames;
+
+                if (warped && placed.audio != nullptr && clip.stretchRatio > 0.0) {
+                    // The source span that fills the clip's timeline length at
+                    // this ratio.
+                    const auto consumed = static_cast<engine::FrameCount>(std::llround(
+                        static_cast<double>(clip.length) / clip.stretchRatio));
+
+                    const engine::FrameCount from =
+                        std::min(clip.sourceOffset, placed.audio->frameCount);
+                    const engine::FrameCount to =
+                        std::min(from + consumed, placed.audio->frameCount);
+
+                    engine::AudioFileData span;
+                    span.sampleRate   = placed.audio->sampleRate;
+                    span.channelCount = placed.audio->channelCount;
+                    span.frameCount   = to - from;
+                    span.channels.reserve(span.channelCount);
+                    for (const auto& channel : placed.audio->channels)
+                        span.channels.emplace_back(
+                            channel.begin() + static_cast<std::ptrdiff_t>(from),
+                            channel.begin() + static_cast<std::ptrdiff_t>(to));
+
+                    engine::dsp::StretchOptions stretchOptions;
+                    stretchOptions.ratio          = clip.stretchRatio;
+                    stretchOptions.pitchSemitones = clip.pitchSemitones;
+
+                    auto rendered = std::make_shared<engine::AudioFileData>(
+                        engine::dsp::timeStretch(span, stretchOptions));
+
+                    placed.audio        = std::move(rendered);
+                    placed.sourceOffset = 0;
+                    placed.length       = std::min(clip.length, placed.audio->frameCount);
+                }
 
                 // Clip normalize folds into the placement gain here, at
                 // compile time — the node stays one multiply per sample. The

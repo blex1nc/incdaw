@@ -344,6 +344,70 @@ void DuplicateClipsCommand::undo(Project& project)
         (void)project.removeClip(id);
 }
 
+// ── StretchClipsCommand ───────────────────────────────────────────────────────
+
+bool StretchClipsCommand::execute(Project& project)
+{
+    if (lengthDelta_ == 0)
+        return false;
+
+    const engine::TempoMap& tempoMap = project.tempoMap();
+    const bool firstRun              = previous_.empty();
+
+    bool changed = false;
+    for (const EntityId id : clips_) {
+        Clip* clip = project.findClip(id);
+        if (clip == nullptr || clip->type != project::ClipType::audio
+            || clip->stretchRatio <= 0.0 || clip->length == 0)
+            continue;
+
+        const Tick endTick = project::clipStartTicks(*clip, tempoMap)
+                           + project::clipLengthTicks(*clip, tempoMap) + lengthDelta_;
+        const project::FramePosition endFrame = tempoMap.frameForTick(endTick);
+        if (endFrame <= clip->start)
+            continue;   // stretched into nothing — refuse rather than vanish
+
+        const auto newLength = static_cast<project::FrameCount>(endFrame - clip->start);
+        if (newLength == clip->length)
+            continue;
+
+        if (firstRun)
+            previous_.push_back({ id, clip->length, clip->stretchRatio });
+
+        const double factor = static_cast<double>(newLength)
+                            / static_cast<double>(clip->length);
+
+        clip->length       = newLength;
+        clip->stretchRatio = clip->stretchRatio * factor;
+        changed            = true;
+    }
+
+    return changed;
+}
+
+void StretchClipsCommand::undo(Project& project)
+{
+    for (const Snapshot& snapshot : previous_) {
+        if (Clip* clip = project.findClip(snapshot.id)) {
+            clip->length       = snapshot.previousLength;
+            clip->stretchRatio = snapshot.previousRatio;
+        }
+    }
+}
+
+bool StretchClipsCommand::canMergeWith(const Command& next) const noexcept
+{
+    const auto* other = dynamic_cast<const StretchClipsCommand*>(&next);
+    return other != nullptr && other->clips_ == clips_;
+}
+
+void StretchClipsCommand::mergeWith(const Command& next)
+{
+    // previous_ keeps the pre-gesture state; only the distance accumulates.
+    if (const auto* other = dynamic_cast<const StretchClipsCommand*>(&next))
+        lengthDelta_ += other->lengthDelta_;
+}
+
 // ── SplitClipCommand ──────────────────────────────────────────────────────────
 
 bool SplitClipCommand::execute(Project& project)

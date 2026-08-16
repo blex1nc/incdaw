@@ -136,6 +136,36 @@ private:
     std::vector<project::FrameCount> previousFrameLengths_;
 };
 
+/// Resizes audio clips by re-stretching their content instead of trimming
+/// it — the resize-vs-stretch distinction FL Studio 2026 draws at the clip
+/// edge. Length and stretch ratio scale together, so the clip keeps playing
+/// the same source span, slower or faster. Mergeable, like resize.
+class StretchClipsCommand final : public Command {
+public:
+    StretchClipsCommand(ClipIds clips, Tick lengthDelta)
+        : clips_(std::move(clips)), lengthDelta_(lengthDelta) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.stretch"; }
+    [[nodiscard]] std::string name() const override { return "Stretch Clips"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    [[nodiscard]] bool canMergeWith(const Command& next) const noexcept override;
+    void mergeWith(const Command& next) override;
+
+private:
+    ClipIds clips_;
+    Tick    lengthDelta_ = 0;
+
+    struct Snapshot {
+        EntityId                id;
+        project::FrameCount     previousLength = 0;
+        double                  previousRatio  = 1.0;
+    };
+    std::vector<Snapshot> previous_;   ///< captured once, before the gesture
+};
+
 /// Copies clips, offset in time and tracks.
 class DuplicateClipsCommand final : public Command {
 public:
