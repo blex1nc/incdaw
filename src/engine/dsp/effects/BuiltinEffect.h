@@ -20,6 +20,10 @@ namespace incdaw::engine::dsp {
 /// here, exactly as the hosted PluginNode's does.
 void sumInputsInto(const ProcessContext& context) noexcept;
 
+/// Same, but leaves one input out of the sum — how a keyed effect keeps its
+/// sidechain detector feed out of the audio path.
+void sumInputsInto(const ProcessContext& context, std::size_t skippedInput) noexcept;
+
 /// One parameter of a builtin effect, in the same format-agnostic terms a
 /// hosted plugin's discovery produces — which is exactly the point: the
 /// registry, the automation system and the UI treat a builtin and a hosted

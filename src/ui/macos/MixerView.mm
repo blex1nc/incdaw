@@ -377,6 +377,26 @@ enum class MixerDrag { none, fader, pan };
     send.target = self;
     send.representedObject = @(nodeId.value());
 
+    // Sidechain: this strip becomes the key of a compressor on the chosen
+    // strip. The compile step warns if the destination has none to key.
+    NSMenuItem* sidechainItem = [menu addItemWithTitle:@"Sidechain Into"
+                                                action:nil
+                                         keyEquivalent:@""];
+    NSMenu* sidechainMenu = [[NSMenu alloc] init];
+
+    for (const project::MixerNode& node : _project->mixerNodes()) {
+        if (node.id.value() == nodeId.value() || node.id == _project->masterMixerNode())
+            continue;
+
+        NSMenuItem* target = [sidechainMenu addItemWithTitle:@(node.name.c_str())
+                                                      action:@selector(addSidechainFromMenu:)
+                                               keyEquivalent:@""];
+        target.target            = self;
+        target.representedObject = @{@"source": @(nodeId.value()),
+                                     @"destination": @(node.id.value())};
+    }
+    sidechainItem.submenu = sidechainMenu;
+
     // ── The insert chain ─────────────────────────────────────────────────
     [menu addItem:[NSMenuItem separatorItem]];
 
@@ -711,6 +731,16 @@ enum class MixerDrag { none, fader, pan };
 
     [self commitStructural:std::make_unique<app::ConnectMixerCommand>(
         nodeId, _project->masterMixerNode(), true, 0.25)];
+}
+
+- (void)addSidechainFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+    const project::EntityId source{[info[@"source"] unsignedLongLongValue]};
+    const project::EntityId destination{[info[@"destination"] unsignedLongLongValue]};
+
+    [self commitStructural:std::make_unique<app::ConnectMixerCommand>(
+        source, destination, false, 1.0, false, true)];
 }
 
 - (void)removeFromMenu:(NSMenuItem*)item

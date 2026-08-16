@@ -5,6 +5,7 @@
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
+#include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/graph/ParameterSink.h"
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
@@ -130,6 +131,16 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
     engine::NodeIndex master = engine::invalidNode;
 
+    /// Compressor inserts that can accept an external key, by the mixer node
+    /// that owns them, with the number of edges already wired into each — the
+    /// key's input index is the connection count at the moment it lands.
+    struct KeyReceiver {
+        engine::NodeIndex              node = engine::invalidNode;
+        engine::dsp::CompressorEffect* compressor = nullptr;
+        std::size_t                    inputsSoFar = 0;
+    };
+    std::unordered_map<EntityId, std::vector<KeyReceiver>> keyReceivers;
+
     for (const MixerNode& node : project.mixerNodes()) {
         auto strip  = std::make_unique<engine::dsp::MixerStripNode>();
         auto* handle = strip.get();
@@ -197,7 +208,17 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 insertStateHandles.push_back(state);
             }
 
-            chain.push_back(builder.addNode(std::move(insertNode)));
+            engine::dsp::CompressorEffect* compressor =
+                slot.plugin.format == plugins::Format::builtin
+                        && slot.plugin.uid == "incdaw.compressor"
+                    ? static_cast<engine::dsp::CompressorEffect*>(insertNode.get())
+                    : nullptr;
+
+            const engine::NodeIndex inserted = builder.addNode(std::move(insertNode));
+            if (compressor != nullptr)
+                keyReceivers[node.id].push_back({ inserted, compressor, 0 });
+
+            chain.push_back(inserted);
         }
 
         engine::NodeIndex chainInput = index;
@@ -208,6 +229,12 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
             builder.connect(chain.back(), index);
             chainInput = chain.front();
+
+            // Every non-head chain node now has exactly one wired input.
+            if (auto found = keyReceivers.find(node.id); found != keyReceivers.end())
+                for (KeyReceiver& receiver : found->second)
+                    if (receiver.node != chain.front())
+                        receiver.inputsSoFar = 1;
         }
 
         stripInputIndices.emplace(node.id, chainInput);
@@ -242,6 +269,16 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         masterInput = found->second;
 
     // ── Routing between mixer nodes ─────────────────────────────────────────
+
+    // Keyed inserts at a chain's head keep receiving edges below; their key
+    // index is the number of edges wired in before the key arrives.
+    const auto countEdgeIntoHead = [&](EntityId destinationId, engine::NodeIndex head) {
+        if (auto found = keyReceivers.find(destinationId); found != keyReceivers.end())
+            for (auto& receiver : found->second)
+                if (receiver.node == head)
+                    ++receiver.inputsSoFar;
+    };
+
     for (const RoutingConnection& connection : project.routing()) {
         // Out of the source's fader, into the head of the destination's
         // insert chain.
@@ -251,11 +288,38 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         if (source == stripIndices.end() || destination == stripInputIndices.end())
             continue;   // an edge naming something that is not a mixer node
 
-        if (connection.sidechain)
-            continue;   // sidechain has no meaning until a plugin can receive it
+        if (connection.sidechain) {
+            // A key edge: out of the source's fader, into the detector input
+            // of the destination's keyed inserts. The builder treats it as
+            // any other edge, so delay compensation aligns the key with the
+            // audio it ducks.
+            const auto receivers = keyReceivers.find(connection.destination);
+            if (receivers == keyReceivers.end() || receivers->second.empty()) {
+                const MixerNode* named = project.findMixerNode(connection.destination);
+                compiled.warnings.push_back(
+                    "sidechain into \"" + (named != nullptr ? named->name : std::string{"?"})
+                    + "\" is silent: no compressor insert to key");
+                continue;
+            }
+
+            for (auto& receiver : receivers->second) {
+                if (receiver.compressor->keyInput()
+                    != engine::dsp::CompressorEffect::noKeyInput) {
+                    compiled.warnings.push_back(
+                        "second sidechain into the same compressor ignored");
+                    continue;
+                }
+
+                builder.connect(source->second, receiver.node);
+                receiver.compressor->setKeyInput(receiver.inputsSoFar);
+                ++receiver.inputsSoFar;
+            }
+            continue;
+        }
 
         if (!connection.isSend) {
             builder.connect(source->second, destination->second);
+            countEdgeIntoHead(connection.destination, destination->second);
             continue;
         }
 
@@ -266,6 +330,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
         builder.connect(source->second, send);
         builder.connect(send, destination->second);
+        countEdgeIntoHead(connection.destination, destination->second);
     }
 
     // ── Asset decoding ──────────────────────────────────────────────────────

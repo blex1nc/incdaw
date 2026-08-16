@@ -192,16 +192,20 @@ private:
     EntityId previous_;
 };
 
-/// Adds an edge between two mixer nodes: a route, or a send with its own gain.
+/// Adds an edge between two mixer nodes: a route, a send with its own gain,
+/// or a sidechain key feed into the destination's keyed inserts.
 class ConnectMixerCommand final : public Command {
 public:
     ConnectMixerCommand(EntityId source, EntityId destination, bool isSend = false,
-                        double gain = 1.0, bool preFader = false)
+                        double gain = 1.0, bool preFader = false, bool sidechain = false)
         : source_(source), destination_(destination), isSend_(isSend), gain_(gain),
-          preFader_(preFader) {}
+          preFader_(preFader), sidechain_(sidechain) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "mixer.connect"; }
-    [[nodiscard]] std::string name() const override { return isSend_ ? "Add Send" : "Route Mixer Track"; }
+    [[nodiscard]] std::string name() const override
+    {
+        return sidechain_ ? "Add Sidechain" : (isSend_ ? "Add Send" : "Route Mixer Track");
+    }
 
     [[nodiscard]] bool execute(Project& project) override;
     void undo(Project& project) override;
@@ -211,9 +215,10 @@ public:
 private:
     EntityId          source_;
     EntityId          destination_;
-    bool              isSend_   = false;
-    double            gain_     = 1.0;
-    bool              preFader_ = false;
+    bool              isSend_    = false;
+    double            gain_      = 1.0;
+    bool              preFader_  = false;
+    bool              sidechain_ = false;
 
     RoutingConnection connection_;
     std::size_t       index_  = 0;

@@ -48,6 +48,16 @@ double linkedPeakAt(const ProcessContext& context, FrameCount frame,
     return peak;
 }
 
+/// The same linked detector, reading an arbitrary view — the external key.
+double linkedPeakOf(const AudioBufferView& view, FrameCount frame) noexcept
+{
+    double peak = 0.0;
+    for (std::size_t channel = 0; channel < view.channelCount(); ++channel)
+        peak = std::max(peak, std::fabs(static_cast<double>(view.channel(channel)[frame])));
+
+    return peak;
+}
+
 } // namespace
 
 // ── CompressorEffect ─────────────────────────────────────────────────────────
@@ -63,7 +73,15 @@ void CompressorEffect::prepare(SampleRate sampleRate, FrameCount maxBlockSize)
 
 void CompressorEffect::process(const ProcessContext& context) noexcept
 {
-    sumInputsInto(context);
+    // With an external key wired in, that input feeds the detector only — it
+    // must never reach the audio path.
+    const bool keyed = keyInput_ != noKeyInput && keyInput_ < context.inputCount
+                    && context.input(keyInput_).channelCount() > 0;
+
+    if (keyed)
+        sumInputsInto(context, keyInput_);
+    else
+        sumInputsInto(context);
 
     const double threshold = valueAt(0);
     const double ratioVal  = std::max(1.0, valueAt(1));
@@ -78,11 +96,12 @@ void CompressorEffect::process(const ProcessContext& context) noexcept
 
     const std::size_t channels = context.output.channelCount();
     const double      slope    = 1.0 / ratioVal - 1.0;
+    const AudioBufferView key  = keyed ? context.input(keyInput_) : AudioBufferView{};
 
     double worstReduction = 0.0;
 
     for (FrameCount frame = 0; frame < context.frameCount; ++frame) {
-        const double peak   = linkedPeakAt(context, frame, channels);
+        const double peak   = keyed ? linkedPeakOf(key, frame) : linkedPeakAt(context, frame, channels);
         const double peakDb = peak > 1.0e-10 ? 20.0 * std::log10(peak) : -200.0;
 
         const double overDb      = peakDb - threshold;

@@ -30,9 +30,18 @@ public:
         return reduction_.load(std::memory_order_relaxed);
     }
 
+    static constexpr std::size_t noKeyInput = static_cast<std::size_t>(-1);
+
+    /// Marks which graph input feeds the detector instead of the audio path —
+    /// external sidechain. Set by the graph compiler when a sidechain edge
+    /// lands on this insert; build time only, before the node ever renders.
+    void setKeyInput(std::size_t index) noexcept { keyInput_ = index; }
+    [[nodiscard]] std::size_t keyInput() const noexcept { return keyInput_; }
+
 private:
     double              envelope_ = 1.0;   ///< smoothed gain, linear
     SampleRate          sampleRate_ = 48000.0;
+    std::size_t         keyInput_   = noKeyInput;
     std::atomic<double> reduction_{0.0};
 };
 

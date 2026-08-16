@@ -261,9 +261,10 @@ bool ConnectMixerCommand::execute(Project& project)
             return false;   // a node feeding itself is a cycle, not a route
 
         RoutingConnection& created = project.connect(source_, destination_);
-        created.isSend   = isSend_;
-        created.gain     = gain_;
-        created.preFader = preFader_;
+        created.isSend    = isSend_;
+        created.gain      = gain_;
+        created.preFader  = preFader_;
+        created.sidechain = sidechain_;
 
         connection_ = created;
         index_      = project.routing().size() - 1;
