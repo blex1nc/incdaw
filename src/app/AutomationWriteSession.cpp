@@ -75,19 +75,53 @@ void AutomationWriteSession::capture(project::EntityId target, const std::string
         stream->points.push_back(point);
 }
 
-std::vector<std::unique_ptr<Command>> AutomationWriteSession::finish()
+void AutomationWriteSession::gestureEnded(project::EntityId target,
+                                          const std::string& parameterKey)
+{
+    if (!enabled_ || mode_ != WriteMode::touch)
+        return;
+
+    for (Stream& stream : streams_) {
+        if (stream.target != target || stream.key != parameterKey
+            || stream.points.empty())
+            continue;
+
+        // The drag becomes its own landed segment; the stream stays, empty,
+        // ready for the next drag on the same control.
+        closedSegments_.push_back({stream.target, stream.key, std::move(stream.points)});
+        stream.points.clear();
+        return;
+    }
+}
+
+std::vector<std::unique_ptr<Command>> AutomationWriteSession::finish(project::Tick endTick)
 {
     std::vector<std::unique_ptr<Command>> commands;
+
+    for (Stream& segment : closedSegments_)
+        if (!segment.points.empty())
+            commands.push_back(std::make_unique<WriteAutomationCommand>(
+                segment.target, segment.key, thin(segment.points)));
 
     for (Stream& stream : streams_) {
         if (stream.points.empty())
             continue;
+
+        // Latch keeps writing after the hand leaves: the pass ends at the
+        // stop, holding the last value the control had.
+        if (mode_ == WriteMode::latch && endTick > stream.points.back().tick) {
+            project::AutomationPoint hold;
+            hold.tick  = endTick;
+            hold.value = stream.points.back().value;
+            stream.points.push_back(hold);
+        }
 
         commands.push_back(std::make_unique<WriteAutomationCommand>(
             stream.target, stream.key, thin(stream.points)));
     }
 
     streams_.clear();
+    closedSegments_.clear();
     return commands;
 }
 

@@ -203,6 +203,102 @@ TEST_CASE("a recorded pass lands as lane, clip and track — and undoes as one")
     CHECK(projectModel.automation().front().id == laneId);
 }
 
+TEST_CASE("touch closes a segment per drag; write spans the gap; latch holds to the end")
+{
+    // The lane starts with a point BETWEEN where the two drags will land.
+    const auto seedLane = [](project::Project& projectModel) {
+        auto& lane = projectModel.addAutomationLane(projectModel.masterMixerNode(), "volume");
+        project::AutomationPoint middle;
+        middle.tick  = 2 * ticksPerQuarterNote;
+        middle.value = 0.5;
+        lane.points  = {middle};
+    };
+
+    const auto twoDrags = [](app::AutomationWriteSession& session,
+                             project::Project& projectModel, bool endGestures) {
+        const auto master = projectModel.masterMixerNode();
+
+        session.capture(master, "volume", 0, 0.1);
+        session.capture(master, "volume", ticksPerQuarterNote, 0.2);
+        if (endGestures)
+            session.gestureEnded(master, "volume");
+
+        session.capture(master, "volume", 3 * ticksPerQuarterNote, 0.8);
+        session.capture(master, "volume", 4 * ticksPerQuarterNote, 0.9);
+        if (endGestures)
+            session.gestureEnded(master, "volume");
+    };
+
+    SUBCASE("touch: the untouched middle survives between two drags")
+    {
+        auto projectModel = makeProject();
+        seedLane(projectModel);
+        app::CommandRegistry registry{projectModel};
+
+        app::AutomationWriteSession session;
+        session.setMode(app::AutomationWriteSession::WriteMode::touch);
+        session.setEnabled(true);
+
+        twoDrags(session, projectModel, true);
+
+        auto commands = session.finish(5 * ticksPerQuarterNote);
+        REQUIRE(commands.size() == 2);
+        for (auto& command : commands)
+            REQUIRE(registry.execute(std::move(command)));
+
+        const auto& points = projectModel.automation().front().points;
+
+        bool middleSurvived = false;
+        for (const auto& point : points)
+            middleSurvived |= point.tick == 2 * ticksPerQuarterNote && point.value == 0.5;
+        CHECK(middleSurvived);
+    }
+
+    SUBCASE("write: one segment spans both drags and the middle is replaced")
+    {
+        auto projectModel = makeProject();
+        seedLane(projectModel);
+        app::CommandRegistry registry{projectModel};
+
+        app::AutomationWriteSession session;
+        session.setMode(app::AutomationWriteSession::WriteMode::write);
+        session.setEnabled(true);
+
+        // Gesture ends are reported either way; write must not care.
+        twoDrags(session, projectModel, true);
+
+        auto commands = session.finish(5 * ticksPerQuarterNote);
+        REQUIRE(commands.size() == 1);
+        REQUIRE(registry.execute(std::move(commands.front())));
+
+        for (const auto& point : projectModel.automation().front().points)
+            CHECK(!(point.tick == 2 * ticksPerQuarterNote && point.value == 0.5));
+    }
+
+    SUBCASE("latch: the last value holds out to the end tick")
+    {
+        auto projectModel = makeProject();
+        app::CommandRegistry registry{projectModel};
+
+        app::AutomationWriteSession session;
+        session.setMode(app::AutomationWriteSession::WriteMode::latch);
+        session.setEnabled(true);
+
+        session.capture(projectModel.masterMixerNode(), "volume", 0, 0.1);
+        session.capture(projectModel.masterMixerNode(), "volume", ticksPerQuarterNote, 0.7);
+        session.gestureEnded(projectModel.masterMixerNode(), "volume");   // latch ignores it
+
+        auto commands = session.finish(8 * ticksPerQuarterNote);
+        REQUIRE(commands.size() == 1);
+        REQUIRE(registry.execute(std::move(commands.front())));
+
+        const auto& points = projectModel.automation().front().points;
+        REQUIRE(!points.empty());
+        CHECK(points.back().tick == 8 * ticksPerQuarterNote);
+        CHECK(points.back().value == 0.7);
+    }
+}
+
 TEST_CASE("writing over an existing lane replaces the range and keeps the rest")
 {
     auto projectModel = makeProject();

@@ -344,6 +344,11 @@ enum class MixerDrag { none, fader, pan };
 - (void)mouseUp:(NSEvent*)event
 {
     (void)event;
+
+    if (_drag != MixerDrag::none && self.onParameterGestureEnded != nil)
+        self.onParameterGestureEnded(_dragNode.value(),
+                                     _drag == MixerDrag::fader ? "volume" : "pan");
+
     _drag = MixerDrag::none;
 }
 

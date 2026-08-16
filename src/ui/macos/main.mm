@@ -398,6 +398,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         [weakSelfForEditor automationParameterEdited:nodeId key:key value:normalized];
     };
 
+    self.mixer.onParameterGestureEnded = ^(unsigned long long nodeId, const char* key) {
+        [weakSelfForEditor automationGestureEnded:nodeId key:key];
+    };
+
     // The editors share one region and are swapped rather than tiled: each
     // wants the whole window, and a DAW that shows half a Piano Roll above half
     // a playlist shows neither.
@@ -759,6 +763,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                        _audio->transport().positionInTicks(), normalized);
 }
 
+- (void)automationGestureEnded:(unsigned long long)nodeId key:(const char*)key
+{
+    _autoWrite.gestureEnded(project::EntityId{nodeId}, key);
+}
+
 - (void)toggleAudioLogger:(NSMenuItem*)sender
 {
     if (!_audioReady)
@@ -856,23 +865,41 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self refreshStatus];
 }
 
-- (void)toggleAutomationWrite:(NSMenuItem*)sender
+/// Lands whatever the session holds. Each touched parameter is its own undo
+/// entry, which is what a user riding two faders expects Cmd+Z to peel back.
+- (void)landAutomationPass
 {
-    if (_autoWrite.isEnabled()) {
-        _autoWrite.setEnabled(false);
-        sender.state = NSControlStateValueOff;
+    const project::Tick endTick =
+        _audioReady ? _audio->transport().positionInTicks() : project::Tick{0};
 
-        // Land every touched parameter's pass. Each is its own undo entry,
-        // which is what a user riding two faders expects Cmd+Z to peel back.
-        for (auto& command : _autoWrite.finish())
-            (void)_registry->execute(std::move(command));
+    bool landed = false;
+    for (auto& command : _autoWrite.finish(endTick))
+        landed |= _registry->execute(std::move(command));
 
+    if (landed) {
         [self rebuildGraph];
         [self.playlist setNeedsDisplay:YES];
-    } else {
-        _autoWrite.setEnabled(true);
-        sender.state = NSControlStateValueOn;
     }
+}
+
+/// The Off / Write / Touch / Latch selector. Switching modes mid-pass lands
+/// the pass first — two modes never mix inside one recorded gesture.
+- (void)setAutomationMode:(NSMenuItem*)sender
+{
+    if (_autoWrite.isEnabled())
+        [self landAutomationPass];
+
+    switch (sender.tag) {
+        case 1: _autoWrite.setMode(app::AutomationWriteSession::WriteMode::write); break;
+        case 2: _autoWrite.setMode(app::AutomationWriteSession::WriteMode::touch); break;
+        case 3: _autoWrite.setMode(app::AutomationWriteSession::WriteMode::latch); break;
+        default: break;
+    }
+
+    _autoWrite.setEnabled(sender.tag != 0);
+
+    for (NSMenuItem* item in sender.menu.itemArray)
+        item.state = item == sender ? NSControlStateValueOn : NSControlStateValueOff;
 
     [self refreshStatus];
 }
@@ -3233,13 +3260,31 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     [audioMenu addItem:[NSMenuItem separatorItem]];
 
-    // Write-mode automation recording: while checked and the transport rolls,
-    // every fader and pan move in the mixer is captured; unchecking lands the
-    // passes as automation lanes (and clips, when the lane is new).
-    NSMenuItem* writeItem = [audioMenu addItemWithTitle:@"Write Automation"
-                                                 action:@selector(toggleAutomationWrite:)
-                                          keyEquivalent:@""];
-    writeItem.target = self;
+    // Automation recording: while a mode is active and the transport rolls,
+    // every fader and pan move in the mixer is captured; selecting Off (or
+    // switching modes) lands the passes as lanes and clips. Write spans the
+    // whole pass, touch records only while a control is held, latch holds
+    // from the first touch to the stop.
+    NSMenuItem* recordAutomationItem = [[NSMenuItem alloc] initWithTitle:@"Record Automation"
+                                                                  action:nil
+                                                           keyEquivalent:@""];
+    NSMenu* automationModeMenu = [[NSMenu alloc] initWithTitle:@"Record Automation"];
+
+    const struct { NSString* title; NSInteger tag; } automationModes[] = {
+        {@"Off", 0}, {@"Write", 1}, {@"Touch", 2}, {@"Latch", 3},
+    };
+
+    for (const auto& mode : automationModes) {
+        NSMenuItem* item = [automationModeMenu addItemWithTitle:mode.title
+                                                         action:@selector(setAutomationMode:)
+                                                  keyEquivalent:@""];
+        item.target = self;
+        item.tag    = mode.tag;
+        item.state  = mode.tag == 0 ? NSControlStateValueOn : NSControlStateValueOff;
+    }
+
+    recordAutomationItem.submenu = automationModeMenu;
+    [audioMenu addItem:recordAutomationItem];
 
     NSMenuItem* monitorItem = [audioMenu addItemWithTitle:@"Monitor Input"
                                                    action:@selector(toggleInputMonitoring:)

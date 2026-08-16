@@ -39,6 +39,11 @@ namespace incdaw::engine::dsp { class MixerStripNode; }
 @property (nonatomic, copy) void (^onParameterEdited)(unsigned long long nodeId,
                                                       const char* key, double normalized);
 
+/// The drag on that control ended — touch-mode automation closes its
+/// segment here.
+@property (nonatomic, copy) void (^onParameterGestureEnded)(unsigned long long nodeId,
+                                                            const char* key);
+
 /// Called when the user asks to start or stop playback (space bar).
 @property (nonatomic, copy) void (^onTransportToggle)(void);
 
