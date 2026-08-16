@@ -125,10 +125,12 @@ add_library(incdaw_app STATIC
     app/Version.cpp
     app/AutomationWriteSession.cpp
     app/CommandRegistry.cpp
+    app/MusicTheory.cpp
     app/PianoRollModel.cpp
     app/ChannelRackModel.cpp
     app/PlaylistModel.cpp
     app/commands/NoteCommands.cpp
+    app/commands/ChordCommands.cpp
     app/commands/ChannelCommands.cpp
     app/commands/MidiMappingCommands.cpp
     app/commands/SamplerCommands.cpp

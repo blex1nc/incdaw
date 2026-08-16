@@ -16,6 +16,7 @@ add_executable(incdaw_tests
     unit/ProjectFormatTests.cpp
     unit/MidiTests.cpp
     unit/CommandTests.cpp
+    unit/ChordToolTests.cpp
     unit/PianoRollTests.cpp
     unit/InstrumentTests.cpp
     unit/BuiltinEffectTests.cpp
