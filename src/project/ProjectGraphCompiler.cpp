@@ -89,6 +89,15 @@ engine::ParameterSink* CompiledProjectGraph::insertSinkFor(EntityId slot) const 
     return nullptr;
 }
 
+engine::Node* CompiledProjectGraph::insertNodeFor(EntityId slot) const noexcept
+{
+    for (std::size_t index = 0; index < builtSlots.size(); ++index)
+        if (builtSlots[index] == slot)
+            return builtInserts[index];
+
+    return nullptr;
+}
+
 CompiledProjectGraph compileProjectGraph(const Project& project, const engine::TempoMap& tempoMap,
                                          const GraphCompileOptions& options)
 {
@@ -136,6 +145,10 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     /// on failure the builder (and every node these point into) is destroyed.
     std::vector<EntityId>         insertSlotIds;
     std::vector<engine::StateIO*> insertStateHandles;
+
+    /// Every built insert node, for CompiledProjectGraph::insertNodeFor.
+    std::vector<EntityId>      builtInsertSlotIds;
+    std::vector<engine::Node*> builtInsertNodes;
 
     engine::NodeIndex master = engine::invalidNode;
 
@@ -205,6 +218,9 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 insertSlotIds.push_back(slot.id);
                 insertStateHandles.push_back(state);
             }
+
+            builtInsertSlotIds.push_back(slot.id);
+            builtInsertNodes.push_back(insertNode.get());
 
             chain.push_back(builder.addNode(std::move(insertNode)));
         }
@@ -852,6 +868,9 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         compiled.sinkSlots.push_back(slot);
         compiled.insertSinks.push_back(sink);
     }
+
+    compiled.builtSlots   = std::move(builtInsertSlotIds);
+    compiled.builtInserts = std::move(builtInsertNodes);
 
     return compiled;
 }

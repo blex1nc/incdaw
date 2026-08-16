@@ -1,11 +1,13 @@
 #include "doctest.h"
 
 #include "engine/core/AudioBufferPool.h"
+#include "engine/dsp/Fft.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/SineOscillatorNode.h"
 
 #include <cmath>
 #include <numbers>
+#include <vector>
 
 using namespace incdaw::engine;
 
@@ -233,4 +235,48 @@ TEST_CASE("a smoothed gain converges exactly, so the smoothing path goes cold")
 
     CHECK(gain.currentGain() == doctest::Approx(0.5f));
     CHECK(outputs.buffer(0).channel(0)[blockSize - 1] == doctest::Approx(0.5f));
+}
+
+// ── Fft ──────────────────────────────────────────────────────────────────────
+
+TEST_CASE("the FFT matches a naive DFT and resolves a pure tone to its bin")
+{
+    using incdaw::engine::dsp::Fft;
+
+    constexpr std::size_t size = 256;
+
+    Fft fft;
+    fft.setSize(size);
+
+    // An impulse transforms to a flat spectrum of ones.
+    std::vector<float> real(size, 0.0f);
+    std::vector<float> imaginary(size, 0.0f);
+    real[0] = 1.0f;
+
+    fft.forward(real.data(), imaginary.data());
+
+    for (std::size_t bin = 0; bin < size; ++bin) {
+        CHECK(real[bin] == doctest::Approx(1.0).epsilon(1e-4));
+        CHECK(imaginary[bin] == doctest::Approx(0.0).scale(1.0).epsilon(1e-4));
+    }
+
+    // A bin-exact cosine lands its energy at exactly that bin (and its
+    // mirror), amplitude N/2.
+    constexpr std::size_t tone = 16;
+    for (std::size_t index = 0; index < size; ++index) {
+        real[index] = static_cast<float>(
+            std::cos(2.0 * M_PI * tone * static_cast<double>(index) / size));
+        imaginary[index] = 0.0f;
+    }
+
+    fft.forward(real.data(), imaginary.data());
+
+    for (std::size_t bin = 0; bin <= size / 2; ++bin) {
+        const double magnitude = std::hypot(static_cast<double>(real[bin]),
+                                            static_cast<double>(imaginary[bin]));
+        if (bin == tone)
+            CHECK(magnitude == doctest::Approx(size / 2.0).epsilon(1e-3));
+        else
+            CHECK(magnitude < 1e-2);
+    }
 }

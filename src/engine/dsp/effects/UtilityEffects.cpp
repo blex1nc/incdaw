@@ -81,6 +81,56 @@ void UtilityEffect::process(const ProcessContext& context) noexcept
 
 AnalyzerEffect::AnalyzerEffect() : BuiltinEffect(nullptr, 0) {}
 
+void AnalyzerEffect::prepare(SampleRate sampleRate, FrameCount maxBlockSize)
+{
+    (void)maxBlockSize;
+
+    sampleRate_.store(sampleRate, std::memory_order_relaxed);
+
+    fft_.setSize(fftSize);
+
+    window_.assign(fftSize, 0.0f);
+    for (std::size_t index = 0; index < fftSize; ++index)
+        window_[index] = static_cast<float>(
+            0.5 * (1.0 - std::cos(2.0 * M_PI * static_cast<double>(index)
+                                  / static_cast<double>(fftSize - 1))));
+
+    accumulate_.assign(fftSize, 0.0f);
+    accumulated_ = 0;
+    scratchReal_.assign(fftSize, 0.0f);
+    scratchImaginary_.assign(fftSize, 0.0f);
+
+    published_[0].assign(binCount, -160.0f);
+    published_[1].assign(binCount, -160.0f);
+    generation_.store(0, std::memory_order_release);
+}
+
+void AnalyzerEffect::publishSpectrum() noexcept
+{
+    for (std::size_t index = 0; index < fftSize; ++index) {
+        scratchReal_[index]      = accumulate_[index] * window_[index];
+        scratchImaginary_[index] = 0.0f;
+    }
+
+    fft_.forward(scratchReal_.data(), scratchImaginary_.data());
+
+    // Hann coherent gain is 0.5; a full-scale sine lands at 0 dBFS.
+    constexpr float scale = 4.0f / static_cast<float>(fftSize);
+    constexpr float floor = 1.0e-8f;
+
+    const std::uint64_t generation = generation_.load(std::memory_order_relaxed);
+    std::vector<float>& target     = published_[(generation + 1) & 1];
+
+    for (std::size_t bin = 0; bin < binCount; ++bin) {
+        const float magnitude = std::sqrt(scratchReal_[bin] * scratchReal_[bin]
+                                          + scratchImaginary_[bin] * scratchImaginary_[bin])
+                              * scale;
+        target[bin] = 20.0f * std::log10(magnitude > floor ? magnitude : floor);
+    }
+
+    generation_.store(generation + 1, std::memory_order_release);
+}
+
 void AnalyzerEffect::process(const ProcessContext& context) noexcept
 {
     sumInputsInto(context);
@@ -106,6 +156,41 @@ void AnalyzerEffect::process(const ProcessContext& context) noexcept
                 : 0.0f,
             std::memory_order_relaxed);
     }
+
+    // ── The spectrum half: accumulate a mono downmix, transform when full.
+    if (accumulate_.size() != fftSize)
+        return;   // never prepared: levels only
+
+    for (FrameCount frame = 0; frame < context.frameCount; ++frame) {
+        float mono = 0.0f;
+        for (std::size_t channel = 0; channel < channels; ++channel)
+            mono += context.output.channel(channel)[frame];
+
+        accumulate_[accumulated_] = channels > 0 ? mono / static_cast<float>(channels) : 0.0f;
+
+        if (++accumulated_ == fftSize) {
+            publishSpectrum();
+            accumulated_ = 0;
+        }
+    }
+}
+
+bool AnalyzerEffect::readSpectrum(std::vector<float>& binsDb) const
+{
+    // Seqlock-style: copy the buffer the generation points at, then confirm
+    // the generation did not move underneath the copy.
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        const std::uint64_t before = generation_.load(std::memory_order_acquire);
+        if (before == 0)
+            return false;   // nothing published yet
+
+        binsDb = published_[before & 1];
+
+        if (generation_.load(std::memory_order_acquire) == before)
+            return true;
+    }
+
+    return false;   // the audio thread kept lapping us; try next frame
 }
 
 } // namespace incdaw::engine::dsp

@@ -41,7 +41,9 @@
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "ui/macos/AudioEditorView.h"
 #include "ui/macos/ChannelRackView.h"
+#include "engine/dsp/effects/UtilityEffects.h"
 #include "ui/macos/InsertParameterPanel.h"
+#include "ui/macos/SpectrumView.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
 #include "ui/macos/MixerView.h"
@@ -1496,6 +1498,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         return;
     }
 
+    // The analyzer's surface is a picture, not sliders.
+    if (slot->plugin.format == plugins::Format::builtin
+        && slot->plugin.uid == "incdaw.analyzer") {
+        [self openSpectrumWindowForSlotKey:slotKey];
+        return;
+    }
+
     NSArray<NSDictionary*>* rows = [self parameterRowsForSlot:*slot];
     if (rows.count == 0) {
         // A hosted plugin that reports no parameters: nothing to show.
@@ -1541,11 +1550,66 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [_panelWindows removeObjectForKey:key];
 }
 
+- (void)openSpectrumWindowForSlotKey:(unsigned long long)slotKey
+{
+    NSNumber* key = @(slotKey);
+
+    NSWindow* window = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(0, 0, 420, 220)
+                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                          | NSWindowStyleMaskResizable
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    window.releasedWhenClosed = NO;
+    window.title              = [self displayNameForSlotKey:slotKey];
+
+    INCDAWSpectrumView* view =
+        [[INCDAWSpectrumView alloc] initWithFrame:NSMakeRect(0, 0, 420, 220)];
+    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    window.contentView    = view;
+
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+
+    _panelWindows[key] = window;
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+    _panelObservers[key] = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSWindowWillCloseNotification
+                    object:window
+                     queue:nil
+                usingBlock:^(NSNotification*) {
+                    [weakSelf panelWindowClosedForSlotKey:slotKey];
+                }];
+}
+
 /// Open panels follow the live values at ~5 Hz, so automation, MIDI knobs
 /// and undo become visible without any panel owning an engine pointer.
+/// Spectrum windows repaint at the full housekeeping rate — a spectrum at
+/// 5 Hz reads as broken.
 - (void)refreshOpenPanelValues
 {
-    if (_panelWindows.count == 0 || ++_panelRefreshTick % 6 != 0)
+    if (_panelWindows.count == 0)
+        return;
+
+    for (NSNumber* key in _panelWindows.allKeys) {
+        NSWindow* window = _panelWindows[key];
+        if (![window.contentView isKindOfClass:[INCDAWSpectrumView class]])
+            continue;
+
+        auto* node = _live.insertNodeFor(project::EntityId{key.unsignedLongLongValue});
+        auto* analyzer = dynamic_cast<engine::dsp::AnalyzerEffect*>(node);
+        if (analyzer == nullptr)
+            continue;
+
+        std::vector<float> bins;
+        if (analyzer->readSpectrum(bins))
+            [static_cast<INCDAWSpectrumView*>(window.contentView)
+                updateWithBins:bins
+                    sampleRate:analyzer->analysisSampleRate()];
+    }
+
+    if (++_panelRefreshTick % 6 != 0)
         return;
 
     for (NSNumber* key in _panelWindows.allKeys) {

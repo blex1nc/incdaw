@@ -169,6 +169,12 @@ struct CompiledProjectGraph {
     std::vector<EntityId>               sinkSlots;
     std::vector<engine::ParameterSink*> insertSinks;
 
+    /// Every insert node that made it into the graph, by slot — the UI's
+    /// door to effect-specific surfaces (the analyzer's spectrum). Owned by
+    /// `graph`, like everything here.
+    std::vector<EntityId>      builtSlots;
+    std::vector<engine::Node*> builtInserts;
+
     std::string error;
 
     /// Non-fatal compile notes: an asset file that could not be read, an
@@ -192,6 +198,9 @@ struct CompiledProjectGraph {
 
     /// Parameter sink for an insert slot, or nullptr if it is not in the graph.
     [[nodiscard]] engine::ParameterSink* insertSinkFor(EntityId slot) const noexcept;
+
+    /// The insert node itself, or nullptr if it is not in the graph.
+    [[nodiscard]] engine::Node* insertNodeFor(EntityId slot) const noexcept;
 };
 
 /// Compiles `project` against `tempoMap`, which must outlive the returned graph

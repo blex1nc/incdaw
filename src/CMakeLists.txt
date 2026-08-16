@@ -41,6 +41,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/SineOscillatorNode.cpp
     engine/dsp/GainNode.cpp
     engine/dsp/DelayLineNode.cpp
+    engine/dsp/Fft.cpp
     engine/dsp/Resampler.cpp
     engine/dsp/MixerStripNode.cpp
     engine/dsp/effects/BuiltinEffect.cpp
@@ -158,7 +159,8 @@ if(APPLE)
         ui/macos/PlaylistView.mm
         ui/macos/MixerView.mm
         ui/macos/AudioEditorView.mm
-        ui/macos/InsertParameterPanel.mm)
+        ui/macos/InsertParameterPanel.mm
+        ui/macos/SpectrumView.mm)
     # incdaw_plugins is linked directly: the shell owns the plugin registry and
     # the instance manager, and injects the insert factory into the graph
     # compiler (docs/DECISIONS.md D-028). project/ deliberately does not link

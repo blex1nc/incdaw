@@ -608,3 +608,44 @@ TEST_CASE("the lookahead limiter holds its ceiling through a step transient")
     CHECK(peak <= ceiling * 1.0001f);   // never over, first transient included
     CHECK(peak >= ceiling * 0.9f);      // and it genuinely limits, not mutes
 }
+
+// ── The analyzer's spectrum ──────────────────────────────────────────────────
+
+TEST_CASE("the analyzer publishes a spectrum whose peak sits at the tone's bin")
+{
+    engine::dsp::AnalyzerEffect analyzer;
+
+    // Nothing published before a full window.
+    std::vector<float> bins;
+    CHECK_FALSE(analyzer.readSpectrum(bins));
+
+    // A full-scale sine exactly on bin 32: 32 * 48000 / 2048 = 750 Hz.
+    constexpr std::size_t toneBin = 32;
+    const std::size_t     size    = engine::dsp::AnalyzerEffect::fftSize;
+
+    std::vector<std::vector<Sample>> input(
+        2, std::vector<Sample>(size, 0.0f));
+    for (std::size_t frame = 0; frame < size; ++frame) {
+        const auto value = static_cast<Sample>(
+            std::sin(2.0 * M_PI * toneBin * static_cast<double>(frame)
+                     / static_cast<double>(size)));
+        input[0][frame] = value;
+        input[1][frame] = value;
+    }
+
+    (void)processThrough(analyzer, input);
+
+    REQUIRE(analyzer.readSpectrum(bins));
+    REQUIRE(bins.size() == engine::dsp::AnalyzerEffect::binCount);
+
+    // The peak bin is the tone's, at ~0 dBFS; far bins sit deep below.
+    std::size_t peakBin = 0;
+    for (std::size_t bin = 1; bin < bins.size(); ++bin)
+        if (bins[bin] > bins[peakBin])
+            peakBin = bin;
+
+    CHECK(peakBin == toneBin);
+    CHECK(bins[toneBin] > -1.0f);
+    CHECK(bins[toneBin] < 1.0f);
+    CHECK(bins[toneBin + 40] < -40.0f);
+}
