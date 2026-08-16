@@ -131,6 +131,7 @@ add_library(incdaw_app STATIC
     app/PlaylistModel.cpp
     app/commands/NoteCommands.cpp
     app/commands/ChordCommands.cpp
+    app/commands/NoteToolCommands.cpp
     app/commands/ChannelCommands.cpp
     app/commands/MidiMappingCommands.cpp
     app/commands/SamplerCommands.cpp
