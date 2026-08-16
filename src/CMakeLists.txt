@@ -127,6 +127,7 @@ target_link_libraries(incdaw_project
 add_library(incdaw_app STATIC
     app/Version.cpp
     app/AutomationWriteSession.cpp
+    app/Browser.cpp
     app/CommandRegistry.cpp
     app/MusicTheory.cpp
     app/PianoRollModel.cpp
