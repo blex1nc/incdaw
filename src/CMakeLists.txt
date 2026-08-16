@@ -129,6 +129,7 @@ add_library(incdaw_app STATIC
     app/Version.cpp
     app/AutomationWriteSession.cpp
     app/Browser.cpp
+    app/AudioAssetImport.cpp
     app/CommandRegistry.cpp
     app/MusicTheory.cpp
     app/PianoRollModel.cpp
@@ -140,6 +141,7 @@ add_library(incdaw_app STATIC
     app/commands/ChannelCommands.cpp
     app/commands/MidiMappingCommands.cpp
     app/commands/SamplerCommands.cpp
+    app/commands/ImportCommands.cpp
     app/commands/PatternCommands.cpp
     app/commands/StepCommands.cpp
     app/commands/TrackCommands.cpp

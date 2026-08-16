@@ -17,6 +17,7 @@ add_executable(incdaw_tests
     unit/MidiTests.cpp
     unit/CommandTests.cpp
     unit/BrowserTests.cpp
+    unit/BrowserDropTests.cpp
     unit/ChordToolTests.cpp
     unit/NoteToolTests.cpp
     unit/PianoRollTests.cpp

@@ -1,8 +1,10 @@
 #include "ui/macos/PlaylistView.h"
 
+#include "app/Browser.h"
 #include "app/CommandRegistry.h"
 #include "app/PlaylistModel.h"
 #include "app/commands/ClipCommands.h"
+#include "app/commands/ImportCommands.h"
 #include "app/commands/MarkerCommands.h"
 #include "app/commands/TrackCommands.h"
 #include "engine/audio/WaveformOverview.h"
@@ -73,6 +75,11 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
     std::vector<app::PlaylistModel::VisibleClip> _visible;
 
+    /// Track row a dragged sample is hovering, and the tick it would land on.
+    /// Drawn while the drag is in flight so the drop is aimed, not guessed.
+    std::size_t   _dropTrack;
+    project::Tick _dropTick;
+
     /// Waveform overviews per asset, built lazily on first draw. Invalidated
     /// by the host after any edit that may have rewritten an asset's file —
     /// the view cannot see a file change, only the host knows one happened.
@@ -113,6 +120,10 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     viewport.height       = frame.size.height - rulerHeight;
     _model->setViewport(viewport);
     _model->setSnap(ticksPerQuarterNote * 4);               // one bar
+
+    _dropTrack = app::PlaylistModel::noTrack;
+    _dropTick  = 0;
+    [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
 
     return self;
 }
@@ -155,6 +166,23 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     [self drawTracks];
     [self drawClips];
     [self drawPlayhead];
+
+    // Where a dragged sample would land: the lane, and the exact tick.
+    if (_dropTrack != app::PlaylistModel::noTrack && _dropTrack < _project->tracks().size()) {
+        const project::Track& track = _project->tracks()[_dropTrack];
+
+        const NSRect lane = NSMakeRect(headerWidth,
+                                       _model->trackY(_project->tracks(), _dropTrack) + rulerHeight,
+                                       self.bounds.size.width - headerWidth,
+                                       app::PlaylistModel::trackHeight(track));
+
+        [[NSColor colorWithCalibratedRed:0.45 green:0.72 blue:1.0 alpha:0.12] setFill];
+        NSRectFillUsingOperation(lane, NSCompositingOperationSourceOver);
+
+        const auto x = static_cast<CGFloat>(headerWidth + _model->tickToX(_dropTick));
+        [[NSColor colorWithCalibratedRed:0.45 green:0.72 blue:1.0 alpha:0.9] setFill];
+        NSRectFill(NSMakeRect(x, lane.origin.y, 2.0, lane.size.height));
+    }
 
     if (_drag == PlaylistDrag::boxSelect) {
         const NSRect box = NSMakeRect(std::min(_dragOrigin.x, _dragCurrent.x) + headerWidth,
@@ -493,6 +521,86 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
                     - _model->viewport().firstTrackY;
 
     return NSMakeRect(0, y, self.bounds.size.width, addRowHeight);
+}
+
+// ── Dropping a sample ───────────────────────────────────────────────────────
+
+/// The dragged file, if INCDAW can read it. The same answer the Channel Rack
+/// gives, from the same place: what is on the pasteboard, not who started the
+/// drag — a drop from Finder behaves exactly like one from the Browser.
+static NSString* droppedAudioPath(id<NSDraggingInfo> info)
+{
+    NSArray<NSURL*>* urls = [info.draggingPasteboard
+        readObjectsForClasses:@[ [NSURL class] ]
+                      options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+
+    if (urls.count != 1)
+        return nil;
+
+    NSString* path = urls.firstObject.path;
+
+    return path != nil && incdaw::app::Browser::canDecodeAudio(std::filesystem::path{path.UTF8String})
+               ? path
+               : nil;
+}
+
+- (project::Tick)dropTickForGrid:(NSPoint)grid
+{
+    const project::Tick tick    = _model->xToTick(grid.x > 0.0 ? grid.x : 0.0);
+    const project::Tick snapped = _model->snapTick(tick > 0 ? tick : 0);
+    return snapped > 0 ? snapped : 0;
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info
+{
+    return [self draggingUpdated:info];
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info
+{
+    if (droppedAudioPath(info) == nil || _project == nullptr) {
+        _dropTrack = app::PlaylistModel::noTrack;
+        return NSDragOperationNone;
+    }
+
+    const NSPoint point = [self convertPoint:info.draggingLocation fromView:nil];
+    const NSPoint grid  = NSMakePoint(point.x - headerWidth, point.y - rulerHeight);
+
+    _dropTrack = _model->trackAtY(_project->tracks(), grid.y);
+    _dropTick  = [self dropTickForGrid:grid];
+
+    [self setNeedsDisplay:YES];
+
+    return _dropTrack == app::PlaylistModel::noTrack ? NSDragOperationNone : NSDragOperationCopy;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)info
+{
+    (void)info;
+    _dropTrack = app::PlaylistModel::noTrack;
+    [self setNeedsDisplay:YES];
+}
+
+/// A sample dropped on a lane becomes an audio clip there, snapped like every
+/// other placement in this view, as long as the file itself. It is the clip a
+/// recording would have produced — arrived at by dragging.
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info
+{
+    NSString* path = droppedAudioPath(info);
+
+    const std::size_t   row  = _dropTrack;
+    const project::Tick tick = _dropTick;
+
+    _dropTrack = app::PlaylistModel::noTrack;
+    [self setNeedsDisplay:YES];
+
+    if (path == nil || _project == nullptr || row == app::PlaylistModel::noTrack
+        || row >= _project->tracks().size())
+        return NO;
+
+    [self commit:std::make_unique<app::ImportAudioClipCommand>(_project->tracks()[row].id,
+                                                               path.UTF8String, tick)];
+    return YES;
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────

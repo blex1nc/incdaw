@@ -3,6 +3,8 @@
 #include "app/ChannelRackModel.h"
 #include "app/CommandRegistry.h"
 #include "app/commands/ChannelCommands.h"
+#include "app/Browser.h"
+#include "app/commands/ImportCommands.h"
 #include "app/commands/SamplerCommands.h"
 #include "app/commands/StepCommands.h"
 #include "project/Model.h"
@@ -61,6 +63,10 @@ enum class RackDrag { none, volume, paintSteps };
 
 @implementation INCDAWChannelRackView {
     project::Project*     _project;
+
+    /// Row a drag is hovering, or noRow. Drawn so the drop's destination is
+    /// visible before the mouse is released.
+    std::size_t           _dropRow;
     app::CommandRegistry* _registry;
 
     std::unique_ptr<app::ChannelRackModel> _model;
@@ -80,6 +86,8 @@ enum class RackDrag { none, volume, paintSteps };
         return nil;
 
     _project      = project;
+    _dropRow      = app::ChannelRackModel::noRow;
+    [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
     _registry     = registry;
     _model        = std::make_unique<app::ChannelRackModel>();
     _drag         = RackDrag::none;
@@ -92,6 +100,27 @@ enum class RackDrag { none, volume, paintSteps };
 // Flipped, so the view agrees with app::ChannelRackModel instead of converting
 // at every call — the same choice the Piano Roll makes.
 - (BOOL)isFlipped { return YES; }
+
+/// The file being dragged, if it is one INCDAW can actually load.
+///
+/// Answered from the pasteboard rather than from the drag source, so a drop
+/// from Finder works exactly like a drop from the Browser pane — the rack does
+/// not care where a sample came from.
+static NSString* droppedSamplePath(id<NSDraggingInfo> info)
+{
+    NSArray<NSURL*>* urls = [info.draggingPasteboard
+        readObjectsForClasses:@[ [NSURL class] ]
+                      options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+
+    if (urls.count != 1)
+        return nil;
+
+    NSString* path = urls.firstObject.path;
+
+    return path != nil && incdaw::app::Browser::canDecodeAudio(std::filesystem::path{path.UTF8String})
+               ? path
+               : nil;
+}
 - (BOOL)acceptsFirstResponder { return YES; }
 
 - (const project::Pattern*)currentPattern
@@ -190,6 +219,21 @@ enum class RackDrag { none, volume, paintSteps };
     fill(addRow, grey(0.13));
     drawText(@"＋  Add channel", {addRow.x + layout.padding, addRow.y + 6.0,
                                   addRow.width, addRow.height}, grey(0.55), 12.0);
+
+    // The row a dragged sample would land on. Drawn last so it reads over the
+    // row it marks: dropping ON a channel replaces its sound, and the user
+    // must be able to see which one before letting go.
+    if (_dropRow != app::ChannelRackModel::noRow && _dropRow < channels.size()) {
+        auto target  = _model->rowRect(_dropRow);
+        target.width = self.bounds.size.width;
+
+        [[NSColor colorWithCalibratedRed:0.45 green:0.72 blue:1.0 alpha:0.9] setStroke];
+        NSBezierPath* outline = [NSBezierPath
+            bezierPathWithRect:NSMakeRect(target.x + 1.0, target.y + 1.0,
+                                          target.width - 2.0, target.height - 2.0)];
+        outline.lineWidth = 2.0;
+        [outline stroke];
+    }
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────
@@ -354,6 +398,73 @@ enum class RackDrag { none, volume, paintSteps };
     if (channelId.value() == _selectedChannelIdValue && !_project->channels().empty()
         && self.onSelectChannel != nil)
         self.onSelectChannel(_project->channels().front().id.value());
+}
+
+// ── Dropping a sample ───────────────────────────────────────────────────────
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info
+{
+    return [self draggingUpdated:info];
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info
+{
+    if (droppedSamplePath(info) == nil) {
+        _dropRow = app::ChannelRackModel::noRow;
+        return NSDragOperationNone;
+    }
+
+    const NSPoint point = [self convertPoint:info.draggingLocation fromView:nil];
+    const auto    hit   = _model->hitTest([self channelCount], [self currentPattern],
+                                          point.x, point.y);
+
+    _dropRow = hit.row;
+    [self setNeedsDisplay:YES];
+
+    return NSDragOperationCopy;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)info
+{
+    (void)info;
+    _dropRow = app::ChannelRackModel::noRow;
+    [self setNeedsDisplay:YES];
+}
+
+/// A sample dropped ON a channel replaces that channel's sound; a sample
+/// dropped anywhere else becomes a new channel. Both are one undo, and both go
+/// through the same commands the menus use — a drop is a gesture, not a
+/// second way of editing the project.
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info
+{
+    NSString* path = droppedSamplePath(info);
+
+    const std::size_t row = _dropRow;
+    _dropRow              = app::ChannelRackModel::noRow;
+    [self setNeedsDisplay:YES];
+
+    if (path == nil || _project == nullptr)
+        return NO;
+
+    if (row != app::ChannelRackModel::noRow && row < _project->channels().size()) {
+        const project::EntityId channelId = _project->channels()[row].id;
+        [self commit:std::make_unique<app::LoadSampleCommand>(channelId, path.UTF8String)];
+
+        if (self.onSelectChannel != nil)
+            self.onSelectChannel(channelId.value());
+
+        return YES;
+    }
+
+    auto command = std::make_unique<app::ImportSampleAsChannelCommand>(path.UTF8String);
+    app::ImportSampleAsChannelCommand* imported = command.get();
+
+    [self commit:std::move(command)];
+
+    if (imported->channelId().isValid() && self.onSelectChannel != nil)
+        self.onSelectChannel(imported->channelId().value());
+
+    return YES;
 }
 
 - (void)keyDown:(NSEvent*)event

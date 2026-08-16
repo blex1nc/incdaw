@@ -1,6 +1,5 @@
 #include "app/commands/SamplerCommands.h"
 
-#include "engine/audio/WavFile.h"
 
 namespace incdaw::app {
 
@@ -11,36 +10,18 @@ bool LoadSampleCommand::execute(Project& project)
         return false;
 
     if (!minted_) {
-        // Probe, never decode: the command needs the header's metadata, and
-        // failing HERE — before any mutation — is what makes an unreadable
-        // file a clean refusal rather than a half-applied edit.
-        engine::AudioFileData header;
-        if (!engine::WavFile::probe(path_, header))
+        // Probes the header, never decodes, and fails BEFORE any mutation —
+        // which is what makes an unreadable file a clean refusal rather than a
+        // half-applied edit (app/AudioAssetImport.h).
+        if (!importAudioAsset(project, path_, import_))
             return false;
-
-        assetId_ = EntityId{};
-        for (const project::AudioAsset& existing : project.audioAssets())
-            if (existing.absolutePath == path_)
-                assetId_ = existing.id;
-
-        if (!assetId_.isValid()) {
-            project::AudioAsset& added = project.addAudioAsset(path_);
-            added.sampleRate           = header.sampleRate;
-            added.frameCount           = header.frameCount;
-            added.channelCount         = header.channelCount;
-
-            created_    = true;
-            assetId_    = added.id;
-            asset_      = added;
-            assetIndex_ = project.audioAssets().size() - 1;
-        }
 
         previousInstrument_ = channel->instrument;
         previousStateFile_  = channel->instrumentStateFile;
         previousZones_      = channel->samplerZones;
         minted_             = true;
-    } else if (created_ && project.indexOfAudioAsset(assetId_) == Project::notFound) {
-        project.insertAudioAsset(assetIndex_, asset_);
+    } else {
+        restoreImportedAsset(project, import_);
     }
 
     channel->instrument = plugins::builtinSampler();
@@ -49,7 +30,7 @@ bool LoadSampleCommand::execute(Project& project)
     // The default program: the whole file across the whole keyboard, rooted
     // at middle C — the note a bare click in the Piano Roll writes.
     project::ChannelSamplerZone zone;
-    zone.asset            = assetId_;
+    zone.asset            = import_.id;
     channel->samplerZones = {zone};
 
     return true;
@@ -65,8 +46,8 @@ void LoadSampleCommand::undo(Project& project)
     channel->instrumentStateFile = previousStateFile_;
     channel->samplerZones        = previousZones_;
 
-    if (created_)
-        project.removeAudioAsset(assetId_);
+    if (import_.created)
+        project.removeAudioAsset(import_.id);
 }
 
 } // namespace incdaw::app

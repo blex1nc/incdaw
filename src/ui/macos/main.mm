@@ -35,6 +35,7 @@
 #include "project/ProjectGraphCompiler.h"
 #include "project/RecordingSession.h"
 #include "app/commands/AudioEditCommands.h"
+#include "app/commands/ImportCommands.h"
 #include "app/commands/SlicerCommands.h"
 #include "engine/audio/OnsetDetection.h"
 #include "ui/macos/AudioEditorView.h"
@@ -1345,10 +1346,36 @@ std::filesystem::path incdawSupportDirectory()
     [self saveBrowserSettings];
     [self.browserPane reload];
 
-    if (kind == app::BrowserItemKind::project)
+    if (kind == app::BrowserItemKind::project) {
         [self openProjectAtPath:chosen];
-    else if (kind == app::BrowserItemKind::midi)
+        return;
+    }
+
+    if (kind == app::BrowserItemKind::midi) {
         [self importMidiFromPath:chosen];
+        return;
+    }
+
+    if (kind != app::BrowserItemKind::audio)
+        return;
+
+    if (!app::Browser::canDecodeAudio(chosen)) {
+        _lastGraphError = [NSString stringWithFormat:@"Cannot load %s — WAV only so far",
+                                                     chosen.filename().string().c_str()];
+        return;
+    }
+
+    // Double-clicking a sample is the keyboard-free version of dragging it
+    // into the rack, and lands the same command.
+    auto  command  = std::make_unique<app::ImportSampleAsChannelCommand>(chosen.string());
+    auto* imported = command.get();
+
+    if (!_registry->execute(std::move(command)))
+        return;
+
+    [self selectChannel:imported->channelId().value()];
+    [self.channelRack setNeedsDisplay:YES];
+    [self rebuildGraph];
 }
 
 /// Hiding the Browser is a workspace change, not a mode: the split view

@@ -295,6 +295,24 @@ std::filesystem::path pathOf(NSString* text)
     return cell;
 }
 
+/// Rows are drag sources: an audio file leaves the pane as a file URL, which
+/// is exactly what the Channel Rack and the Playlist read from the pasteboard.
+/// Nothing INCDAW-specific rides along, so a drop into another application is
+/// a file drop and a drop from Finder is indistinguishable from one of these.
+- (id<NSPasteboardWriting>)outlineView:(NSOutlineView*)outlineView
+               pasteboardWriterForItem:(id)item
+{
+    (void)outlineView;
+
+    INCDAWBrowserNode* node = item;
+
+    if (node == nil || node.missing || node.path == nil
+        || node.kind != app::BrowserItemKind::audio)
+        return nil;
+
+    return [NSURL fileURLWithPath:node.path];
+}
+
 // ── Search ──────────────────────────────────────────────────────────────────
 
 - (void)searchChanged:(id)sender

@@ -56,11 +56,25 @@ reference (docs/FL2026_GAP.md holds the full analysis and status table).
   Project packages and plugin bundles are named as themselves and never
   descended into. Leftmost in the workspace, hidden and shown from
   View > Browser (⌘B); a double-click opens a project or imports a MIDI
-  file. Preview and drag-into-project are the parts still to come.
+  file.
+- **Preview** (`engine::AuditionPlayer`): a click in the Browser auditions
+  the sample, mixed by the engine after the project graph — it sounds with
+  the transport stopped and never costs a graph rebuild. The audio thread
+  reads a raw pointer; the decoded buffer is released only once the block
+  counter has passed the swap, the same grace a retired graph gets.
+  Cross-rate files are repitched by interpolated reading; NaN containment
+  now covers the preview too.
+- **Drag into the project**: browser rows are drag sources, and the
+  Channel Rack and Playlist accept file drops (from Finder as well). A
+  sample dropped on a channel replaces its sound, on empty rack space
+  becomes a sampler channel, on a playlist lane becomes an audio clip at
+  the snapped drop tick, as long as the file. Each is one undo with ids
+  that survive redo; asset import is now one shared helper
+  (`app::AudioAssetImport`) rather than a copy per command.
 
 **Tests**
 
-- 483 → 563 cases; every feature carries its own quality gates
+- 483 → 575 cases; every feature carries its own quality gates
   (calibrated LUFS, analytic sidechain levels, WSOLA click preservation,
   chord-theory pins, format round-trips and the v1.5 fixture).
 
