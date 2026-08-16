@@ -1436,6 +1436,65 @@ recording and the Audio Logger all work. What remains in it is polish):
   panels, an export options dialog, a zone-mapping editor, mapping
   list UI, dirty-prompt on quit, autosave, recent projects.
 
+  SINCE THEN (branch claude/fl-studio-2026-features, continued on
+  claude/continue-after-analysis): the UI build-out ran in ten
+  increments — project lifecycle safety, the generic insert parameter
+  panel, the export options dialog, mapping/zone/instrument editors,
+  insert reordering with live panels and latency.changed, export
+  progress and cancel, touch and latch automation modes, editor
+  cut/copy/paste, the lookahead limiter, the spectrum analyzer. The FL
+  Studio 2026 gap analysis (docs/FL2026_GAP.md — read it first, it holds
+  the status table) then drove eight feature blocks, P1-P8: the chord
+  toolkit, note tools, clip split with markers and regions (format
+  v1.5), functional sidechain routing, LUFS with stereo separation and
+  true pre-fader sends, chorus/flanger/phaser with the transient
+  splitter, the WSOLA time-stretch subsystem, and the slicer.
+
+  P9 — THE BROWSER — IS HALF DONE (2026-08-16):
+
+    - Part 1, app::Browser: classification (a project package and a
+      .clap bundle are items, never folders to walk into), folders-first
+      listings with dot-files hidden, recursive search capped at 500
+      results and 8 levels, favourites, recents, JSON persistence
+      staged-and-renamed. canDecodeAudio is deliberately separate from
+      the kind — a .flac IS audio and the row says so, but WAV is all
+      engine/audio reads today, so the drop must refuse with a reason.
+      8 test cases in tests/unit/BrowserTests.cpp.
+
+    - Part 2, INCDAWBrowserView: a stock NSOutlineView over that model
+      (a file tree is what AppKit's outline view is for; the custom
+      drawing in this shell is for musical surfaces). Leftmost in the
+      workspace, View > Browser (Cmd+B), per-keystroke search, context
+      menu for favourite / reveal / add root / remove root / refresh.
+      The pane opens nothing itself: a double-click hands the path to
+      the shell, which is why openProjectAtPath: and importMidiFromPath:
+      were factored out of the panel handlers. Roots, favourites and
+      recents live in Application Support/INCDAW/browser.json beside
+      plugins.tsv — installation state, never project state.
+
+    - PART 3, PREVIEW, IS THE NEXT STEP. The engine already implies the
+      design: an engine-owned audition source summed into the master by
+      a node every compiled graph includes — InputMonitorNode (ring
+      owned by the engine, drained by a node in the graph) is the
+      precedent for the plumbing, and the retired-graph block-counter
+      grace in AudioEngine::collectRetiredGraphs is the precedent for
+      handing a decoded buffer to the audio thread and releasing it on
+      the UI thread. Decode through the shell's SampleCache (D-032);
+      repitch cross-rate files the way SamplerZone does. Gates: it
+      renders the file, it stops at the end, it allocates nothing on the
+      audio thread under the realtime guard, and it works while the
+      transport is stopped.
+
+    - PART 4, DRAG INTO THE PROJECT: a .wav dropped on the Channel Rack
+      (LoadSampleCommand exists, is undoable and shares an asset when
+      the file is already in the project) and on the Playlist (needs an
+      add-audio-clip command; the asset-creation logic to reuse is in
+      SamplerCommands and SlicerCommands).
+
+    - P10, AU HOSTING, is last. AudioUnit is a system framework rather
+      than a vendored SDK, but do not start a second plugin format
+      without asking: it is a standing commitment, not a small one.
+
 Things to be careful about:
 
   - third_party/ is gitignored: a fresh clone or worktree has neither
