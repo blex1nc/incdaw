@@ -332,6 +332,7 @@ struct MixerNode {
     bool                    muted        = false;
     bool                    soloed       = false;
     bool                    polarityFlip = false;
+    double                  stereoSeparation = 0.0;   ///< -1 mono … +1 wide
     std::vector<PluginSlot> inserts;
 
     [[nodiscard]] friend bool operator==(const MixerNode&, const MixerNode&) = default;

@@ -31,9 +31,10 @@ inline constexpr int projectFormatMajor = 1;
 /// controls bound to parameters by registry key. Additive: earlier files
 /// have none.
 ///
-/// 1.5 (FL2026 P3): the project carries timeline markers and regions — named
-/// musical positions with an optional length. Additive: earlier files have
-/// none.
+/// 1.5 (FL2026 P3/P5): the project carries timeline markers and regions —
+/// named musical positions with an optional length — and a mixer node carries
+/// stereo separation. Additive: earlier files have neither and read back with
+/// no markers and untouched width.
 inline constexpr int projectFormatMinor = 5;
 
 [[nodiscard]] std::string projectFormatVersionString();

@@ -46,6 +46,8 @@ const std::vector<CatalogueEntry>& catalogue()
         add("incdaw.delay",      "Delay",      [] { return std::make_unique<DelayEffect>(); });
         add("incdaw.reverb",     "Reverb",     [] { return std::make_unique<ReverbEffect>(); });
         add("incdaw.analyzer",   "Analyzer",   [] { return std::make_unique<AnalyzerEffect>(); });
+        add("incdaw.loudness",   "Loudness Meter",
+            [] { return std::make_unique<LoudnessMeterEffect>(); });
 
         return rows;
     }();

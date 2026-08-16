@@ -141,6 +141,9 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     };
     std::unordered_map<EntityId, std::vector<KeyReceiver>> keyReceivers;
 
+    /// Where a pre-fader send taps each strip, when one asked for it.
+    std::unordered_map<EntityId, engine::NodeIndex> preFaderTaps;
+
     for (const MixerNode& node : project.mixerNodes()) {
         auto strip  = std::make_unique<engine::dsp::MixerStripNode>();
         auto* handle = strip.get();
@@ -156,6 +159,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         handle->setPan(node.pan);
         handle->setMuted(silenced);
         handle->setPolarityInverted(node.polarityFlip);
+        handle->setStereoSeparation(node.stereoSeparation);
 
         const auto index = builder.addNode(std::move(strip));
         stripIndices.emplace(node.id, index);
@@ -221,13 +225,31 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             chain.push_back(inserted);
         }
 
-        engine::NodeIndex chainInput = index;
+        // A pre-fader send taps the signal after the inserts and before the
+        // fader. The tap is a unity gain node, spliced in only when a send
+        // actually asks for it — ordinary strips keep their direct wiring.
+        const bool needsPreFaderTap =
+            std::any_of(project.routing().begin(), project.routing().end(),
+                        [&node](const RoutingConnection& connection) {
+                            return connection.isSend && connection.preFader
+                                && connection.source == node.id;
+                        });
+
+        engine::NodeIndex preFaderTap = engine::invalidNode;
+        if (needsPreFaderTap) {
+            preFaderTap = builder.addNode(
+                std::make_unique<engine::dsp::GainNode>(engine::Sample{1}));
+            builder.connect(preFaderTap, index);
+        }
+
+        const engine::NodeIndex stripEntry = needsPreFaderTap ? preFaderTap : index;
+        engine::NodeIndex       chainInput = stripEntry;
 
         if (!chain.empty()) {
             for (std::size_t position = 0; position + 1 < chain.size(); ++position)
                 builder.connect(chain[position], chain[position + 1]);
 
-            builder.connect(chain.back(), index);
+            builder.connect(chain.back(), stripEntry);
             chainInput = chain.front();
 
             // Every non-head chain node now has exactly one wired input.
@@ -237,6 +259,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                         receiver.inputsSoFar = 1;
         }
 
+        preFaderTaps.emplace(node.id, preFaderTap);
         stripInputIndices.emplace(node.id, chainInput);
 
         mixerIds.push_back(node.id);
@@ -324,11 +347,19 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         }
 
         // A send is a second edge with its own gain, so it needs a node to
-        // carry that gain.
+        // carry that gain. Pre-fader sends leave from the tap ahead of the
+        // fader; post-fader sends leave from the strip's output.
+        engine::NodeIndex from = source->second;
+        if (connection.preFader) {
+            if (const auto tap = preFaderTaps.find(connection.source);
+                tap != preFaderTaps.end() && tap->second != engine::invalidNode)
+                from = tap->second;
+        }
+
         const auto send = builder.addNode(std::make_unique<engine::dsp::GainNode>(
             static_cast<engine::Sample>(connection.gain)));
 
-        builder.connect(source->second, send);
+        builder.connect(from, send);
         builder.connect(send, destination->second);
         countEdgeIntoHead(connection.destination, destination->second);
     }

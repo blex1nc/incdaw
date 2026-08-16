@@ -82,7 +82,7 @@ every item tested; CLAUDE.md §44 definition of done):
 | P2 | Piano Roll note tools: strum, arpeggiate, legato; note labels | **DONE** — `NoteToolCommands`, wired: `S` strum (+Shift down), `P` arpeggiate (+Shift up-down), `L` legato, F2 rename |
 | P3 | Playlist: clip split; timeline markers + regions | **DONE** — `SplitClipCommand` (tick-exact for pattern/automation clips, frame-exact for audio, source offsets advance), `TimelineMarker` model + format v1.5 + `MarkerCommands`; wired: Option-click slices a clip, `M` / Shift+`M` drop a marker / one-bar region at the playhead, ruler draws both |
 | P4 | Sidechain routing made functional: compressor external key input, compiled sidechain edges | **DONE** — sidechain edges compile into detector-only inputs on the destination's compressor inserts (PDC-aligned like any edge, key never sums into audio, exact-level tests); mixer strip menu gained "Sidechain Into" |
-| P5 | LUFS meter (EBU R128), stereo separation, true pre-fader sends | pending |
+| P5 | LUFS meter (EBU R128), stereo separation, true pre-fader sends | **DONE** — `incdaw.loudness` insert (BS.1770-4 K-weighting designed per rate, momentary/short-term/gated integrated via histogram, calibrated to the −3.01 LUFS reference at 44.1 and 48 kHz); mid/side stereo separation on every strip (model+format+command+automation key); pre-fader sends tap ahead of the fader through a spliced unity node |
 | P6 | Chorus, flanger, phaser; transient/sustain splitter (Transmitter equivalent) | pending |
 | P7 | Time-stretch/pitch subsystem (offline, transient-aware) + playlist stretch + editor verbs | pending |
 | P8 | Slicer: onset detection, slice-to-keys, timing pattern export | pending |

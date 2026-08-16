@@ -377,6 +377,31 @@ enum class MixerDrag { none, fader, pan };
     send.target = self;
     send.representedObject = @(nodeId.value());
 
+    NSMenuItem* preSend = [menu addItemWithTitle:@"Send To Master (Pre-Fader, 25%)"
+                                          action:@selector(addPreFaderSendFromMenu:)
+                                   keyEquivalent:@""];
+    preSend.target = self;
+    preSend.representedObject = @(nodeId.value());
+
+    // Stereo separation presets; the strip applies them mid/side, before pan.
+    NSMenuItem* widthItem = [menu addItemWithTitle:@"Stereo Separation"
+                                            action:nil
+                                     keyEquivalent:@""];
+    NSMenu* widthMenu = [[NSMenu alloc] init];
+
+    const struct { const char* title; double value; } widths[] = {
+        { "Mono (-100%)", -1.0 }, { "Narrow (-50%)", -0.5 }, { "Normal (0%)", 0.0 },
+        { "Wide (+50%)", 0.5 },   { "Widest (+100%)", 1.0 },
+    };
+    for (const auto& width : widths) {
+        NSMenuItem* item = [widthMenu addItemWithTitle:@(width.title)
+                                                action:@selector(setSeparationFromMenu:)
+                                         keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @{@"node": @(nodeId.value()), @"separation": @(width.value)};
+    }
+    widthItem.submenu = widthMenu;
+
     // Sidechain: this strip becomes the key of a compressor on the chosen
     // strip. The compile step warns if the destination has none to key.
     NSMenuItem* sidechainItem = [menu addItemWithTitle:@"Sidechain Into"
@@ -731,6 +756,26 @@ enum class MixerDrag { none, fader, pan };
 
     [self commitStructural:std::make_unique<app::ConnectMixerCommand>(
         nodeId, _project->masterMixerNode(), true, 0.25)];
+}
+
+- (void)addPreFaderSendFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId nodeId{[item.representedObject unsignedLongLongValue]};
+
+    if (nodeId == _project->masterMixerNode())
+        return;
+
+    [self commitStructural:std::make_unique<app::ConnectMixerCommand>(
+        nodeId, _project->masterMixerNode(), true, 0.25, true)];
+}
+
+- (void)setSeparationFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+
+    [self commitStructural:std::make_unique<app::SetMixerStereoSeparationCommand>(
+        project::EntityId{[info[@"node"] unsignedLongLongValue]},
+        [info[@"separation"] doubleValue])];
 }
 
 - (void)addSidechainFromMenu:(NSMenuItem*)item

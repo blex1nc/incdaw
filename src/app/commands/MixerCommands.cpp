@@ -250,6 +250,40 @@ void SetChannelOutputCommand::undo(Project& project)
 
 // ── ConnectMixerCommand ───────────────────────────────────────────────────────
 
+bool SetMixerStereoSeparationCommand::execute(Project& project)
+{
+    MixerNode* node = project.findMixerNode(nodeId_);
+    if (node == nullptr)
+        return false;
+
+    const double clamped = std::clamp(separation_, -1.0, 1.0);
+    if (node->stereoSeparation == clamped)
+        return false;
+
+    previous_              = node->stereoSeparation;
+    separation_            = clamped;
+    node->stereoSeparation = clamped;
+    return true;
+}
+
+void SetMixerStereoSeparationCommand::undo(Project& project)
+{
+    if (MixerNode* node = project.findMixerNode(nodeId_))
+        node->stereoSeparation = previous_;
+}
+
+bool SetMixerStereoSeparationCommand::canMergeWith(const Command& next) const noexcept
+{
+    const auto* other = dynamic_cast<const SetMixerStereoSeparationCommand*>(&next);
+    return other != nullptr && other->nodeId_ == nodeId_;
+}
+
+void SetMixerStereoSeparationCommand::mergeWith(const Command& next)
+{
+    if (const auto* other = dynamic_cast<const SetMixerStereoSeparationCommand*>(&next))
+        separation_ = other->separation_;
+}
+
 bool ConnectMixerCommand::execute(Project& project)
 {
     if (!minted_) {

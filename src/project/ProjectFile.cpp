@@ -246,6 +246,7 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("muted", node.muted);
         json.set("soloed", node.soloed);
         json.set("polarityFlip", node.polarityFlip);
+        json.set("stereoSeparation", node.stereoSeparation);
 
         Json inserts = Json::array();
         for (const PluginSlot& slot : node.inserts)
@@ -619,6 +620,7 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         node.muted        = json["muted"].asBool(false);
         node.soloed       = json["soloed"].asBool(false);
         node.polarityFlip = json["polarityFlip"].asBool(false);
+        node.stereoSeparation = json["stereoSeparation"].asDouble(0.0);
 
         for (const Json& slot : json["inserts"].elements())
             node.inserts.push_back(pluginSlotFrom(slot));

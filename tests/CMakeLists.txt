@@ -36,6 +36,7 @@ add_executable(incdaw_tests
     unit/MarkerAndSplitTests.cpp
     unit/MixerTests.cpp
     unit/SidechainTests.cpp
+    unit/LoudnessAndRoutingTests.cpp
     unit/AutomationTests.cpp
     unit/WavFileTests.cpp
     unit/WavStreamWriterTests.cpp
