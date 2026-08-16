@@ -48,10 +48,19 @@ reference (docs/FL2026_GAP.md holds the full analysis and status table).
   one undo lands a sampler channel (a zone per slice, chromatic keys)
   and the pattern replaying the loop's timing; "Slice to New Channel"
   in the editor's Audio menu.
+- **Browser** (`app::Browser` + `INCDAWBrowserView`): the pane INCDAW
+  never had. Roots (the user's own folders on a first launch), listings
+  that put folders first and hide dot-files, recursive name search
+  capped at 500 results and 8 levels, favourites and recents — all
+  persisted beside the plugin catalogue, never inside a project.
+  Project packages and plugin bundles are named as themselves and never
+  descended into. Leftmost in the workspace, hidden and shown from
+  View > Browser (⌘B); a double-click opens a project or imports a MIDI
+  file. Preview and drag-into-project are the parts still to come.
 
 **Tests**
 
-- 483 → 555 cases; every feature carries its own quality gates
+- 483 → 563 cases; every feature carries its own quality gates
   (calibrated LUFS, analytic sidechain levels, WSOLA click preservation,
   chord-theory pins, format round-trips and the v1.5 fixture).
 

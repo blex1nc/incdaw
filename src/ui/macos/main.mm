@@ -17,6 +17,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "app/AutomationWriteSession.h"
+#include "app/Browser.h"
 #include "app/CommandRegistry.h"
 #include "app/Version.h"
 #include "app/commands/MidiMappingCommands.h"
@@ -37,6 +38,7 @@
 #include "app/commands/SlicerCommands.h"
 #include "engine/audio/OnsetDetection.h"
 #include "ui/macos/AudioEditorView.h"
+#include "ui/macos/BrowserView.h"
 #include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
@@ -109,6 +111,7 @@ std::filesystem::path incdawSupportDirectory()
 @property (strong) INCDAWChannelRackView*   channelRack;
 @property (strong) INCDAWPatternListView*   patternList;
 @property (strong) NSTextField*             statusField;
+@property (strong) INCDAWBrowserView*       browserPane;
 @end
 
 @implementation INCDAWAppDelegate {
@@ -186,6 +189,12 @@ std::filesystem::path incdawSupportDirectory()
     /// window's death must reach the plugin while the plugin is still alive.
     NSMutableDictionary<NSNumber*, NSWindow*>* _editorWindows;
     NSMutableDictionary<NSNumber*, id>*        _editorObservers;
+
+    /// The Browser pane's model: roots, favourites and recents. Application
+    /// state rather than project state — a sample library belongs to the
+    /// installation, and follows the user from project to project.
+    app::Browser          _browser;
+    std::filesystem::path _browserSettings;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -203,6 +212,22 @@ std::filesystem::path incdawSupportDirectory()
     // first-run state, not an error.
     if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty())
         (void)_pluginRegistry.load(support / "plugins.tsv");
+
+    // The browser keeps its roots and favourites next to that catalogue. A
+    // first launch has no file and is given the user's own folders, because a
+    // browser that opens empty teaches nothing about what it is for.
+    if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty()) {
+        _browserSettings = support / "browser.json";
+
+        std::string browserError;
+        if (!_browser.load(_browserSettings, browserError))
+            NSLog(@"INCDAW: browser settings ignored: %s", browserError.c_str());
+    }
+
+    if (_browser.roots().empty()) {
+        _browser.addDefaultRoots(std::filesystem::path{NSHomeDirectory().UTF8String});
+        [self saveBrowserSettings];
+    }
 
     _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
     _parameters      = project::ParameterRegistry::withBuiltins();
@@ -263,12 +288,13 @@ std::filesystem::path incdawSupportDirectory()
     constexpr CGFloat statusHeight  = 26.0;
     constexpr CGFloat toolbarHeight = 30.0;
     constexpr CGFloat listWidth     = 150.0;
+    constexpr CGFloat browserWidth  = 210.0;
     constexpr CGFloat rackHeight    = 220.0;
 
     const NSRect body = NSMakeRect(0, statusHeight, frame.size.width,
                                    frame.size.height - statusHeight - toolbarHeight);
 
-    const NSRect editorFrame = NSMakeRect(0, 0, body.size.width - listWidth,
+    const NSRect editorFrame = NSMakeRect(0, 0, body.size.width - listWidth - browserWidth,
                                           body.size.height - rackHeight);
 
     self.pianoRoll = [[INCDAWPianoRollView alloc]
@@ -381,16 +407,37 @@ std::filesystem::path incdawSupportDirectory()
     [editors addSubview:editorContainer];
     [editors addSubview:rackScroll];
 
+    // The Browser: leftmost, as in every DAW that has one. It opens nothing
+    // itself — a double-click hands the path back here, and this decides what
+    // opening it means.
+    self.browserPane = [[INCDAWBrowserView alloc]
+        initWithFrame:NSMakeRect(0, 0, browserWidth, body.size.height)
+              browser:&_browser];
+
+    self.browserPane.autoresizingMask = NSViewHeightSizable;
+
+    __weak INCDAWAppDelegate* weakSelfForBrowser = self;
+
+    self.browserPane.onActivate = ^(NSString* path) {
+        [weakSelfForBrowser browserActivated:path];
+    };
+
+    self.browserPane.onSettingsChanged = ^{
+        [weakSelfForBrowser saveBrowserSettings];
+    };
+
     NSSplitView* workspace = [[NSSplitView alloc] initWithFrame:body];
     workspace.vertical         = YES;
     workspace.dividerStyle     = NSSplitViewDividerStyleThin;
     workspace.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [workspace addSubview:self.browserPane];
     [workspace addSubview:listScroll];
     [workspace addSubview:editors];
 
     [content addSubview:workspace];
 
-    [workspace setPosition:listWidth ofDividerAtIndex:0];
+    [workspace setPosition:browserWidth ofDividerAtIndex:0];
+    [workspace setPosition:browserWidth + listWidth ofDividerAtIndex:1];
     [editors setPosition:body.size.height - rackHeight ofDividerAtIndex:0];
 
     [workspace adjustSubviews];
@@ -1218,6 +1265,60 @@ std::filesystem::path incdawSupportDirectory()
 
 // ── The project as a document ────────────────────────────────────────────────
 
+/// Roots, favourites and recents, written where the next launch will find
+/// them. A failure is logged and dropped: browser state is a convenience,
+/// and nothing the user is doing should stop because it could not be saved.
+- (void)saveBrowserSettings
+{
+    if (_browserSettings.empty())
+        return;
+
+    std::string error;
+
+    if (!_browser.save(_browserSettings, error))
+        NSLog(@"INCDAW: could not save browser settings: %s", error.c_str());
+}
+
+/// What double-clicking in the Browser means.
+///
+/// Projects open and MIDI files import. Audio is remembered as recent and
+/// otherwise waits for the parts that give it somewhere to go — preview, and
+/// dragging into the rack or the playlist. The recents list is about what the
+/// user reached for, not about what INCDAW managed to do with it.
+- (void)browserActivated:(NSString*)path
+{
+    if (path == nil)
+        return;
+
+    const std::filesystem::path chosen{path.UTF8String};
+    const app::BrowserItemKind  kind = app::Browser::classify(chosen);
+
+    _browser.noteRecent(chosen);
+    [self saveBrowserSettings];
+    [self.browserPane reload];
+
+    if (kind == app::BrowserItemKind::project)
+        [self openProjectAtPath:chosen];
+    else if (kind == app::BrowserItemKind::midi)
+        [self importMidiFromPath:chosen];
+}
+
+/// Hiding the Browser is a workspace change, not a mode: the split view
+/// re-lays out around it and the panes beside it keep their proportions.
+- (void)toggleBrowser:(id)sender
+{
+    const BOOL hidden       = !self.browserPane.isHidden;
+    self.browserPane.hidden = hidden;
+
+    NSView* parent = self.browserPane.superview;
+
+    if ([parent isKindOfClass:[NSSplitView class]])
+        [(NSSplitView*)parent adjustSubviews];
+
+    if ([sender isKindOfClass:[NSMenuItem class]])
+        ((NSMenuItem*)sender).state = hidden ? NSControlStateValueOff : NSControlStateValueOn;
+}
+
 - (void)saveProject:(id)sender
 {
     if (_projectPath.empty()) {
@@ -1323,8 +1424,13 @@ std::filesystem::path incdawSupportDirectory()
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
         return;
 
-    const auto imported = project::importAsPattern(
-        *_project, std::filesystem::path{panel.URL.path.UTF8String});
+    [self importMidiFromPath:std::filesystem::path{panel.URL.path.UTF8String}];
+}
+
+/// Importing a Standard MIDI File, from the panel or from the Browser.
+- (void)importMidiFromPath:(const std::filesystem::path&)file
+{
+    const auto imported = project::importAsPattern(*_project, file);
 
     if (!imported) {
         NSAlert* alert        = [[NSAlert alloc] init];
@@ -1377,8 +1483,13 @@ std::filesystem::path incdawSupportDirectory()
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
         return;
 
-    const std::filesystem::path chosen{panel.URL.path.UTF8String};
+    [self openProjectAtPath:std::filesystem::path{panel.URL.path.UTF8String}];
+}
 
+/// Loading a package, wherever it was chosen: the Open panel, or a
+/// double-click in the Browser.
+- (void)openProjectAtPath:(const std::filesystem::path&)chosen
+{
     if (!project::ProjectFile::isProjectPackage(chosen)) {
         NSAlert* alert        = [[NSAlert alloc] init];
         alert.messageText     = @"Not an INCDAW project";
@@ -1813,6 +1924,12 @@ std::filesystem::path incdawSupportDirectory()
                                                       action:@selector(showAudioEditor:)
                                                keyEquivalent:@"6"];
     audioEditorItem.target = self;
+
+    NSMenuItem* browserItem = [viewMenu addItemWithTitle:@"Browser"
+                                                  action:@selector(toggleBrowser:)
+                                           keyEquivalent:@"b"];
+    browserItem.target = self;
+    browserItem.state  = NSControlStateValueOn;
 
     [viewMenu addItem:[NSMenuItem separatorItem]];
 
