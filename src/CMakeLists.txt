@@ -125,6 +125,7 @@ add_library(incdaw_app STATIC
     app/Version.cpp
     app/AutomationWriteSession.cpp
     app/CommandRegistry.cpp
+    app/ProjectSession.cpp
     app/PianoRollModel.cpp
     app/ChannelRackModel.cpp
     app/PlaylistModel.cpp

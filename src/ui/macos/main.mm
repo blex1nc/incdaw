@@ -18,6 +18,7 @@
 
 #include "app/AutomationWriteSession.h"
 #include "app/CommandRegistry.h"
+#include "app/ProjectSession.h"
 #include "app/Version.h"
 #include "app/commands/MidiMappingCommands.h"
 #include "app/commands/RecordingCommands.h"
@@ -95,6 +96,12 @@ std::filesystem::path incdawSupportDirectory()
 }
 
 } // namespace
+
+/// Recent projects live in user defaults as an array of absolute paths,
+/// newest first.
+static NSString* const      kRecentProjectsKey = @"INCDAWRecentProjects";
+static const NSUInteger     kRecentProjectsCap = 10;
+static const NSTimeInterval kAutosaveInterval  = 120.0;
 
 @interface INCDAWAppDelegate : NSObject <NSApplicationDelegate>
 @property (strong) NSWindow*                window;
@@ -176,6 +183,20 @@ std::filesystem::path incdawSupportDirectory()
     /// Open; Save falls back to Save As while it is.
     std::filesystem::path _projectPath;
 
+    /// Set by any project mutation since the last save, open, or new — what
+    /// the quit and open guards ask, and what the close button's dot shows.
+    /// Sourced from the undo stack's depth in housekeeping, plus the paths
+    /// that mutate without a command (MIDI import). A knob turned inside a
+    /// plugin's own editor window is NOT seen — recorded limitation.
+    BOOL _dirty;
+
+    /// The safety net (app/ProjectSession.h decides where it lands). Fires
+    /// every two minutes; a clean project is skipped.
+    NSTimer* _autosave;
+
+    /// File > Open Recent, rebuilt from user defaults whenever they change.
+    NSMenu* _recentMenu;
+
     /// The scanned plugin catalogue as menu fodder, built once at launch.
     NSArray<NSDictionary*>* _availableInserts;
 
@@ -225,23 +246,10 @@ std::filesystem::path incdawSupportDirectory()
     _editorWindows    = [NSMutableDictionary dictionary];
     _editorObservers  = [NSMutableDictionary dictionary];
 
-    const project::EntityId channelId = _project->addChannel("Channel 1").id;
-    const project::EntityId patternId = _project->addPattern("Pattern 1").id;
+    [self seedStarterProject];
 
-    project::Pattern& pattern = *_project->findPattern(patternId);
-    addStarterPhrase(pattern.contentFor(channelId).events);
-
-    // One track with the pattern placed on it, so switching to song mode plays
-    // something rather than presenting an empty timeline and silence. Ordinary
-    // project data — movable, deletable, undoable.
-    const project::EntityId trackId =
-        _project->addTrack(project::TrackType::instrument, "Track 1").id;
-
-    project::Clip& clip = _project->addClip(project::ClipType::pattern, trackId, patternId);
-    clip.startTick   = 0;
-    clip.lengthTicks = pattern.length;
-    clip.name        = pattern.name;
-    clip.colour      = pattern.colour;
+    const project::EntityId channelId = _project->channels().front().id;
+    const project::EntityId patternId = _project->patterns().front().id;
 
     const NSRect frame = NSMakeRect(0, 0, 1180, 720);
 
@@ -252,7 +260,7 @@ std::filesystem::path incdawSupportDirectory()
                     backing:NSBackingStoreBuffered
                       defer:NO];
 
-    self.window.title = @"INCDAW — Pattern 1";
+    [self refreshWindowTitle];
     self.window.backgroundColor = [NSColor colorWithCalibratedWhite:0.10 alpha:1.0];
     [self.window center];
 
@@ -477,12 +485,64 @@ std::filesystem::path incdawSupportDirectory()
         [weakAudioSelf housekeeping];
     }];
 
+    // The safety net. Two minutes: long enough to stay invisible, short
+    // enough that a crash costs minutes of work, not a session.
+    _autosave = [NSTimer scheduledTimerWithTimeInterval:kAutosaveInterval
+                                                repeats:YES
+                                                  block:^(NSTimer* timer) {
+        (void)timer;
+        [weakAudioSelf autosaveTick];
+    }];
+
     [self buildMenu];
     [self refreshStatus];
 
     [self.window makeKeyAndOrderFront:nil];
     [self.window makeFirstResponder:self.pianoRoll];
     [NSApp activateIgnoringOtherApps:YES];
+
+    [self offerAutosaveRecovery];
+}
+
+/// A leftover unsaved-project autosave means the last session ended without a
+/// normal quit — a normal quit deletes it. Offer it before the user starts
+/// working over it. Saved projects recover through Open instead: their
+/// autosave lives beside them and is offered there when it is newer.
+- (void)offerAutosaveRecovery
+{
+    const std::filesystem::path recovery = [self untitledAutosavePath];
+    if (recovery.empty() || !project::ProjectFile::isProjectPackage(recovery))
+        return;
+
+    NSAlert* alert        = [[NSAlert alloc] init];
+    alert.messageText     = @"Restore the autosaved project?";
+    alert.informativeText = @"INCDAW did not quit normally last time, and an "
+                            @"autosave of an unsaved project exists.";
+    [alert addButtonWithTitle:@"Restore"];
+    [alert addButtonWithTitle:@"Discard"];
+
+    if ([alert runModal] != NSAlertFirstButtonReturn) {
+        [self removeUntitledAutosave];
+        return;
+    }
+
+    const auto result = project::ProjectFile::load(*_project, recovery);
+
+    if (!result) {
+        NSAlert* failed        = [[NSAlert alloc] init];
+        failed.messageText     = @"Could not restore the autosave";
+        failed.informativeText = @(result.error.c_str());
+        [failed runModal];
+        return;
+    }
+
+    _registry->clearHistory();
+    _projectPath.clear();
+
+    [self adoptLoadedProjectRestoringStateFrom:recovery];
+
+    // Restored contents live nowhere the user chose yet.
+    [self markDirty];
 }
 
 /// Points both editors at a channel. The rack owns the highlight, the Piano
@@ -1115,33 +1175,254 @@ std::filesystem::path incdawSupportDirectory()
 
 // ── The project as a document ────────────────────────────────────────────────
 
-- (void)saveProject:(id)sender
+/// The starter document: one channel, one pattern carrying the demo phrase,
+/// one track with the pattern placed. What launch shows, and what File > New
+/// resets to.
+- (void)seedStarterProject
 {
-    if (_projectPath.empty()) {
-        [self saveProjectAs:sender];
+    const project::EntityId channelId = _project->addChannel("Channel 1").id;
+    const project::EntityId patternId = _project->addPattern("Pattern 1").id;
+
+    project::Pattern& pattern = *_project->findPattern(patternId);
+    addStarterPhrase(pattern.contentFor(channelId).events);
+
+    // One track with the pattern placed on it, so switching to song mode plays
+    // something rather than presenting an empty timeline and silence. Ordinary
+    // project data — movable, deletable, undoable.
+    const project::EntityId trackId =
+        _project->addTrack(project::TrackType::instrument, "Track 1").id;
+
+    project::Clip& clip = _project->addClip(project::ClipType::pattern, trackId, patternId);
+    clip.startTick   = 0;
+    clip.lengthTicks = pattern.length;
+    clip.name        = pattern.name;
+    clip.colour      = pattern.colour;
+}
+
+- (void)markDirty
+{
+    _dirty                     = YES;
+    self.window.documentEdited = YES;
+}
+
+- (void)clearDirty
+{
+    _dirty                     = NO;
+    self.window.documentEdited = NO;
+}
+
+- (void)refreshWindowTitle
+{
+    self.window.title = _projectPath.empty()
+        ? @"INCDAW — Untitled"
+        : [NSString stringWithFormat:@"INCDAW — %s",
+                                     _projectPath.stem().string().c_str()];
+}
+
+/// The guard in front of anything that discards the open project: quit, New,
+/// Open. YES means proceed — the project is clean, was saved here, or the
+/// user chose to drop it.
+- (BOOL)confirmDiscardChanges
+{
+    if (!_dirty)
+        return YES;
+
+    NSAlert* alert    = [[NSAlert alloc] init];
+    alert.messageText = _projectPath.empty()
+        ? @"Save changes to Untitled?"
+        : [NSString stringWithFormat:@"Save changes to %s?",
+                                     _projectPath.stem().string().c_str()];
+    alert.informativeText = @"Unsaved changes are lost otherwise.";
+    [alert addButtonWithTitle:@"Save"];
+    [alert addButtonWithTitle:@"Cancel"];
+    [alert addButtonWithTitle:@"Don't Save"];
+
+    const NSModalResponse choice = [alert runModal];
+
+    if (choice == NSAlertFirstButtonReturn)
+        return [self saveInteractive];
+
+    return choice == NSAlertThirdButtonReturn;
+}
+
+- (void)newProject:(id)sender
+{
+    (void)sender;
+
+    if (![self confirmDiscardChanges])
         return;
+
+    *_project = project::Project{};
+    [self seedStarterProject];
+
+    _registry->clearHistory();
+    _projectPath.clear();
+
+    [self adoptLoadedProjectRestoringStateFrom:std::filesystem::path{}];
+    [self clearDirty];
+}
+
+- (NSArray<NSString*>*)recentProjects
+{
+    NSArray* stored =
+        [[NSUserDefaults standardUserDefaults] arrayForKey:kRecentProjectsKey];
+
+    NSMutableArray<NSString*>* result = [NSMutableArray array];
+    for (id entry in stored)
+        if ([entry isKindOfClass:[NSString class]])
+            [result addObject:entry];
+
+    return result;
+}
+
+- (void)storeRecentProjects:(const std::vector<std::string>&)list
+{
+    NSMutableArray<NSString*>* stored = [NSMutableArray array];
+    for (const std::string& entry : list)
+        [stored addObject:@(entry.c_str())];
+
+    [[NSUserDefaults standardUserDefaults] setObject:stored
+                                              forKey:kRecentProjectsKey];
+    [self refreshRecentMenu];
+}
+
+- (void)noteRecentProject:(const std::filesystem::path&)path
+{
+    std::vector<std::string> list;
+    for (NSString* entry in [self recentProjects])
+        list.emplace_back(entry.UTF8String);
+
+    [self storeRecentProjects:app::session::updatedRecents(std::move(list),
+                                                           path.string(),
+                                                           kRecentProjectsCap)];
+}
+
+- (void)refreshRecentMenu
+{
+    [_recentMenu removeAllItems];
+
+    for (NSString* stored in [self recentProjects]) {
+        const std::filesystem::path path{stored.UTF8String};
+
+        NSMenuItem* item =
+            [_recentMenu addItemWithTitle:@(path.stem().string().c_str())
+                                   action:@selector(openRecentProject:)
+                            keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = stored;
     }
 
-    [self writeProjectToPath];
+    if (_recentMenu.numberOfItems > 0)
+        [_recentMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* clear = [_recentMenu addItemWithTitle:@"Clear Menu"
+                                               action:@selector(clearRecentProjects:)
+                                        keyEquivalent:@""];
+    clear.target = self;
+}
+
+- (void)clearRecentProjects:(id)sender
+{
+    (void)sender;
+    [self storeRecentProjects:std::vector<std::string>{}];
+}
+
+- (void)openRecentProject:(NSMenuItem*)sender
+{
+    NSString* stored = sender.representedObject;
+    if (![stored isKindOfClass:[NSString class]])
+        return;
+
+    if (![self confirmDiscardChanges])
+        return;
+
+    if ([self loadProjectPackageAtPath:std::filesystem::path{stored.UTF8String}])
+        return;
+
+    // Gone or unreadable: a menu that keeps offering it can only fail again.
+    std::vector<std::string> remaining;
+    for (NSString* entry in [self recentProjects])
+        if (![entry isEqualToString:stored])
+            remaining.emplace_back(entry.UTF8String);
+
+    [self storeRecentProjects:remaining];
+}
+
+- (std::filesystem::path)untitledAutosavePath
+{
+    return app::session::autosavePathFor({}, incdawSupportDirectory());
+}
+
+- (void)removeUntitledAutosave
+{
+    const std::filesystem::path path = [self untitledAutosavePath];
+    if (path.empty())
+        return;
+
+    std::error_code ignored;
+    std::filesystem::remove_all(path, ignored); // a package is a directory
+}
+
+/// The safety net, not a save: touches neither the dirty flag, the title,
+/// the recents, nor the user's file. Failures log — an alert every two
+/// minutes would be worse than no autosave at all.
+- (void)autosaveTick
+{
+    if (!_dirty)
+        return;
+
+    const std::filesystem::path destination =
+        app::session::autosavePathFor(_projectPath, incdawSupportDirectory());
+    if (destination.empty())
+        return;
+
+    std::error_code ignored;
+    std::filesystem::create_directories(destination.parent_path(), ignored);
+
+    for (const std::string& warning :
+         project::capturePluginState(*_project, _live, destination))
+        NSLog(@"INCDAW: autosave: %s", warning.c_str());
+
+    const auto result = project::ProjectFile::save(*_project, destination);
+    if (!result)
+        NSLog(@"INCDAW: autosave failed: %s", result.error.c_str());
+}
+
+- (void)saveProject:(id)sender
+{
+    (void)sender;
+    (void)[self saveInteractive];
+}
+
+- (BOOL)saveInteractive
+{
+    if (_projectPath.empty())
+        return [self saveAsInteractive];
+
+    return [self writeProjectToPath];
 }
 
 - (void)saveProjectAs:(id)sender
 {
     (void)sender;
+    (void)[self saveAsInteractive];
+}
 
+- (BOOL)saveAsInteractive
+{
     NSSavePanel* panel = [NSSavePanel savePanel];
     panel.nameFieldStringValue = @"Untitled.incdaw";
     panel.canCreateDirectories = YES;
 
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
-        return;
+        return NO;
 
     std::filesystem::path chosen{panel.URL.path.UTF8String};
     if (chosen.extension() != ".incdaw")
         chosen += ".incdaw";
 
     _projectPath = chosen;
-    [self writeProjectToPath];
+    return [self writeProjectToPath];
 }
 
 - (void)exportAudio:(id)sender
@@ -1234,7 +1515,10 @@ std::filesystem::path incdawSupportDirectory()
     // Not a command, deliberately: the import creates fresh entities and the
     // undo story for "un-importing" channels a later edit may reference is
     // its own project. Recorded in HANDOFF; the redraws below make the
-    // result visible immediately.
+    // result visible immediately. No command also means the undo-depth watch
+    // cannot see this mutation — the document is marked dirty here.
+    [self markDirty];
+
     [self.patternList setNeedsDisplay:YES];
     [self.channelRack setNeedsDisplay:YES];
     [self rebuildGraph];
@@ -1242,7 +1526,7 @@ std::filesystem::path incdawSupportDirectory()
 
 /// The save itself. Live plugin state is captured FIRST, so the stateFile
 /// paths land in the project.json this save writes (docs/PLUGIN_HOST.md §6).
-- (void)writeProjectToPath
+- (BOOL)writeProjectToPath
 {
     for (const std::string& warning :
          project::capturePluginState(*_project, _live, _projectPath))
@@ -1255,16 +1539,24 @@ std::filesystem::path incdawSupportDirectory()
         alert.messageText     = @"Could not save the project";
         alert.informativeText = @(result.error.c_str());
         [alert runModal];
-        return;
+        return NO;
     }
 
-    self.window.title =
-        [NSString stringWithFormat:@"INCDAW — %s", _projectPath.stem().string().c_str()];
+    // What was protecting unsaved work is stale now that the work is saved.
+    [self removeUntitledAutosave];
+
+    [self noteRecentProject:_projectPath];
+    [self clearDirty];
+    [self refreshWindowTitle];
+    return YES;
 }
 
 - (void)openProject:(id)sender
 {
     (void)sender;
+
+    if (![self confirmDiscardChanges])
+        return;
 
     NSOpenPanel* panel            = [NSOpenPanel openPanel];
     panel.canChooseFiles          = YES;
@@ -1274,27 +1566,57 @@ std::filesystem::path incdawSupportDirectory()
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
         return;
 
-    const std::filesystem::path chosen{panel.URL.path.UTF8String};
+    (void)[self loadProjectPackageAtPath:std::filesystem::path{
+                                             panel.URL.path.UTF8String}];
+}
 
+/// Shared by Open… and Open Recent: validates, prefers a newer autosave when
+/// one exists, loads, adopts. NO means the alert was already shown.
+- (BOOL)loadProjectPackageAtPath:(const std::filesystem::path&)chosen
+{
     if (!project::ProjectFile::isProjectPackage(chosen)) {
         NSAlert* alert        = [[NSAlert alloc] init];
         alert.messageText     = @"Not an INCDAW project";
         alert.informativeText = @(chosen.string().c_str());
         [alert runModal];
-        return;
+        return NO;
+    }
+
+    // A sibling autosave newer than the project means the last session ended
+    // without a save. Offer it — ⌘S still points at the real project either
+    // way, which is also why opening the autosave marks the document dirty.
+    std::filesystem::path source       = chosen;
+    bool                  fromAutosave = false;
+
+    const std::filesystem::path autosave =
+        app::session::autosavePathFor(chosen, incdawSupportDirectory());
+
+    if (app::session::autosaveIsNewer(chosen, autosave)) {
+        NSAlert* ask        = [[NSAlert alloc] init];
+        ask.messageText     = @"Open the newer autosave?";
+        ask.informativeText = @"An autosave newer than this project exists, "
+                              @"so the last session probably ended without a "
+                              @"save. Nothing is overwritten until you save.";
+        [ask addButtonWithTitle:@"Open Autosave"];
+        [ask addButtonWithTitle:@"Open Saved Version"];
+
+        if ([ask runModal] == NSAlertFirstButtonReturn) {
+            source       = autosave;
+            fromAutosave = true;
+        }
     }
 
     // Loaded IN PLACE: every view holds a pointer to this project object, and
     // ProjectFile::load replaces its contents wholesale. Undo history against
     // the previous contents no longer applies to what is now here.
-    const auto result = project::ProjectFile::load(*_project, chosen);
+    const auto result = project::ProjectFile::load(*_project, source);
 
     if (!result) {
         NSAlert* alert        = [[NSAlert alloc] init];
         alert.messageText     = @"Could not open the project";
         alert.informativeText = @(result.error.c_str());
         [alert runModal];
-        return;
+        return NO;
     }
 
     if (result.migrated)
@@ -1303,13 +1625,32 @@ std::filesystem::path incdawSupportDirectory()
     _registry->clearHistory();
     _projectPath = chosen;
 
-    [self adoptLoadedProject];
+    [self noteRecentProject:chosen];
+    [self adoptLoadedProjectRestoringStateFrom:source];
+
+    if (fromAutosave)
+        [self markDirty];
+    else
+        [self clearDirty];
+
+    return YES;
 }
 
 /// Points everything at what was just loaded: tempo, views, the graph — and
-/// hands hosted plugins their state back once the graph that owns them exists.
-- (void)adoptLoadedProject
+/// hands hosted plugins their state back once the graph that owns them
+/// exists. `statePackage` is the package the contents actually came from
+/// (the project, or its autosave); empty means there is no state to restore,
+/// which is what File > New wants.
+- (void)adoptLoadedProjectRestoringStateFrom:(const std::filesystem::path&)statePackage
 {
+    // The undo stack was cleared along with the old contents; syncing the
+    // watch keeps housekeeping from reading that as an edit. The caches the
+    // watch would have invalidated are invalidated here instead.
+    _undoDepthSeen = _registry->undoDepth();
+    [self.playlist invalidateWaveformCache];
+    if (!self.audioEditor.hidden && self.audioEditor.assetIdValue != 0)
+        [self.audioEditor reloadWaveform];
+
     const project::EntityId firstPattern =
         _project->patterns().empty() ? project::EntityId{} : _project->patterns().front().id;
     const project::EntityId firstChannel =
@@ -1331,9 +1672,9 @@ std::filesystem::path incdawSupportDirectory()
 
     [self rebuildGraph];
 
-    if (_audioReady && !_projectPath.empty())
+    if (_audioReady && !statePackage.empty())
         for (const std::string& warning :
-             project::restorePluginState(*_project, _live, _projectPath))
+             project::restorePluginState(*_project, _live, statePackage))
             NSLog(@"INCDAW: open: %s", warning.c_str());
 
     [self retargetLoop];
@@ -1345,8 +1686,7 @@ std::filesystem::path incdawSupportDirectory()
     [self.mixer setNeedsDisplay:YES];
     [self.audioEditor setNeedsDisplay:YES];
 
-    self.window.title =
-        [NSString stringWithFormat:@"INCDAW — %s", _projectPath.stem().string().c_str()];
+    [self refreshWindowTitle];
 }
 
 /// Loops whatever pattern is selected, so playback repeats rather than running
@@ -1580,6 +1920,10 @@ std::filesystem::path incdawSupportDirectory()
     if (_registry->undoDepth() != _undoDepthSeen) {
         _undoDepthSeen = _registry->undoDepth();
 
+        // Every command-based mutation passes here, undo and redo included —
+        // undoing away from the last save leaves the document dirty too.
+        [self markDirty];
+
         [self.playlist invalidateWaveformCache];
 
         if (!self.audioEditor.hidden && self.audioEditor.assetIdValue != 0) {
@@ -1669,7 +2013,17 @@ std::filesystem::path incdawSupportDirectory()
     [menuBar addItem:fileItem];
 
     NSMenu* fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+    [fileMenu addItemWithTitle:@"New" action:@selector(newProject:) keyEquivalent:@"n"];
     [fileMenu addItemWithTitle:@"Open…" action:@selector(openProject:) keyEquivalent:@"o"];
+
+    NSMenuItem* openRecentItem = [[NSMenuItem alloc] initWithTitle:@"Open Recent"
+                                                            action:nil
+                                                     keyEquivalent:@""];
+    _recentMenu            = [[NSMenu alloc] initWithTitle:@"Open Recent"];
+    openRecentItem.submenu = _recentMenu;
+    [fileMenu addItem:openRecentItem];
+    [self refreshRecentMenu];
+
     [fileMenu addItem:[NSMenuItem separatorItem]];
     [fileMenu addItemWithTitle:@"Save" action:@selector(saveProject:) keyEquivalent:@"s"];
     [fileMenu addItemWithTitle:@"Save As…" action:@selector(saveProjectAs:) keyEquivalent:@"S"];
@@ -1824,6 +2178,19 @@ std::filesystem::path incdawSupportDirectory()
     NSApp.mainMenu = menuBar;
 }
 
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender
+{
+    (void)sender;
+
+    if (![self confirmDiscardChanges])
+        return NSTerminateCancel;
+
+    // A normal quit leaves nothing to recover; only a crash leaves the
+    // unsaved-project autosave behind for the next launch to offer.
+    [self removeUntitledAutosave];
+    return NSTerminateNow;
+}
+
 - (void)applicationWillTerminate:(NSNotification*)notification
 {
     (void)notification;
@@ -1832,6 +2199,9 @@ std::filesystem::path incdawSupportDirectory()
     // in flight is finished first — quitting must not truncate a take's file.
     [_housekeeping invalidate];
     _housekeeping = nil;
+
+    [_autosave invalidate];
+    _autosave = nil;
 
     if (_audio != nullptr) {
         if (_recording.isRecording())

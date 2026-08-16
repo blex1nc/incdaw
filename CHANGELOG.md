@@ -6,6 +6,53 @@ public version yet.
 
 ---
 
+## [Unreleased] — UI build-out
+
+The twenty engineering phases produced a complete core; what follows is
+the UI build-out — FL-Studio-class workspaces over that core, in
+increments. Each increment ships working, tested behaviour.
+
+### UI build-out, increment 1 — project lifecycle safety — 2026-08-16
+
+Unsaved work is no longer lost silently. The gaps this closes were the
+standing ones recorded at 0.9.0: dirty-prompt on quit, autosave,
+recent projects.
+
+**Added**
+
+- Dirty tracking: any command-based mutation (undo and redo included,
+  via the undo-depth watch in housekeeping) and the one command-less
+  mutation (MIDI import) mark the document edited; the window close
+  button shows the standard dot. Save, Open, and New clear it.
+- Quit guard: `applicationShouldTerminate` asks Save / Cancel /
+  Don't Save when the project is dirty. Open and New ask through the
+  same guard before discarding the current project.
+- File > New (⌘N): resets to the same starter document launch seeds,
+  through the same adoption path Open uses.
+- Autosave, every two minutes while dirty: a saved project autosaves
+  beside itself as `<name>.autosave.incdaw`; an unsaved one autosaves
+  to Application Support. Autosave never touches the dirty flag, the
+  title, the recents, or the user's file, and failures log rather than
+  alert. Opening a project whose autosave is newer offers the autosave
+  (⌘S still targets the real project, and the document opens dirty). A
+  leftover unsaved-project autosave — only a crash leaves one, a normal
+  quit deletes it — is offered for recovery at the next launch.
+- File > Open Recent: the last ten saved or opened projects in user
+  defaults, with Clear Menu; entries that no longer load are pruned.
+- `app/ProjectSession.{h,cpp}`: the headless decisions (recents-list
+  update, autosave destination, autosave-newer comparison), tested in
+  `tests/unit/ProjectSessionTests.cpp` — the same headless-model split
+  the view models use.
+
+**Known limitation (recorded)**
+
+- A parameter changed only inside a hosted plugin's own editor window
+  does not mark the document dirty; the shell cannot see it until the
+  host-callback work (`clap_host_state.mark_dirty`, PLUGIN_HOST §6)
+  lands.
+
+---
+
 ## [0.9.0] — 2026-08-16 — the core is complete
 
 Every engineering phase of the roadmap (0–20) is done: the first

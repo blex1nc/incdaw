@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 3.0
-Status: ALL PHASES 0-20 COMPLETE — CORE DONE, v0.9.0 — UI BUILD-OUT NEXT
+Version: 3.1
+Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT IN PROGRESS (increment 1 done)
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1431,10 +1431,49 @@ recording and the Audio Logger all work. What remains in it is polish):
   will bind to is ready: CompiledProjectGraph handles (strips, meters,
   instruments, insert state), the command registry, ParameterRegistry
   (every builtin + hosted parameter), MIDI learn plumbing, the offline
-  renderer, SMF exchange, and the sample cache. Known engine-side gaps
-  a UI pass will surface first: builtin effect/instrument parameter
-  panels, an export options dialog, a zone-mapping editor, mapping
-  list UI, dirty-prompt on quit, autosave, recent projects.
+  renderer, SMF exchange, and the sample cache. The increment plan is
+  in docs/ROADMAP.md ("After the phases — the UI build-out").
+
+  UI BUILD-OUT INCREMENT 1 IS DONE (2026-08-16): project lifecycle
+  safety — the "unsaved work is lost silently" era is over.
+    - Dirty tracking: the housekeeping undo-depth watch marks the
+      document edited on every command-based mutation (undo/redo
+      included); MIDI import (the one command-less mutation) marks it
+      explicitly. Save/Open/New clear it; the close button shows the
+      standard dot (documentEdited).
+    - Guards: applicationShouldTerminate + Open + New all run one
+      confirmDiscardChanges (Save / Cancel / Don't Save).
+    - File > New (⌘N): seedStarterProject (extracted from launch) +
+      the same adoption path Open uses
+      (adoptLoadedProjectRestoringStateFrom:, which now takes the
+      package to restore plugin state from — the autosave when the
+      autosave was opened, empty for New).
+    - Autosave every 120 s while dirty: saved projects ->
+      "<stem>.autosave.incdaw" beside the project; unsaved ->
+      Application Support/INCDAW/Autosave/Untitled.autosave.incdaw.
+      Never touches dirty/title/recents; failures NSLog, never alert.
+      Open offers a strictly-newer sibling autosave (⌘S still targets
+      the real path; opening the autosave marks dirty). A leftover
+      Untitled autosave is offered at launch (normal quit deletes it;
+      only a crash leaves one; successful save deletes it too).
+    - Open Recent: last 10 in user defaults (INCDAWRecentProjects),
+      Clear Menu, entries that fail to load are pruned.
+    - app/ProjectSession.{h,cpp}: headless decisions (updatedRecents,
+      autosavePathFor, autosaveIsNewer), 8 cases in
+      tests/unit/ProjectSessionTests.cpp. 491 cases green Debug and
+      Release (built Debug here; suite green 2/2 ctest).
+    - Verified live: launch (starter seeding via the extracted
+      method), clean AppleScript quit with NO dialog (guard does not
+      false-positive on a clean project).
+    KNOWN LIMITATION (recorded): a parameter changed only inside a
+    hosted plugin's own editor window does not mark the document
+    dirty — invisible to the shell until clap_host_state.mark_dirty
+    lands (PLUGIN_HOST §6 host-callback work).
+
+  NEXT: increment 2 — the generic parameter panel (ROADMAP "After the
+  phases" §Increment 2): every automatable parameter of a selected
+  builtin effect / builtin instrument / hosted plugin, listed and
+  editable, driven by ParameterRegistry + PluginParameterInfo.
 
 Things to be careful about:
 
@@ -1444,9 +1483,10 @@ Things to be careful about:
     doctest command; D-027 has CLAP's).
   - RESOLVED (2026-08-15): the File menu exists — Open/Save/Save As call
     ProjectFile and PluginStateFiles in the documented order (capture before
-    save; restore after the rebuild). Still missing: dirty prompt on quit,
-    autosave, recent projects. Unsaved work is still lost silently on quit;
-    only SAVING became possible.
+    save; restore after the rebuild).
+    RESOLVED (2026-08-16, UI build-out increment 1): dirty prompt on quit,
+    autosave with crash recovery, Open Recent, File > New. Unsaved work is
+    no longer lost silently.
   - tests/fixtures/v1.1/ does not exist. Format 1.1 is covered only by the
     save/load round trip, which proves the code agrees with itself and nothing
     more. docs/PROJECT_FORMAT.md §2 requires a hand-written fixture before 1.1

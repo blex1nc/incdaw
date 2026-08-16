@@ -390,6 +390,49 @@ launches INCDAW successfully by the documented procedure.
 
 ---
 
+## After the phases — the UI build-out
+
+Phases 0–20 delivered the core. What follows (authorised 2026-08-16) is the
+UI build-out: FL-Studio-class workspaces over the finished engine, in
+increments. Each increment is a coherent, tested, committed unit — the same
+discipline as the phases, without renumbering them.
+
+The engine-side surface the UI binds to already exists: CompiledProjectGraph
+handles, the command registry, ParameterRegistry, MIDI learn plumbing, the
+offline renderer, SMF exchange, the sample cache.
+
+### Increment 1 — project lifecycle safety — DONE 2026-08-16
+
+Dirty tracking + quit/open/new guard, File > New, autosave with crash
+recovery and newer-autosave offer on open, Open Recent. Headless decisions in
+`app/ProjectSession`, tested; interaction in the shell.
+
+**Exit criterion (met):** quitting, opening over, or replacing a dirty
+project always asks first; a crash loses at most the autosave interval.
+
+### Increment 2 — generic parameter panel (planned)
+
+A surface listing every automatable parameter of a selected builtin effect,
+builtin instrument, or hosted plugin, driven by ParameterRegistry and
+PluginParameterInfo — the ten Phase 15 effects and the sampler's filter/LFO
+become editable without automation lanes.
+
+### Increment 3 — export options dialog (planned)
+
+Master/stems/tracks/region, format, bit depth, dither, normalize — the
+options `project::OfflineRender` already implements, reachable from File >
+Export Audio.
+
+### Increment 4 — mapping and zone editors (planned)
+
+MIDI mapping list UI; a sampler zone-mapping editor over
+`Channel::samplerZones`.
+
+Later increments are drawn from the same recorded gap list as needed
+(docs/RELEASE.md known limits, HANDOFF §22).
+
+---
+
 ## Deliberately out of scope
 
 - **VST2 hosting** — not licensable (D-007)
