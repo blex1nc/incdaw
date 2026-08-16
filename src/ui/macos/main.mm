@@ -241,6 +241,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     /// Export cancel flag, shared with the rendering thread. Reset per run.
     std::shared_ptr<std::atomic<bool>> _exportCancel;
+
+    /// The audio editor's clipboard: whatever Copy or Cut last extracted.
+    /// App-local by design — a WAV region is not pasteboard text.
+    engine::AudioFileData _audioClipboard;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -740,6 +744,97 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self rebuildGraph];
     [self.playlist setNeedsDisplay:YES];
     [self refreshStatus];
+}
+
+/// The selection as a region, or nothing to act on. Cut/Copy/Delete demand a
+/// selection — "the whole file" is a surprising thing to cut by accident.
+- (BOOL)editorSelection:(engine::edits::Region*)outRegion
+                  asset:(project::EntityId*)outAsset
+{
+    if (self.audioEditor.assetIdValue == 0 || !self.audioEditor.hasSelection)
+        return NO;
+
+    *outAsset       = project::EntityId{self.audioEditor.assetIdValue};
+    outRegion->from = static_cast<engine::FrameCount>(self.audioEditor.selectionFrom);
+    outRegion->to   = static_cast<engine::FrameCount>(self.audioEditor.selectionTo);
+    return YES;
+}
+
+/// Reads the selected region into the clipboard. Non-destructive: no
+/// command, no undo entry — there is nothing to undo.
+- (BOOL)copySelectionToClipboard
+{
+    engine::edits::Region region;
+    project::EntityId     asset;
+    if (![self editorSelection:&region asset:&asset])
+        return NO;
+
+    const project::AudioAsset* record = nullptr;
+    for (const project::AudioAsset& candidate : _project->audioAssets())
+        if (candidate.id == asset)
+            record = &candidate;
+    if (record == nullptr)
+        return NO;
+
+    engine::AudioFileData data;
+    const std::string path =
+        !record->absolutePath.empty() ? record->absolutePath : record->relativePath;
+    if (!engine::WavFile::read(path, data))
+        return NO;
+
+    _audioClipboard = engine::edits::extractRegion(data, region);
+    return _audioClipboard.frameCount > 0;
+}
+
+- (void)editCopy:(id)sender
+{
+    (void)sender;
+    (void)[self copySelectionToClipboard];
+}
+
+- (void)editCut:(id)sender
+{
+    (void)sender;
+
+    engine::edits::Region region;
+    project::EntityId     asset;
+    if (![self editorSelection:&region asset:&asset] || ![self copySelectionToClipboard])
+        return;
+
+    (void)_registry->execute(std::make_unique<app::DeleteAudioRegionCommand>(asset, region));
+    [self audioAssetChanged];
+}
+
+- (void)editDelete:(id)sender
+{
+    (void)sender;
+
+    engine::edits::Region region;
+    project::EntityId     asset;
+    if (![self editorSelection:&region asset:&asset])
+        return;
+
+    (void)_registry->execute(std::make_unique<app::DeleteAudioRegionCommand>(asset, region));
+    [self audioAssetChanged];
+}
+
+- (void)editPaste:(id)sender
+{
+    (void)sender;
+
+    if (self.audioEditor.assetIdValue == 0 || _audioClipboard.frameCount <= 0)
+        return;
+
+    const project::EntityId asset{self.audioEditor.assetIdValue};
+
+    // At the selection start when there is one, else at the very end.
+    const engine::FramePosition at = self.audioEditor.hasSelection
+        ? static_cast<engine::FramePosition>(self.audioEditor.selectionFrom)
+        : std::numeric_limits<engine::FramePosition>::max();
+
+    (void)_registry->execute(
+        std::make_unique<app::InsertAudioCommand>(asset, at, _audioClipboard));
+    [self audioAssetChanged];
 }
 
 - (void)editNormalize:(id)sender { (void)sender; [self applyAudioEdit:app::AudioEditOp::normalize factor:1.0f]; }
@@ -3241,6 +3336,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     NSMenu* audioMenu = [[NSMenu alloc] initWithTitle:@"Audio"];
 
     const struct { NSString* title; SEL action; } verbs[] = {
+        {@"Cut",               @selector(editCut:)},
+        {@"Copy",              @selector(editCopy:)},
+        {@"Paste",             @selector(editPaste:)},
+        {@"Delete Selection",  @selector(editDelete:)},
         {@"Trim to Selection", @selector(editTrim:)},
         {@"Normalize",         @selector(editNormalize:)},
         {@"Reverse",           @selector(editReverse:)},

@@ -268,6 +268,80 @@ TEST_CASE("trim shortens the file and undo reassembles the original")
     CHECK(fixture.load().frameCount == 3000);
 }
 
+TEST_CASE("extract, delete and insert are exact and refuse mismatches")
+{
+    const auto data = makeAudio(2, 100);
+
+    // Copy: the piece is the region, byte for byte.
+    const auto piece = engine::edits::extractRegion(data, {20, 30});
+    CHECK(piece.frameCount == 10);
+    CHECK(piece.channels[0][0] == data.channels[0][20]);
+    CHECK(piece.channels[1][9] == data.channels[1][29]);
+
+    // Delete closes the gap.
+    auto shortened = data;
+    engine::edits::deleteRegion(shortened, {20, 30});
+    CHECK(shortened.frameCount == 90);
+    CHECK(shortened.channels[0][20] == data.channels[0][30]);
+
+    // Insert at the cut restores the original exactly.
+    auto restored = shortened;
+    REQUIRE(engine::edits::insertAudio(restored, 20, piece));
+    CHECK(restored.channels == data.channels);
+    CHECK(restored.frameCount == data.frameCount);
+
+    // Mismatched channel count or rate refuses and leaves data untouched.
+    auto mono         = makeAudio(1, 10);
+    auto beforeRefuse = restored;
+    CHECK_FALSE(engine::edits::insertAudio(restored, 0, mono));
+    CHECK(restored.channels == beforeRefuse.channels);
+
+    auto wrongRate       = piece;
+    wrongRate.sampleRate = 44100.0;
+    CHECK_FALSE(engine::edits::insertAudio(restored, 0, wrongRate));
+}
+
+TEST_CASE("cut-paste round-trips through the commands, undo included")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    const auto original = fixture.load();
+
+    // Cut [1000, 2000): the shell copies first, then deletes undoably.
+    const auto clipboard = engine::edits::extractRegion(original, {1000, 2000});
+
+    REQUIRE(registry.execute(
+        std::make_unique<app::DeleteAudioRegionCommand>(fixture.assetId,
+                                                        engine::edits::Region{1000, 2000})));
+    CHECK(fixture.load().frameCount == 4000);
+
+    // Paste it back where it came from: the file round-trips bit-exactly.
+    REQUIRE(registry.execute(
+        std::make_unique<app::InsertAudioCommand>(fixture.assetId, 1000, clipboard)));
+
+    const auto pasted = fixture.load();
+    CHECK(pasted.frameCount == original.frameCount);
+    CHECK(pasted.channels == original.channels);
+
+    // Undo peels the paste, then the delete — back to the original twice.
+    registry.undo();
+    CHECK(fixture.load().frameCount == 4000);
+
+    registry.undo();
+    const auto restored = fixture.load();
+    CHECK(restored.channels == original.channels);
+
+    // Redo replays the recorded result.
+    registry.redo();
+    registry.redo();
+    CHECK(fixture.load().channels == original.channels);
+
+    // Deleting everything is refused, like trim's.
+    CHECK_FALSE(registry.execute(std::make_unique<app::DeleteAudioRegionCommand>(
+        fixture.assetId, engine::edits::Region{0, 999999})));
+}
+
 TEST_CASE("a trim that would keep nothing, or everything, is refused")
 {
     EditFixture fixture;

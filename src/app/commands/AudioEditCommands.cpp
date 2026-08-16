@@ -199,4 +199,123 @@ void TrimAssetCommand::undo(Project& project)
         asset->frameCount = previousFrameCount_;
 }
 
+// ── DeleteAudioRegionCommand ──────────────────────────────────────────────────
+
+bool DeleteAudioRegionCommand::execute(Project& project)
+{
+    project::AudioAsset* asset = nullptr;
+    for (project::AudioAsset& candidate : project.audioAssets())
+        if (candidate.id == asset_)
+            asset = &candidate;
+
+    if (asset == nullptr)
+        return false;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return false;
+
+    if (!minted_) {
+        applied_ = engine::edits::clampedRegion(data, region_);
+
+        // Deleting nothing is not an edit; deleting everything destroys the
+        // asset — both are refusals, like Trim's.
+        if (applied_.length() <= 0 || applied_.length() == data.frameCount)
+            return false;
+
+        removed_ = snapshotRegion(data, applied_);
+        minted_  = true;
+    }
+
+    engine::edits::deleteRegion(data, applied_);
+
+    if (!WavFile::write(assetFilePath(*asset), data))
+        return false;
+
+    asset->frameCount = data.frameCount;
+    return true;
+}
+
+void DeleteAudioRegionCommand::undo(Project& project)
+{
+    project::AudioAsset* asset = nullptr;
+    for (project::AudioAsset& candidate : project.audioAssets())
+        if (candidate.id == asset_)
+            asset = &candidate;
+
+    if (asset == nullptr)
+        return;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return;
+
+    AudioFileData piece;
+    piece.sampleRate   = data.sampleRate;
+    piece.channelCount = data.channelCount;
+    piece.frameCount   = applied_.length();
+    piece.channels     = removed_;
+
+    if (!engine::edits::insertAudio(data, applied_.from, piece))
+        return;
+
+    if (WavFile::write(assetFilePath(*asset), data))
+        asset->frameCount = data.frameCount;
+}
+
+// ── InsertAudioCommand ────────────────────────────────────────────────────────
+
+bool InsertAudioCommand::execute(Project& project)
+{
+    project::AudioAsset* asset = nullptr;
+    for (project::AudioAsset& candidate : project.audioAssets())
+        if (candidate.id == asset_)
+            asset = &candidate;
+
+    if (asset == nullptr || piece_.frameCount <= 0)
+        return false;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return false;
+
+    if (!minted_) {
+        insertedAt_ = std::min<engine::FramePosition>(
+            at_, static_cast<engine::FramePosition>(data.frameCount));
+        minted_ = true;
+    }
+
+    // Rate or channel mismatch refuses here, before any write.
+    if (!engine::edits::insertAudio(data, insertedAt_, piece_))
+        return false;
+
+    if (!WavFile::write(assetFilePath(*asset), data))
+        return false;
+
+    asset->frameCount = data.frameCount;
+    return true;
+}
+
+void InsertAudioCommand::undo(Project& project)
+{
+    project::AudioAsset* asset = nullptr;
+    for (project::AudioAsset& candidate : project.audioAssets())
+        if (candidate.id == asset_)
+            asset = &candidate;
+
+    if (asset == nullptr)
+        return;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return;
+
+    engine::edits::deleteRegion(
+        data, {static_cast<FrameCount>(insertedAt_),
+               static_cast<FrameCount>(insertedAt_) + piece_.frameCount});
+
+    if (WavFile::write(assetFilePath(*asset), data))
+        asset->frameCount = data.frameCount;
+}
+
 } // namespace incdaw::app

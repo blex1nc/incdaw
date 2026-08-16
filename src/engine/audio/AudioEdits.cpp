@@ -113,4 +113,49 @@ void trimTo(AudioFileData& data, Region region)
     data.frameCount = clamped.length();
 }
 
+AudioFileData extractRegion(const AudioFileData& data, Region region)
+{
+    const Region clamped = clampedRegion(data, region);
+
+    AudioFileData piece;
+    piece.sampleRate   = data.sampleRate;
+    piece.channelCount = data.channelCount;
+    piece.frameCount   = clamped.length();
+
+    for (const auto& channel : data.channels)
+        piece.channels.emplace_back(
+            channel.begin() + static_cast<std::ptrdiff_t>(clamped.from),
+            channel.begin() + static_cast<std::ptrdiff_t>(clamped.to));
+
+    return piece;
+}
+
+void deleteRegion(AudioFileData& data, Region region)
+{
+    const Region clamped = clampedRegion(data, region);
+
+    for (auto& channel : data.channels)
+        channel.erase(channel.begin() + static_cast<std::ptrdiff_t>(clamped.from),
+                      channel.begin() + static_cast<std::ptrdiff_t>(clamped.to));
+
+    data.frameCount -= clamped.length();
+}
+
+bool insertAudio(AudioFileData& data, FramePosition at, const AudioFileData& piece)
+{
+    if (piece.channelCount != data.channelCount || piece.sampleRate != data.sampleRate)
+        return false;
+
+    const auto clampedAt = static_cast<std::size_t>(
+        std::min<FramePosition>(at, static_cast<FramePosition>(data.frameCount)));
+
+    for (std::size_t index = 0; index < data.channels.size(); ++index)
+        data.channels[index].insert(
+            data.channels[index].begin() + static_cast<std::ptrdiff_t>(clampedAt),
+            piece.channels[index].begin(), piece.channels[index].end());
+
+    data.frameCount += piece.frameCount;
+    return true;
+}
+
 } // namespace incdaw::engine::edits

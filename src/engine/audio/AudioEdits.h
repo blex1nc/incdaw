@@ -52,4 +52,17 @@ void fadeOut(AudioFileData& data, Region region) noexcept;
 /// audio shrinks to the region's length.
 void trimTo(AudioFileData& data, Region region);
 
+/// The region's samples as their own audio — the clipboard's copy verb.
+/// Metadata (rate, channel count) rides along.
+[[nodiscard]] AudioFileData extractRegion(const AudioFileData& data, Region region);
+
+/// Removes the region and closes the gap; the audio shrinks by its length.
+void deleteRegion(AudioFileData& data, Region region);
+
+/// Inserts `piece` at frame `at` (clamped to the end), pushing what follows
+/// later. False — and untouched data — when the piece's sample rate or
+/// channel count disagrees: a paste must never resample or remap silently.
+[[nodiscard]] bool insertAudio(AudioFileData& data, FramePosition at,
+                               const AudioFileData& piece);
+
 } // namespace incdaw::engine::edits

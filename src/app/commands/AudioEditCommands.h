@@ -76,4 +76,50 @@ private:
     bool                                     minted_ = false;
 };
 
+/// Removes [from, to) and closes the gap — the destructive half of Cut, and
+/// Delete on its own. Undo reinserts the removed span bit-exactly.
+class DeleteAudioRegionCommand final : public Command {
+public:
+    DeleteAudioRegionCommand(project::EntityId asset, engine::edits::Region region)
+        : asset_(asset), region_(region) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "audio.deleteRegion"; }
+    [[nodiscard]] std::string name() const override { return "Delete Audio"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    project::EntityId    asset_;
+    engine::edits::Region region_;
+
+    std::vector<std::vector<engine::Sample>> removed_;
+    engine::edits::Region                    applied_;
+    bool                                     minted_ = false;
+};
+
+/// Inserts audio at a frame, pushing what follows later — Paste. The piece
+/// is carried BY the command, so redo re-inserts the recorded bytes and a
+/// later clipboard change cannot rewrite history. Undo removes the span.
+class InsertAudioCommand final : public Command {
+public:
+    InsertAudioCommand(project::EntityId asset, engine::FramePosition at,
+                       engine::AudioFileData piece)
+        : asset_(asset), at_(at), piece_(std::move(piece)) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "audio.insert"; }
+    [[nodiscard]] std::string name() const override { return "Paste Audio"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    project::EntityId     asset_;
+    engine::FramePosition at_ = 0;
+    engine::AudioFileData piece_;
+
+    engine::FramePosition insertedAt_ = 0;
+    bool                  minted_     = false;
+};
+
 } // namespace incdaw::app
