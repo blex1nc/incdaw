@@ -142,35 +142,35 @@ TEST_CASE("every effect at its transparent settings passes the signal bit-exact"
         requireBitExact(processThrough(*node, input), input);
     };
 
-    SUBCASE("utility")  { nullThrough(makeBuiltinEffect("incdaw.utility")); }
-    SUBCASE("filter")   { nullThrough(makeBuiltinEffect("incdaw.filter")); }
-    SUBCASE("eq")       { nullThrough(makeBuiltinEffect("incdaw.eq")); }
-    SUBCASE("saturator"){ nullThrough(makeBuiltinEffect("incdaw.saturator")); }
-    SUBCASE("gate")     { nullThrough(makeBuiltinEffect("incdaw.gate")); }
-    SUBCASE("analyzer") { nullThrough(makeBuiltinEffect("incdaw.analyzer")); }
+    SUBCASE("utility")  { nullThrough(makeBuiltinEffect("incdaw.utility", 48000.0)); }
+    SUBCASE("filter")   { nullThrough(makeBuiltinEffect("incdaw.filter", 48000.0)); }
+    SUBCASE("eq")       { nullThrough(makeBuiltinEffect("incdaw.eq", 48000.0)); }
+    SUBCASE("saturator"){ nullThrough(makeBuiltinEffect("incdaw.saturator", 48000.0)); }
+    SUBCASE("gate")     { nullThrough(makeBuiltinEffect("incdaw.gate", 48000.0)); }
+    SUBCASE("analyzer") { nullThrough(makeBuiltinEffect("incdaw.analyzer", 48000.0)); }
 
     SUBCASE("compressor at ratio 1")
     {
-        auto node = makeBuiltinEffect("incdaw.compressor");
+        auto node = makeBuiltinEffect("incdaw.compressor", 48000.0);
         node->parameterSink()->setParameter(CompressorEffect::ratio, 1.0);
         nullThrough(std::move(node));
     }
 
     SUBCASE("limiter under the ceiling")
     {
-        nullThrough(makeBuiltinEffect("incdaw.limiter"));
+        nullThrough(makeBuiltinEffect("incdaw.limiter", 48000.0));
     }
 
     SUBCASE("delay at mix zero")
     {
-        auto node = makeBuiltinEffect("incdaw.delay");
+        auto node = makeBuiltinEffect("incdaw.delay", 48000.0);
         node->parameterSink()->setParameter(DelayEffect::mix, 0.0);
         nullThrough(std::move(node));
     }
 
     SUBCASE("reverb at mix zero")
     {
-        auto node = makeBuiltinEffect("incdaw.reverb");
+        auto node = makeBuiltinEffect("incdaw.reverb", 48000.0);
         node->parameterSink()->setParameter(ReverbEffect::mix, 0.0);
         nullThrough(std::move(node));
     }
@@ -561,4 +561,50 @@ TEST_CASE("the analyzer measures without touching the signal")
     CHECK(effect.peak(0) == doctest::Approx(static_cast<double>(expectedPeak)));
     CHECK(effect.rms(0)
           == doctest::Approx(std::sqrt(sum / static_cast<double>(blockSize))).epsilon(0.001));
+}
+
+// ── The lookahead limiter ────────────────────────────────────────────────────
+
+TEST_CASE("the lookahead limiter is a pure delay when transparent")
+{
+    const auto input = testSignal(2, 2048);
+
+    engine::dsp::LookaheadLimiterEffect transparent{48000.0};
+    const auto lookahead = static_cast<std::size_t>(transparent.latencyFrames());
+    CHECK(lookahead == 96);   // 2 ms at 48 kHz — and what it TELLS the graph
+
+    const auto delayed = processThrough(transparent, input);
+
+    for (std::size_t channel = 0; channel < 2; ++channel) {
+        for (std::size_t frame = 0; frame < lookahead; ++frame)
+            REQUIRE(delayed[channel][frame] == 0.0f);
+
+        for (std::size_t frame = lookahead; frame < delayed[channel].size(); ++frame)
+            REQUIRE(delayed[channel][frame] == input[channel][frame - lookahead]);
+    }
+}
+
+TEST_CASE("the lookahead limiter holds its ceiling through a step transient")
+{
+    // The zero-lookahead limiter clamps the first hot sample by force; this
+    // one must have ramped DOWN before the step even arrives at the output.
+    std::vector<std::vector<Sample>> step(2, std::vector<Sample>(2048, 0.0f));
+    for (auto& channel : step)
+        for (std::size_t frame = 256; frame < channel.size(); ++frame)
+            channel[frame] = 1.0f;
+
+    engine::dsp::LookaheadLimiterEffect limiter{48000.0};
+    limiter.setParameter(engine::dsp::LookaheadLimiterEffect::ceilingDb, -6.0);
+    limiter.setParameter(engine::dsp::LookaheadLimiterEffect::releaseMs, 200.0);
+
+    const auto out     = processThrough(limiter, step);
+    const auto ceiling = static_cast<Sample>(db(-6.0));
+
+    Sample peak = 0.0f;
+    for (const auto& channel : out)
+        for (const Sample sample : channel)
+            peak = std::max(peak, std::abs(sample));
+
+    CHECK(peak <= ceiling * 1.0001f);   // never over, first transient included
+    CHECK(peak >= ceiling * 0.9f);      // and it genuinely limits, not mutes
 }

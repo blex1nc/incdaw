@@ -178,7 +178,7 @@ int main()
         std::printf("\nper-effect cost, 512-frame stereo blocks:\n");
 
         for (const auto& info : engine::dsp::builtinEffects()) {
-            auto node = engine::dsp::makeBuiltinEffect(info.uid);
+            auto node = engine::dsp::makeBuiltinEffect(info.uid, 48000.0);
             node->prepare(48000.0, blockSize);
 
             // Non-transparent settings so the real path is measured: 75% of

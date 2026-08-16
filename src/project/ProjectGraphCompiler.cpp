@@ -178,7 +178,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             // formats plug into (docs/DECISIONS.md D-028). Downstream of
             // this branch nothing distinguishes the two.
             if (slot.plugin.format == plugins::Format::builtin) {
-                insertNode = engine::dsp::makeBuiltinEffect(slot.plugin.uid);
+                insertNode = engine::dsp::makeBuiltinEffect(slot.plugin.uid, options.sampleRate);
                 if (insertNode == nullptr)
                     insertError = "unknown builtin effect";
             } else if (!options.insertFactory) {

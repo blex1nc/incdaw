@@ -24,7 +24,8 @@ struct BuiltinEffectInfo {
 
 /// The effect for `uid`, or nullptr for an unknown one. The node carries its
 /// ParameterSink and StateIO like any insert.
-[[nodiscard]] std::unique_ptr<Node> makeBuiltinEffect(const std::string& uid);
+[[nodiscard]] std::unique_ptr<Node> makeBuiltinEffect(const std::string& uid,
+                                                      SampleRate sampleRate);
 
 /// Catalogue entry for `uid`, or nullptr.
 [[nodiscard]] const BuiltinEffectInfo* findBuiltinEffect(const std::string& uid);

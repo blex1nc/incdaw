@@ -2,6 +2,9 @@
 
 #include "engine/dsp/effects/BuiltinEffect.h"
 
+#include <cstddef>
+#include <vector>
+
 namespace incdaw::engine::dsp {
 
 /// Feed-forward compressor: linked peak detector, one-pole attack/release
@@ -52,6 +55,55 @@ public:
 private:
     double     gain_       = 1.0;
     SampleRate sampleRate_ = 48000.0;
+};
+
+/// Lookahead peak limiter: the signal is delayed by a fixed two-millisecond
+/// window and the gain is computed against the window's PEAK, so attenuation
+/// arrives before the transient does — the ceiling holds without the
+/// instant-attack grit of the zero-lookahead limiter.
+///
+/// The window is fixed, not a parameter, deliberately: latency is reported
+/// to the graph at CONSTRUCTION (topology reads it before prepare), and a
+/// latency that moved with a knob would leave delay compensation stale
+/// between rebuilds. Two milliseconds is the conventional transparent
+/// figure. A separate catalogued effect rather than a mode of the classic
+/// limiter, so the classic's node-level bit-exact null (Phase 15's exit
+/// criterion) stays untouched; this one's transparency claim is "a pure
+/// delay of its window", which delay compensation absorbs in the graph.
+class LookaheadLimiterEffect final : public BuiltinEffect {
+public:
+    enum Param : std::uint32_t { ceilingDb = 0, releaseMs = 1 };
+
+    /// Milliseconds of lookahead — public so the tests and the latency
+    /// assertion agree with the implementation by construction.
+    static constexpr double lookaheadMilliseconds = 2.0;
+
+    explicit LookaheadLimiterEffect(SampleRate sampleRate);
+
+    void prepare(SampleRate sampleRate, FrameCount maxBlockSize) override;
+    void process(const ProcessContext& context) noexcept override;
+
+    [[nodiscard]] const char* name() const noexcept override { return "Limiter (Lookahead)"; }
+    [[nodiscard]] FrameCount latencyFrames() const noexcept override { return lookahead_; }
+
+private:
+    FrameCount lookahead_  = 0;
+    SampleRate sampleRate_ = 48000.0;
+    double     gain_       = 1.0;
+
+    /// The delay line (stereo) and the sliding-maximum machinery, all sized
+    /// in prepare — process never allocates.
+    std::vector<double> delay_[2];
+    std::size_t         writeIndex_ = 0;
+
+    /// Monotonic deque over the window's linked peaks: front is the maximum.
+    /// Ring-buffered indices; capacity lookahead_ + 1.
+    std::vector<double>     windowPeaks_;
+    std::vector<FrameCount> dequeFrames_;
+    std::vector<double>     dequeValues_;
+    std::size_t             dequeHead_ = 0;
+    std::size_t             dequeTail_ = 0;
+    FrameCount              frameClock_ = 0;
 };
 
 /// Downward gate: linked peak detector opens at threshold, holds, then

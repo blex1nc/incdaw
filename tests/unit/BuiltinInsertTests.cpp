@@ -7,6 +7,7 @@
 #include "doctest.h"
 
 #include "engine/dsp/effects/BuiltinEffects.h"
+#include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
 #include "engine/transport/TempoMap.h"
 #include "project/Model.h"
@@ -138,17 +139,26 @@ TEST_CASE("builtin parameters register into the automation registry like a plugi
 TEST_CASE("every catalogued effect constructs, prepares and carries the shared interface")
 {
     for (const engine::dsp::BuiltinEffectInfo& info : engine::dsp::builtinEffects()) {
-        auto node = engine::dsp::makeBuiltinEffect(info.uid);
+        auto node = engine::dsp::makeBuiltinEffect(info.uid, 48000.0);
         REQUIRE_MESSAGE(node != nullptr, info.uid);
 
         node->prepare(48000.0, 512);
 
         CHECK(node->parameterSink() != nullptr);
         CHECK(node->stateIO() != nullptr);
-        CHECK(node->latencyFrames() == 0);
+
+        // Only the lookahead limiter buys latency; everything else is free,
+        // and delay compensation is told about the one that is not.
+        if (std::string{info.uid} == "incdaw.limiterla")
+            CHECK(node->latencyFrames()
+                  == static_cast<engine::FrameCount>(
+                         engine::dsp::LookaheadLimiterEffect::lookaheadMilliseconds * 0.001
+                         * 48000.0));
+        else
+            CHECK(node->latencyFrames() == 0);
     }
 
-    CHECK(engine::dsp::makeBuiltinEffect("incdaw.nope") == nullptr);
+    CHECK(engine::dsp::makeBuiltinEffect("incdaw.nope", 48000.0) == nullptr);
 }
 
 namespace {
@@ -172,6 +182,24 @@ double decodedValue(engine::StateIO& state, std::uint32_t parameterId)
 }
 
 } // namespace
+
+TEST_CASE("a lookahead limiter insert reports its window as graph latency")
+{
+    project::EntityId slotId;
+    project::Project  project = projectWithMasterInsert("incdaw.limiterla", slotId);
+    project.addPattern("P");
+
+    const engine::TempoMap map{120.0, 48000.0};
+
+    const auto compiled =
+        project::compileProjectGraph(project, map, project::GraphCompileOptions{});
+    REQUIRE(compiled);
+    CHECK(compiled.warnings.empty());
+
+    // The same door a hosted plugin's latency walks through (Phase 13 §8):
+    // the node reports, the graph accounts.
+    CHECK(compiled.graph->latencyFrames() == 96);
+}
 
 TEST_CASE("the compiled graph exposes an insert's parameter sink, and writes land")
 {
