@@ -72,9 +72,22 @@ reference (docs/FL2026_GAP.md holds the full analysis and status table).
   that survive redo; asset import is now one shared helper
   (`app::AudioAssetImport`) rather than a copy per command.
 
+- **Audio Unit hosting** (`platform::AudioUnitHost`, `plugins::AudioUnitInstance`):
+  macOS's own plugin format, hosted as effects. Components are enumerated
+  from the system registry — no scan, no plugin code run — and appear in
+  the mixer's Add Insert menu beside the scanned CLAP plugins. Stereo
+  float in-place rendering, parameters, reported latency into the existing
+  PDC, ClassInfo state through the same StateIO seam project files
+  already use, and the format's generic editor view.
+- **`plugins::HostedPlugin`**: the interface the second format forced.
+  PluginNode, the instance manager, delay compensation, plugin state
+  files and the shell's editor windows are written against it; CLAP and
+  AU are two implementations of it and nothing above the interface knows
+  which is which.
+
 **Tests**
 
-- 483 → 575 cases; every feature carries its own quality gates
+- 483 → 580 cases; every feature carries its own quality gates
   (calibrated LUFS, analytic sidechain levels, WSOLA click preservation,
   chord-theory pins, format round-trips and the v1.5 fixture).
 

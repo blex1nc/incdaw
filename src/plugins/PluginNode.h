@@ -1,7 +1,7 @@
 #pragma once
 
 #include "engine/graph/Node.h"
-#include "plugins/clap/ClapLibrary.h"
+#include "plugins/HostedPlugin.h"
 
 #include <cstring>
 #include <memory>
@@ -24,7 +24,7 @@ namespace incdaw::plugins {
 /// untouched rather than handing the plugin two aliases of one buffer.
 class PluginNode final : public engine::Node {
 public:
-    explicit PluginNode(ClapInstance* instance) noexcept : instance_(instance) {}
+    explicit PluginNode(HostedPlugin* instance) noexcept : instance_(instance) {}
 
     void process(const engine::ProcessContext& context) noexcept override
     {
@@ -74,7 +74,7 @@ public:
     }
 
 private:
-    ClapInstance* instance_ = nullptr;
+    HostedPlugin* instance_ = nullptr;
 };
 
 } // namespace incdaw::plugins

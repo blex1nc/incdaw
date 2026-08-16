@@ -3,6 +3,7 @@
 #include "engine/core/LockFreeQueue.h"
 #include "engine/graph/ParameterSink.h"
 #include "engine/graph/StateIO.h"
+#include "plugins/HostedPlugin.h"
 #include "platform/SharedLibrary.h"
 #include "plugins/PluginParameterInfo.h"
 
@@ -74,7 +75,7 @@ private:
 /// As an engine::StateIO it captures and restores the plugin's opaque state
 /// blob through CLAP_EXT_STATE — main-thread calls, used by project save and
 /// load (docs/PLUGIN_HOST.md §6).
-class ClapInstance final : public engine::ParameterSink, public engine::StateIO {
+class ClapInstance final : public HostedPlugin {
 public:
     ~ClapInstance() override;
 
@@ -85,7 +86,7 @@ public:
     /// the host's; the plugin sees them as one input and one output port.
     /// Parameter values queued since the previous call are delivered first,
     /// in the block's input event list.
-    [[nodiscard]] bool process(float* left, float* right, std::uint32_t frames) noexcept;
+    [[nodiscard]] bool process(float* left, float* right, std::uint32_t frames) noexcept override;
 
     /// Queues one PLAIN value for delivery in the next process() block.
     /// Realtime-safe: a lock-free push, no allocation. A full queue drops the
@@ -94,7 +95,7 @@ public:
 
     /// The automatable parameters discovered at creation (CLAP_EXT_PARAMS),
     /// in plain terms. Empty for a plugin without the extension.
-    [[nodiscard]] const std::vector<PluginParameterInfo>& parameters() const noexcept
+    [[nodiscard]] const std::vector<PluginParameterInfo>& parameters() const noexcept override
     {
         return parameters_;
     }
@@ -103,7 +104,7 @@ public:
     /// creation, in frames. 0 for a plugin without the extension. Feeds
     /// PluginNode::latencyFrames, and from there the graph's existing delay
     /// compensation (docs/AUDIO_ENGINE.md §7).
-    [[nodiscard]] std::uint32_t latencyFrames() const noexcept { return latency_; }
+    [[nodiscard]] std::uint32_t latencyFrames() const noexcept override { return latency_; }
 
     // ── The editor (CLAP_EXT_GUI, docs/PLUGIN_HOST.md §7) ────────────────
     // Main-thread only, like all lifecycle calls. `parentView` is an NSView*
@@ -111,15 +112,16 @@ public:
     // the CLAP window handle is a void* anyway.
 
     /// True when the plugin offers an embeddable Cocoa editor.
-    [[nodiscard]] bool hasEditor() const noexcept;
+    [[nodiscard]] bool hasEditor() const noexcept override;
 
     /// Creates the editor embedded in `parentView` and reports the plugin's
     /// size. False leaves no editor behind, whichever step refused.
-    [[nodiscard]] bool openEditor(void* parentView, std::uint32_t& width, std::uint32_t& height);
+    [[nodiscard]] bool openEditor(void* parentView, std::uint32_t& width,
+                                  std::uint32_t& height) override;
 
     /// Destroys the editor if one is open. Safe to call twice; called by the
     /// destructor, so a closing window and a dying instance cannot double-free.
-    void closeEditor() noexcept;
+    void closeEditor() noexcept override;
 
     [[nodiscard]] bool isEditorOpen() const noexcept { return editorOpen_; }
 

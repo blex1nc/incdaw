@@ -17,7 +17,8 @@ add_library(incdaw_platform STATIC
     platform/ChildProcess.cpp
     platform/macos/CoreAudioDevice.cpp
     platform/macos/CoreMidiDevice.cpp
-    platform/macos/HostTime.cpp)
+    platform/macos/HostTime.cpp
+    platform/macos/AudioUnitHost.mm)
 target_include_directories(incdaw_platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_platform PRIVATE incdaw_warnings)
 
@@ -26,7 +27,15 @@ if(APPLE)
         "-framework CoreAudio"
         "-framework CoreMIDI"
         "-framework AudioToolbox"
+        "-framework CoreAudioKit"
+        "-framework AppKit"
         "-framework CoreFoundation")
+
+    # ARC for the one Objective-C++ file in this layer: the Audio Unit host
+    # holds an AppKit view for the generic editor. The C++ around it is
+    # unaffected — ARC is per translation unit.
+    set_source_files_properties(platform/macos/AudioUnitHost.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 
 # ── engine/ : realtime core. Knows nothing above it, no OS symbols ────────────
@@ -91,7 +100,8 @@ add_library(incdaw_plugins STATIC
     plugins/PluginScan.cpp
     plugins/PluginRegistry.cpp
     plugins/PluginInstanceManager.cpp
-    plugins/clap/ClapLibrary.cpp)
+    plugins/clap/ClapLibrary.cpp
+    plugins/au/AudioUnitInstance.cpp)
 target_include_directories(incdaw_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # The CLAP C ABI (third_party/clap, MIT, D-027). PUBLIC because the host's

@@ -23,6 +23,7 @@
 #include "app/commands/MidiMappingCommands.h"
 #include "app/commands/RecordingCommands.h"
 #include "engine/AudioEngine.h"
+#include "platform/AudioUnitHost.h"
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
 #include "plugins/PluginRegistry.h"
@@ -243,11 +244,30 @@ std::filesystem::path incdawSupportDirectory()
     // plugin, by display name. The view knows menus, not catalogues.
     NSMutableArray<NSDictionary*>* available = [NSMutableArray array];
     for (const plugins::PluginRegistry::Located& located : _pluginRegistry.plugins()) {
+        const plugins::PluginIdentifier identifier{plugins::Format::clap, located.plugin->id};
+
         [available addObject:@{
-            @"uid":  @(located.plugin->id.c_str()),
+            @"id":   @(identifier.toString().c_str()),
             @"name": @(located.plugin->name.empty() ? located.plugin->id.c_str()
                                                     : located.plugin->name.c_str()),
         }];
+    }
+
+    // Audio Units need no scan: the system's component registry IS their
+    // catalogue, and enumerating it runs no plugin code (docs/PLUGIN_HOST.md
+    // §3). Instruments are left out — an insert slot is an effect.
+    for (const platform::AudioUnitDescription& unit : platform::scanAudioUnits()) {
+        if (unit.isInstrument)
+            continue;
+
+        const plugins::PluginIdentifier identifier{plugins::Format::audioUnit, unit.uid};
+
+        NSString* label = unit.manufacturer.empty()
+                              ? @(unit.name.c_str())
+                              : [NSString stringWithFormat:@"%s — %s", unit.name.c_str(),
+                                                           unit.manufacturer.c_str()];
+
+        [available addObject:@{@"id": @(identifier.toString().c_str()), @"name": label}];
     }
     _availableInserts = available;
     _editorWindows    = [NSMutableDictionary dictionary];
@@ -1166,11 +1186,30 @@ std::filesystem::path incdawSupportDirectory()
 
     NSMutableArray<NSDictionary*>* available = [NSMutableArray array];
     for (const plugins::PluginRegistry::Located& located : _pluginRegistry.plugins()) {
+        const plugins::PluginIdentifier identifier{plugins::Format::clap, located.plugin->id};
+
         [available addObject:@{
-            @"uid":  @(located.plugin->id.c_str()),
+            @"id":   @(identifier.toString().c_str()),
             @"name": @(located.plugin->name.empty() ? located.plugin->id.c_str()
                                                     : located.plugin->name.c_str()),
         }];
+    }
+
+    // Audio Units need no scan: the system's component registry IS their
+    // catalogue, and enumerating it runs no plugin code (docs/PLUGIN_HOST.md
+    // §3). Instruments are left out — an insert slot is an effect.
+    for (const platform::AudioUnitDescription& unit : platform::scanAudioUnits()) {
+        if (unit.isInstrument)
+            continue;
+
+        const plugins::PluginIdentifier identifier{plugins::Format::audioUnit, unit.uid};
+
+        NSString* label = unit.manufacturer.empty()
+                              ? @(unit.name.c_str())
+                              : [NSString stringWithFormat:@"%s — %s", unit.name.c_str(),
+                                                           unit.manufacturer.c_str()];
+
+        [available addObject:@{@"id": @(identifier.toString().c_str()), @"name": label}];
     }
     _availableInserts           = available;
     self.mixer.availableInserts = available;
@@ -1194,7 +1233,7 @@ std::filesystem::path incdawSupportDirectory()
         return;
     }
 
-    plugins::ClapInstance* instance =
+    plugins::HostedPlugin* instance =
         _pluginInstances != nullptr ? _pluginInstances->instanceFor(slotKey) : nullptr;
 
     if (instance == nullptr || !instance->hasEditor()) {
@@ -1268,7 +1307,7 @@ std::filesystem::path incdawSupportDirectory()
     // The instance may already be gone when the slot was removed first; the
     // manager answers nullptr then, and there is nothing left to close.
     if (_pluginInstances != nullptr)
-        if (plugins::ClapInstance* instance = _pluginInstances->instanceFor(slotKey))
+        if (plugins::HostedPlugin* instance = _pluginInstances->instanceFor(slotKey))
             instance->closeEditor();
 }
 

@@ -50,7 +50,7 @@ std::vector<std::uint8_t> gainBlob(double gain)
     return blob;
 }
 
-float processOnes(plugins::ClapInstance& instance)
+float processOnes(plugins::HostedPlugin& instance)
 {
     std::vector<float> left(blockSize, 1.0f);
     std::vector<float> right(blockSize, 1.0f);
@@ -89,7 +89,7 @@ TEST_CASE("the same slot gets the same instance across rebuilds, live state inta
     auto first = manager.createInsert(7, harness.plugin(gainUid), 48000.0, blockSize, error);
     REQUIRE(first != nullptr);
 
-    plugins::ClapInstance* instance = manager.instanceFor(7);
+    plugins::HostedPlugin* instance = manager.instanceFor(7);
     REQUIRE(instance != nullptr);
 
     // "The user tweaked the plugin": its gain becomes 2.0, live.
@@ -130,7 +130,7 @@ TEST_CASE("changed activation terms recreate the instance but carry its state")
     std::string error;
     REQUIRE(manager.createInsert(9, harness.plugin(gainUid), 48000.0, blockSize, error));
 
-    plugins::ClapInstance* before = manager.instanceFor(9);
+    plugins::HostedPlugin* before = manager.instanceFor(9);
     REQUIRE(before != nullptr);
 
     const auto blob = gainBlob(2.0);
@@ -140,7 +140,7 @@ TEST_CASE("changed activation terms recreate the instance but carry its state")
     // but the plugin must not audibly reset.
     REQUIRE(manager.createInsert(9, harness.plugin(gainUid), 44100.0, blockSize, error));
 
-    plugins::ClapInstance* after = manager.instanceFor(9);
+    plugins::HostedPlugin* after = manager.instanceFor(9);
     REQUIRE(after != nullptr);
     CHECK(manager.liveInstanceCount() == 1);
 
@@ -157,7 +157,7 @@ TEST_CASE("a slot whose plugin changed starts fresh")
     std::string error;
     REQUIRE(manager.createInsert(5, harness.plugin(gainUid), 48000.0, blockSize, error));
 
-    plugins::ClapInstance* gain = manager.instanceFor(5);
+    plugins::HostedPlugin* gain = manager.instanceFor(5);
     REQUIRE(gain != nullptr);
 
     const auto blob = gainBlob(2.0);
@@ -167,7 +167,7 @@ TEST_CASE("a slot whose plugin changed starts fresh")
     // one plugin's blob means nothing to another.
     REQUIRE(manager.createInsert(5, harness.plugin(latencyUid), 48000.0, blockSize, error));
 
-    plugins::ClapInstance* latent = manager.instanceFor(5);
+    plugins::HostedPlugin* latent = manager.instanceFor(5);
     REQUIRE(latent != nullptr);
     CHECK(manager.liveInstanceCount() == 1);
 

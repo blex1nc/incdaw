@@ -435,7 +435,7 @@ enum class MixerDrag { none, fader, pan };
                                                     action:@selector(addInsertFromMenu:)
                                              keyEquivalent:@""];
         item.target            = self;
-        item.representedObject = @{@"node": @(nodeId.value()), @"uid": plugin[@"uid"]};
+        item.representedObject = @{@"node": @(nodeId.value()), @"id": plugin[@"id"]};
     }
 
     if (self.availableInserts.count == 0)
@@ -558,8 +558,11 @@ enum class MixerDrag { none, fader, pan };
     NSDictionary* info = item.representedObject;
 
     plugins::PluginIdentifier plugin;
-    plugin.format = plugins::Format::clap;
-    plugin.uid    = [info[@"uid"] UTF8String];
+
+    // "clap:com.acme.reverb", "au:aufx:dely:appl" — the round-trippable form
+    // the project file stores. The menu no longer assumes a format.
+    if (!plugins::PluginIdentifier::fromString([info[@"id"] UTF8String], plugin))
+        return;
 
     if (_registry->execute(std::make_unique<app::AddInsertCommand>(
             project::EntityId{[info[@"node"] unsignedLongLongValue]}, std::move(plugin))))
