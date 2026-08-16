@@ -22,6 +22,14 @@ namespace incdaw::app { class Browser; }
 /// Double-click on something that is not a folder.
 @property (nonatomic, copy) void (^onActivate)(NSString* path);
 
+/// A single click on audio. FL's browser auditions on click and so does
+/// this one: a browser you have to double-click to hear is a file manager.
+@property (nonatomic, copy) void (^onPreview)(NSString* path);
+
+/// Preview asked to stop — a click on something that is not audio, or the
+/// context menu's Stop Preview.
+@property (nonatomic, copy) void (^onStopPreview)(void);
+
 /// Roots, favourites or recents changed and want writing back to disk.
 @property (nonatomic, copy) void (^onSettingsChanged)(void);
 

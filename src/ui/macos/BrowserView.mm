@@ -110,6 +110,7 @@ std::filesystem::path pathOf(NSString* text)
     _outline.dataSource       = self;
     _outline.delegate         = self;
     _outline.target           = self;
+    _outline.action           = @selector(rowClicked:);
     _outline.doubleAction     = @selector(rowDoubleClicked:);
 
     NSTableColumn* column = [[NSTableColumn alloc] initWithIdentifier:@"name"];
@@ -336,6 +337,26 @@ std::filesystem::path pathOf(NSString* text)
     return row < 0 ? nil : [_outline itemAtRow:row];
 }
 
+/// A single click. Audio auditions; anything else stops whatever was
+/// auditioning, so that clicking away is the same gesture as stopping.
+- (void)rowClicked:(id)sender
+{
+    (void)sender;
+
+    INCDAWBrowserNode* node = [self clickedNode];
+
+    if (node == nil || node.missing || node.path == nil
+        || node.kind != app::BrowserItemKind::audio) {
+        if (self.onStopPreview != nil)
+            self.onStopPreview();
+
+        return;
+    }
+
+    if (self.onPreview != nil)
+        self.onPreview(node.path);
+}
+
 - (void)rowDoubleClicked:(id)sender
 {
     (void)sender;
@@ -363,6 +384,20 @@ std::filesystem::path pathOf(NSString* text)
     [menu removeAllItems];
 
     INCDAWBrowserNode* node = [self clickedNode];
+
+    if (node != nil && node.path != nil && node.kind == app::BrowserItemKind::audio) {
+        NSMenuItem* previewItem = [menu addItemWithTitle:@"Preview"
+                                                  action:@selector(previewClicked:)
+                                           keyEquivalent:@""];
+        previewItem.target = self;
+
+        NSMenuItem* stopItem = [menu addItemWithTitle:@"Stop Preview"
+                                               action:@selector(stopPreviewClicked:)
+                                        keyEquivalent:@""];
+        stopItem.target = self;
+
+        [menu addItem:[NSMenuItem separatorItem]];
+    }
 
     if (node != nil && node.path != nil) {
         const bool favourite = _browser->isFavourite(pathOf(node.path));
@@ -397,6 +432,24 @@ std::filesystem::path pathOf(NSString* text)
                                               action:@selector(refresh:)
                                        keyEquivalent:@""];
     refreshItem.target = self;
+}
+
+- (void)previewClicked:(id)sender
+{
+    (void)sender;
+
+    INCDAWBrowserNode* node = [self clickedNode];
+
+    if (node != nil && !node.missing && node.path != nil && self.onPreview != nil)
+        self.onPreview(node.path);
+}
+
+- (void)stopPreviewClicked:(id)sender
+{
+    (void)sender;
+
+    if (self.onStopPreview != nil)
+        self.onStopPreview();
 }
 
 - (void)toggleFavourite:(id)sender

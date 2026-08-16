@@ -236,12 +236,20 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
                            segment.length, segment.startFrame, &segmentMidi_);
         }
 
-        if (output.hasNonFiniteSamples()) {
-            // Contain it here rather than letting it reach the speakers or
-            // poison every downstream buffer next block.
-            output.clear();
-            nonFiniteBlocks_.fetch_add(1, std::memory_order_relaxed);
-        }
+    }
+
+    // The Browser's preview, mixed beside the project rather than into it: it
+    // sounds with the transport stopped, and auditioning a sample never
+    // recompiles a graph.
+    audition_.render(output);
+
+    // Containment covers the preview too, which is why it sits outside the
+    // graph branch: a float WAV can hold a NaN, and one NaN reaching the
+    // device silences the master with a symptom that looks nothing like a
+    // browser click (docs/AUDIO_ENGINE.md §10).
+    if (output.hasNonFiniteSamples()) {
+        output.clear();
+        nonFiniteBlocks_.fetch_add(1, std::memory_order_relaxed);
     }
 
     // The Audio Logger sees exactly what the device is about to play —

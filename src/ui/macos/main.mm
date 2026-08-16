@@ -426,6 +426,14 @@ std::filesystem::path incdawSupportDirectory()
         [weakSelfForBrowser saveBrowserSettings];
     };
 
+    self.browserPane.onPreview = ^(NSString* path) {
+        [weakSelfForBrowser browserPreview:path];
+    };
+
+    self.browserPane.onStopPreview = ^{
+        [weakSelfForBrowser stopBrowserPreview];
+    };
+
     NSSplitView* workspace = [[NSSplitView alloc] initWithFrame:body];
     workspace.vertical         = YES;
     workspace.dividerStyle     = NSSplitViewDividerStyleThin;
@@ -1279,6 +1287,46 @@ std::filesystem::path incdawSupportDirectory()
         NSLog(@"INCDAW: could not save browser settings: %s", error.c_str());
 }
 
+/// Auditioning a sample from the Browser.
+///
+/// The decode goes through the shell's SampleCache, so previewing a file that
+/// a channel already uses costs nothing and previewing one repeatedly costs
+/// nothing twice. The engine holds only a raw pointer into what the cache
+/// owns; housekeeping releases replaced buffers once the block counter has
+/// moved past them (engine/audio/AuditionPlayer.h).
+- (void)browserPreview:(NSString*)path
+{
+    if (path == nil || !_audioReady)
+        return;
+
+    const std::filesystem::path chosen{path.UTF8String};
+
+    if (!app::Browser::canDecodeAudio(chosen)) {
+        _lastGraphError = [NSString stringWithFormat:@"Cannot preview %s — WAV only so far",
+                                                     chosen.filename().string().c_str()];
+        return;
+    }
+
+    std::string error;
+    const std::shared_ptr<const engine::AudioFileData> audio = _sampleCache->load(chosen, error);
+
+    if (audio == nullptr) {
+        _lastGraphError = @(error.c_str());
+        return;
+    }
+
+    _audio->audition().play(audio, _audio->sampleRate(), 1.0F, _audio->blockCount());
+
+    _browser.noteRecent(chosen);
+    [self saveBrowserSettings];
+}
+
+- (void)stopBrowserPreview
+{
+    if (_audio != nullptr)
+        _audio->audition().stop();
+}
+
 /// What double-clicking in the Browser means.
 ///
 /// Projects open and MIDI files import. Audio is remembered as recent and
@@ -1782,6 +1830,10 @@ std::filesystem::path incdawSupportDirectory()
         return;
 
     _audio->collectRetiredGraphs();
+
+    // The preview's decoded audio, released on the same terms as a retired
+    // graph: the audio thread held a raw pointer into it.
+    _audio->audition().collect(_audio->blockCount(), !_audio->isRunning());
 
     if (_learnArmed) {
         const std::uint64_t packed = _audio->midiInput().lastControlChange();

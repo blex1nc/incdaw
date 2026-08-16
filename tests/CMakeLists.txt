@@ -53,6 +53,7 @@ add_executable(incdaw_tests
     unit/InputMonitorTests.cpp
     unit/LoopRecordingTests.cpp
     unit/AudioLoggerTests.cpp
+    unit/AuditionTests.cpp
     unit/PluginHostTests.cpp
     unit/PluginRegistryTests.cpp
     unit/PluginInsertTests.cpp
