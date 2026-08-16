@@ -43,4 +43,13 @@ const std::vector<BuiltinInstrumentInfo>& builtinInstruments()
     return infos;
 }
 
+const BuiltinInstrumentInfo* findBuiltinInstrument(const std::string& uid)
+{
+    for (const BuiltinInstrumentInfo& info : builtinInstruments())
+        if (uid == info.uid)
+            return &info;
+
+    return nullptr;
+}
+
 } // namespace incdaw::engine

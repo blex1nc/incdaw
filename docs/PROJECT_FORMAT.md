@@ -83,6 +83,7 @@ requires a migration step.
 | 1.2 | 8b | Channels gained `stepKey`, the pitch a step sequencer step is written at. Additive. |
 | 1.3 | 14 | Channels gained `samplerZones[]`, the builtin sampler's program — each zone names an audio asset by id plus key/velocity range, slice, sustain loop, crossfade, reverse and gain. Additive. |
 | 1.4 | 16 | The project gained `midiMappings[]` — hardware controls bound to parameters by registry key and target entity, with a normalised (possibly inverted) output range. Additive. |
+| 1.5 | UI build-out 4 | Channels gained `instrumentParameters[]` — stored instrument parameter values ({id, value}, plain units), applied through the instrument's sink at every compile (D-034). Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -119,6 +120,11 @@ asset) are kept permanently beside the earlier ones.
 **Reading a 1.3 file.** Purely additive: no `midiMappings`, read back empty.
 `tests/fixtures/v1.4/Fixture.incdaw` (frozen: one mapping, CC 74 to the master
 node's volume) is kept permanently.
+
+**Reading a 1.4 file.** Purely additive: no `instrumentParameters`, read back
+empty — those instruments played at their defaults and still do.
+`tests/fixtures/v1.5/Fixture.incdaw` (frozen: a sampler channel carrying two
+stored parameter values) is kept permanently.
 
 ---
 

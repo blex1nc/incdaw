@@ -39,4 +39,10 @@ namespace incdaw::app     { class CommandRegistry; }
 /// Called when the user asks to start or stop playback (space bar).
 @property (nonatomic, copy) void (^onTransportToggle)(void);
 
+/// Context menu: the generic parameter panel for the channel's instrument.
+@property (nonatomic, copy) void (^onEditInstrument)(unsigned long long);
+
+/// Context menu: the sampler zone editor for the channel.
+@property (nonatomic, copy) void (^onEditSamplerZones)(unsigned long long);
+
 @end

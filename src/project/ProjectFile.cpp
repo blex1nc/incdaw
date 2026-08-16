@@ -307,6 +307,15 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         }
         json.set("samplerZones", std::move(zones));
 
+        Json parameters = Json::array();
+        for (const ChannelInstrumentParameter& parameter : channel.instrumentParameters) {
+            Json entry;
+            entry.set("id", static_cast<std::int64_t>(parameter.parameterId));
+            entry.set("value", parameter.value);
+            parameters.append(std::move(entry));
+        }
+        json.set("instrumentParameters", std::move(parameters));
+
         channels.append(std::move(json));
     }
     document.set("channels", std::move(channels));
@@ -660,6 +669,13 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
             channel.samplerZones.push_back(zone);
         }
 
+        for (const Json& parameterJson : json["instrumentParameters"].elements()) {
+            ChannelInstrumentParameter parameter;
+            parameter.parameterId = static_cast<std::uint32_t>(parameterJson["id"].asInt(0));
+            parameter.value       = parameterJson["value"].asDouble(0.0);
+            channel.instrumentParameters.push_back(parameter);
+        }
+
         project.channels().push_back(std::move(channel));
     }
 
@@ -872,6 +888,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // document and reads back empty — those projects had no controller
     // bindings.
     if (major == 1 && minor == 3) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.4 -> 1.5. Purely additive: `Channel::instrumentParameters` is absent
+    // from a 1.4 document and reads back empty — those instruments played at
+    // their defaults, and still do.
+    if (major == 1 && minor == 4) {
         result.succeeded = true;
         return result;
     }

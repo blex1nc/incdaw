@@ -2,6 +2,7 @@
 
 #include "engine/dsp/effects/BuiltinEffect.h"
 
+#include <string>
 #include <vector>
 
 namespace incdaw::engine {
@@ -21,5 +22,9 @@ struct BuiltinInstrumentInfo {
 };
 
 [[nodiscard]] const std::vector<BuiltinInstrumentInfo>& builtinInstruments();
+
+/// Catalogue entry for `uid`, or nullptr — the instrument counterpart of
+/// dsp::findBuiltinEffect, consumed by the instrument parameter panel.
+[[nodiscard]] const BuiltinInstrumentInfo* findBuiltinInstrument(const std::string& uid);
 
 } // namespace incdaw::engine

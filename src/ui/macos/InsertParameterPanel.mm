@@ -5,11 +5,6 @@
 #include <algorithm>
 #include <cmath>
 
-/// AppKit's default coordinate system grows upward; a parameter list reads
-/// downward. Flipping the document view keeps row zero at the top.
-@interface INCDAWFlippedView : NSView
-@end
-
 @implementation INCDAWFlippedView
 - (BOOL)isFlipped
 {

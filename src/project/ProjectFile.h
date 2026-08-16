@@ -30,7 +30,12 @@ inline constexpr int projectFormatMajor = 1;
 /// 1.4 (Phase 16): the project carries MIDI controller mappings — hardware
 /// controls bound to parameters by registry key. Additive: earlier files
 /// have none.
-inline constexpr int projectFormatMinor = 4;
+///
+/// 1.5 (UI build-out increment 4): a channel carries stored instrument
+/// parameter values, applied through the instrument's sink at every compile
+/// (docs/DECISIONS.md D-034). Additive: earlier files have none and their
+/// instruments play at catalogue defaults, which is what they always did.
+inline constexpr int projectFormatMinor = 5;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

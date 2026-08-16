@@ -20,8 +20,11 @@
 #include "app/CommandRegistry.h"
 #include "app/ProjectSession.h"
 #include "app/Version.h"
+#include "app/commands/ChannelCommands.h"
 #include "app/commands/MidiMappingCommands.h"
 #include "app/commands/RecordingCommands.h"
+#include "app/commands/SamplerCommands.h"
+#include "engine/instrument/BuiltinInstruments.h"
 #include "engine/AudioEngine.h"
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
@@ -214,6 +217,18 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// re-resolve through _live on every move.
     NSMutableDictionary<NSNumber*, NSWindow*>* _panelWindows;
     NSMutableDictionary<NSNumber*, id>*        _panelObservers;
+
+    /// The sampler zone editor: one window, over one channel at a time. The
+    /// per-row control references live in _zoneRows so a field's action can
+    /// read its whole row; content is rebuilt from the model on every change.
+    NSWindow*                     _zoneWindow;
+    unsigned long long            _zoneChannelKey;
+    NSMutableArray<NSDictionary*>* _zoneRows;
+
+    /// The MIDI mapping list: one window, refreshed on every rebuild while
+    /// open (learn and forget change mappings from elsewhere).
+    NSWindow*                  _mappingWindow;
+    NSMutableArray<NSNumber*>* _mappingRowIds;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -485,6 +500,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     self.mixer.onTransportToggle       = ^{ [weakAudioSelf toggleTransport]; };
 
     self.playlist.onSeekTick = ^(long long tick) { [weakAudioSelf seekToTick:tick]; };
+
+    self.channelRack.onEditInstrument = ^(unsigned long long channelKey) {
+        [weakAudioSelf openInstrumentPanelForChannel:channelKey];
+    };
+    self.channelRack.onEditSamplerZones = ^(unsigned long long channelKey) {
+        [weakAudioSelf openZoneEditorForChannel:channelKey];
+    };
 
     // Drives the playhead and reclaims retired graphs. Both are non-realtime
     // work that must happen off the audio thread; 30 Hz is smooth enough for a
@@ -1039,12 +1061,26 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                 == slotKeys.end())
                 [_editorWindows[key] close];
 
-        // Parameter panels over vanished slots have no instance to notify;
-        // they just close.
+        // Parameter panels over vanished entities have no instance to notify;
+        // they just close. Panels are keyed by insert slot OR channel (the
+        // id space is shared), so both populations are valid keys.
+        std::vector<std::uint64_t> panelKeys = slotKeys;
+        for (const project::Channel& channel : _project->channels())
+            panelKeys.push_back(channel.id.value());
+
         for (NSNumber* key in _panelWindows.allKeys)
-            if (std::find(slotKeys.begin(), slotKeys.end(), key.unsignedLongLongValue)
-                == slotKeys.end())
+            if (std::find(panelKeys.begin(), panelKeys.end(), key.unsignedLongLongValue)
+                == panelKeys.end())
                 [_panelWindows[key] close];
+
+        // The zone editor follows its channel; the mapping list follows the
+        // mappings (learn and forget mutate them from elsewhere).
+        if (_zoneWindow != nil
+            && _project->findChannel(project::EntityId{_zoneChannelKey}) == nullptr)
+            [_zoneWindow close];
+
+        if (_mappingWindow != nil)
+            [self refreshMappingListContent];
 
         _pluginInstances->retainOnlyInstances(slotKeys);
     }
@@ -1369,6 +1405,502 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     [_panelObservers removeObjectForKey:key];
     [_panelWindows removeObjectForKey:key];
+}
+
+// ── The instrument panel, the zone editor, the mapping list ──────────────────
+
+/// The channel's instrument as a catalogue entry: the builtin it names, or
+/// the reference synth for a channel with no instrument yet (which is what
+/// the compiler's default factory plays for it).
+- (const engine::BuiltinInstrumentInfo*)instrumentInfoForChannel:(const project::Channel&)channel
+{
+    if (channel.instrument.uid.empty())
+        return engine::findBuiltinInstrument(plugins::builtinSimpleSynth().uid);
+
+    if (channel.instrument.format != plugins::Format::builtin)
+        return nullptr;
+
+    return engine::findBuiltinInstrument(channel.instrument.uid);
+}
+
+- (void)openInstrumentPanelForChannel:(unsigned long long)channelKey
+{
+    NSNumber* key = @(channelKey);
+
+    if (NSWindow* existing = _panelWindows[key]) {
+        [existing makeKeyAndOrderFront:nil];
+        return;
+    }
+
+    const project::Channel* channel = _project->findChannel(project::EntityId{channelKey});
+    if (channel == nullptr) {
+        NSBeep();
+        return;
+    }
+
+    const engine::BuiltinInstrumentInfo* info = [self instrumentInfoForChannel:*channel];
+    if (info == nullptr) {
+        NSBeep();   // a hosted instrument would edit through its own editor
+        return;
+    }
+
+    NSMutableArray<NSDictionary*>* rows = [NSMutableArray array];
+
+    for (std::size_t index = 0; index < info->parameterCount; ++index) {
+        const engine::dsp::EffectParameter& parameter = info->parameters[index];
+
+        // The model is the panel's truth, exactly as it is the compiler's.
+        double value = parameter.defaultValue;
+        for (const project::ChannelInstrumentParameter& stored : channel->instrumentParameters)
+            if (stored.parameterId == parameter.id)
+                value = stored.value;
+
+        [rows addObject:@{
+            @"id":      @(parameter.id),
+            @"name":    @(parameter.name),
+            @"min":     @(parameter.minValue),
+            @"max":     @(parameter.maxValue),
+            @"value":   @(value),
+            @"stepped": @(parameter.stepped),
+        }];
+    }
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+
+    NSString* title = [NSString stringWithFormat:@"%s — %s", channel->name.c_str(),
+                                                 info->displayName];
+
+    NSWindow* window = [INCDAWInsertParameterPanel
+        makePanelWithTitle:title
+                      rows:rows
+                   onWrite:^(std::uint32_t parameterId, double plainValue) {
+                       [weakSelf writeInstrumentParameter:channelKey
+                                              parameterId:parameterId
+                                               plainValue:plainValue];
+                   }];
+
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+
+    _panelWindows[key] = window;
+
+    _panelObservers[key] = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSWindowWillCloseNotification
+                    object:window
+                     queue:nil
+                usingBlock:^(NSNotification*) {
+                    [weakSelf panelWindowClosedForSlotKey:channelKey];
+                }];
+}
+
+/// The undoable half of an instrument slider move: the value lands in the
+/// MODEL (merging, so a drag is one entry) and the rebuild applies it — the
+/// same source-of-truth rule the mixer's fader follows (D-034).
+- (void)writeInstrumentParameter:(unsigned long long)channelKey
+                     parameterId:(std::uint32_t)parameterId
+                      plainValue:(double)plainValue
+{
+    if (_registry->executeMerging(std::make_unique<app::SetInstrumentParameterCommand>(
+            project::EntityId{channelKey}, parameterId, plainValue)))
+        [self rebuildGraph];
+}
+
+// ── The zone editor ──────────────────────────────────────────────────────────
+
+- (NSString*)assetDisplayName:(project::EntityId)assetId
+{
+    for (const project::AudioAsset& asset : _project->audioAssets())
+        if (asset.id == assetId)
+            return @(std::filesystem::path{asset.absolutePath}.stem().string().c_str());
+
+    return @"missing";
+}
+
+- (void)openZoneEditorForChannel:(unsigned long long)channelKey
+{
+    if (_zoneWindow != nil && _zoneChannelKey == channelKey) {
+        [_zoneWindow makeKeyAndOrderFront:nil];
+        return;
+    }
+
+    [_zoneWindow close];
+    _zoneWindow     = nil;
+    _zoneChannelKey = channelKey;
+
+    const project::Channel* channel = _project->findChannel(project::EntityId{channelKey});
+    if (channel == nullptr) {
+        NSBeep();
+        return;
+    }
+
+    NSWindow* window = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(0, 0, 660, 300)
+                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    window.releasedWhenClosed = NO;
+    window.title = [NSString stringWithFormat:@"%s — Sampler Zones", channel->name.c_str()];
+
+    _zoneWindow = window;
+    [self refreshZoneEditorContent];
+
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification
+                                                    object:window
+                                                     queue:nil
+                                                usingBlock:^(NSNotification*) {
+                                                    INCDAWAppDelegate* strongSelf = weakSelf;
+                                                    if (strongSelf != nil
+                                                        && strongSelf->_zoneWindow != nil)
+                                                        strongSelf->_zoneWindow = nil;
+                                                }];
+}
+
+/// Rebuilds the zone list from the model. Every change routes through a
+/// command and back here, so what the window shows is always what the
+/// project holds — clamps included.
+- (void)refreshZoneEditorContent
+{
+    if (_zoneWindow == nil)
+        return;
+
+    const project::Channel* channel =
+        _project->findChannel(project::EntityId{_zoneChannelKey});
+    if (channel == nullptr) {
+        [_zoneWindow close];
+        return;
+    }
+
+    constexpr CGFloat rowHeight = 30.0;
+    constexpr CGFloat width     = 660.0;
+    const CGFloat listHeight    = rowHeight * static_cast<CGFloat>(channel->samplerZones.size());
+    const CGFloat contentHeight = 20 + 24 + listHeight + 24 + 38;
+
+    INCDAWFlippedView* document =
+        [[INCDAWFlippedView alloc] initWithFrame:NSMakeRect(0, 0, width, contentHeight)];
+
+    _zoneRows = [NSMutableArray array];
+
+    // The header row names the columns once.
+    const struct { const char* title; CGFloat x; CGFloat width; } columns[] = {
+        {"Sample", 10, 130},  {"Root", 148, 50},   {"Key lo", 202, 50},
+        {"Key hi", 256, 50},  {"Vel lo", 310, 50}, {"Vel hi", 364, 50},
+        {"Gain", 418, 56},    {"Rev", 482, 40},
+    };
+
+    for (const auto& column : columns) {
+        NSTextField* header = [NSTextField labelWithString:@(column.title)];
+        header.frame        = NSMakeRect(column.x, 4, column.width, 16);
+        header.font         = [NSFont systemFontOfSize:10];
+        header.textColor    = [NSColor secondaryLabelColor];
+        [document addSubview:header];
+    }
+
+    for (std::size_t index = 0; index < channel->samplerZones.size(); ++index) {
+        const project::ChannelSamplerZone& zone = channel->samplerZones[index];
+        const CGFloat y = 24 + rowHeight * static_cast<CGFloat>(index);
+
+        NSTextField* name = [NSTextField labelWithString:[self assetDisplayName:zone.asset]];
+        name.frame         = NSMakeRect(10, y + 5, 130, 18);
+        name.lineBreakMode = NSLineBreakByTruncatingTail;
+        [document addSubview:name];
+
+        NSMutableDictionary* controls = [NSMutableDictionary dictionary];
+
+        const struct { const char* key; CGFloat x; CGFloat width; double value; } fields[] = {
+            {"rootKey", 148, 50, static_cast<double>(zone.rootKey)},
+            {"keyLow", 202, 50, static_cast<double>(zone.keyLow)},
+            {"keyHigh", 256, 50, static_cast<double>(zone.keyHigh)},
+            {"velocityLow", 310, 50, static_cast<double>(zone.velocityLow)},
+            {"velocityHigh", 364, 50, static_cast<double>(zone.velocityHigh)},
+            {"gain", 418, 56, zone.gain},
+        };
+
+        for (const auto& field : fields) {
+            NSTextField* editor =
+                [[NSTextField alloc] initWithFrame:NSMakeRect(field.x, y, field.width, 22)];
+            editor.font        = [NSFont monospacedDigitSystemFontOfSize:11
+                                                                  weight:NSFontWeightRegular];
+            editor.stringValue = [NSString stringWithFormat:@"%g", field.value];
+            editor.tag         = static_cast<NSInteger>(index);
+            editor.target      = self;
+            editor.action      = @selector(zoneFieldChanged:);
+            [document addSubview:editor];
+            controls[@(field.key)] = editor;
+        }
+
+        NSButton* reverse  = [NSButton checkboxWithTitle:@""
+                                                  target:self
+                                                  action:@selector(zoneFieldChanged:)];
+        reverse.frame = NSMakeRect(482, y + 2, 40, 20);
+        reverse.state = zone.reverse ? NSControlStateValueOn : NSControlStateValueOff;
+        reverse.tag   = static_cast<NSInteger>(index);
+        [document addSubview:reverse];
+        controls[@"reverse"] = reverse;
+
+        NSButton* remove = [NSButton buttonWithTitle:@"Remove"
+                                              target:self
+                                              action:@selector(zoneRemovePressed:)];
+        remove.frame         = NSMakeRect(530, y, 90, 24);
+        remove.bezelStyle    = NSBezelStyleRounded;
+        remove.controlSize   = NSControlSizeSmall;
+        remove.tag           = static_cast<NSInteger>(index);
+        [document addSubview:remove];
+
+        [_zoneRows addObject:controls];
+    }
+
+    NSButton* add = [NSButton buttonWithTitle:@"Add Sample Layer…"
+                                       target:self
+                                       action:@selector(zoneAddPressed:)];
+    add.frame = NSMakeRect(10, 24 + listHeight + 8, 160, 26);
+    [document addSubview:add];
+
+    if (channel->samplerZones.empty()) {
+        NSTextField* hint = [NSTextField
+            labelWithString:@"No zones. Add a layer, or use the rack's Load Sample… "
+                            @"to make this channel a sampler first."];
+        hint.frame     = NSMakeRect(180, 24 + listHeight + 12, width - 190, 18);
+        hint.font      = [NSFont systemFontOfSize:11];
+        hint.textColor = [NSColor secondaryLabelColor];
+        [document addSubview:hint];
+    }
+
+    const CGFloat visibleHeight = std::min(contentHeight, 420.0);
+
+    NSScrollView* scroll =
+        [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, width, visibleHeight)];
+    scroll.hasVerticalScroller = contentHeight > 420.0;
+    scroll.documentView        = document;
+
+    [_zoneWindow setContentSize:NSMakeSize(width, visibleHeight)];
+    _zoneWindow.contentView = scroll;
+}
+
+- (void)zoneFieldChanged:(NSControl*)sender
+{
+    const auto index = static_cast<std::size_t>(sender.tag);
+
+    const project::Channel* channel =
+        _project->findChannel(project::EntityId{_zoneChannelKey});
+    if (channel == nullptr || index >= channel->samplerZones.size()
+        || index >= _zoneRows.count)
+        return;
+
+    NSDictionary* controls = _zoneRows[index];
+
+    // The whole row is read back, so one commit can never tear a zone into
+    // a half-old, half-new state.
+    project::ChannelSamplerZone zone = channel->samplerZones[index];
+
+    const auto intField = [&](NSString* key, int low, int high) {
+        NSTextField* field = controls[key];
+        return std::clamp(static_cast<int>(field.integerValue), low, high);
+    };
+
+    zone.rootKey      = intField(@"rootKey", 0, 127);
+    zone.keyLow       = intField(@"keyLow", 0, 127);
+    zone.keyHigh      = intField(@"keyHigh", 0, 127);
+    zone.velocityLow  = intField(@"velocityLow", 1, 127);
+    zone.velocityHigh = intField(@"velocityHigh", 1, 127);
+    zone.gain    = std::clamp(static_cast<NSTextField*>(controls[@"gain"]).doubleValue,
+                              0.0, 4.0);
+    zone.reverse = static_cast<NSButton*>(controls[@"reverse"]).state
+                   == NSControlStateValueOn;
+
+    if (_registry->executeMerging(std::make_unique<app::SetSamplerZoneCommand>(
+            project::EntityId{_zoneChannelKey}, index, zone)))
+        [self rebuildGraph];
+
+    [self refreshZoneEditorContent];
+}
+
+- (void)zoneRemovePressed:(NSButton*)sender
+{
+    if (_registry->execute(std::make_unique<app::RemoveSamplerZoneCommand>(
+            project::EntityId{_zoneChannelKey}, static_cast<std::size_t>(sender.tag))))
+        [self rebuildGraph];
+
+    [self refreshZoneEditorContent];
+}
+
+- (void)zoneAddPressed:(NSButton*)sender
+{
+    (void)sender;
+
+    const project::Channel* channel =
+        _project->findChannel(project::EntityId{_zoneChannelKey});
+    if (channel == nullptr)
+        return;
+
+    NSOpenPanel* panel            = [NSOpenPanel openPanel];
+    panel.canChooseFiles          = YES;
+    panel.canChooseDirectories    = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.allowedContentTypes     = @[ [UTType typeWithFilenameExtension:@"wav"] ];
+    panel.prompt                  = @"Add";
+
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
+        return;
+
+    // A channel that is not a sampler yet gets the whole Load Sample gesture;
+    // a sampler gets a layer appended.
+    std::unique_ptr<app::Command> command;
+    if (channel->instrument == plugins::builtinSampler())
+        command = std::make_unique<app::AddSamplerZoneCommand>(
+            project::EntityId{_zoneChannelKey}, panel.URL.path.UTF8String);
+    else
+        command = std::make_unique<app::LoadSampleCommand>(project::EntityId{_zoneChannelKey},
+                                                           panel.URL.path.UTF8String);
+
+    if (_registry->execute(std::move(command)))
+        [self rebuildGraph];
+
+    [self refreshZoneEditorContent];
+    [self.channelRack setNeedsDisplay:YES];
+}
+
+// ── The mapping list ─────────────────────────────────────────────────────────
+
+- (NSString*)mappingTargetDisplayName:(project::EntityId)target
+{
+    for (const project::MixerNode& node : _project->mixerNodes())
+        if (node.id == target)
+            return @(node.name.c_str());
+
+    for (const project::Channel& channel : _project->channels())
+        if (channel.id == target)
+            return @(channel.name.c_str());
+
+    for (const project::MixerNode& node : _project->mixerNodes())
+        for (const project::PluginSlot& slot : node.inserts)
+            if (slot.id == target)
+                return [self displayNameForSlotKey:target.value()];
+
+    return [NSString stringWithFormat:@"#%llu", target.value()];
+}
+
+- (void)showMidiMappings:(id)sender
+{
+    (void)sender;
+
+    if (_mappingWindow != nil) {
+        [self refreshMappingListContent];
+        [_mappingWindow makeKeyAndOrderFront:nil];
+        return;
+    }
+
+    NSWindow* window = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(0, 0, 460, 240)
+                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    window.releasedWhenClosed = NO;
+    window.title              = @"MIDI Mappings";
+
+    _mappingWindow = window;
+    [self refreshMappingListContent];
+
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification
+                                                    object:window
+                                                     queue:nil
+                                                usingBlock:^(NSNotification*) {
+                                                    INCDAWAppDelegate* strongSelf = weakSelf;
+                                                    if (strongSelf != nil)
+                                                        strongSelf->_mappingWindow = nil;
+                                                }];
+}
+
+- (void)refreshMappingListContent
+{
+    if (_mappingWindow == nil)
+        return;
+
+    constexpr CGFloat rowHeight = 28.0;
+    constexpr CGFloat width     = 460.0;
+
+    const auto& mappings = _project->midiMappings();
+
+    const CGFloat listHeight =
+        std::max<CGFloat>(rowHeight * static_cast<CGFloat>(mappings.size()), rowHeight);
+    const CGFloat contentHeight = 16 + listHeight;
+
+    INCDAWFlippedView* document =
+        [[INCDAWFlippedView alloc] initWithFrame:NSMakeRect(0, 0, width, contentHeight)];
+
+    _mappingRowIds = [NSMutableArray array];
+
+    if (mappings.empty()) {
+        NSTextField* hint =
+            [NSTextField labelWithString:@"No mappings. Right-click a mixer strip and "
+                                         @"choose MIDI Learn to create one."];
+        hint.frame     = NSMakeRect(10, 12, width - 20, 18);
+        hint.textColor = [NSColor secondaryLabelColor];
+        [document addSubview:hint];
+    }
+
+    for (std::size_t index = 0; index < mappings.size(); ++index) {
+        const project::MidiMapping& mapping = mappings[index];
+        const CGFloat y = 8 + rowHeight * static_cast<CGFloat>(index);
+
+        NSString* channelText = mapping.midiChannel < 0
+            ? @"any"
+            : [NSString stringWithFormat:@"%d", mapping.midiChannel + 1];
+
+        NSTextField* label = [NSTextField
+            labelWithString:[NSString stringWithFormat:@"CC %d (ch %@)  →  %s  ·  %@",
+                                                       mapping.controller, channelText,
+                                                       mapping.parameterKey.c_str(),
+                                                       [self mappingTargetDisplayName:
+                                                                 mapping.targetEntity]]];
+        label.frame         = NSMakeRect(10, y + 4, width - 110, 18);
+        label.font          = [NSFont monospacedDigitSystemFontOfSize:11
+                                                               weight:NSFontWeightRegular];
+        label.lineBreakMode = NSLineBreakByTruncatingTail;
+        [document addSubview:label];
+
+        NSButton* remove = [NSButton buttonWithTitle:@"Remove"
+                                              target:self
+                                              action:@selector(mappingRemovePressed:)];
+        remove.frame       = NSMakeRect(width - 95, y, 85, 24);
+        remove.bezelStyle  = NSBezelStyleRounded;
+        remove.controlSize = NSControlSizeSmall;
+        remove.tag         = static_cast<NSInteger>(index);
+        [document addSubview:remove];
+
+        [_mappingRowIds addObject:@(mapping.id.value())];
+    }
+
+    const CGFloat visibleHeight = std::min(contentHeight, 380.0);
+
+    NSScrollView* scroll =
+        [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, width, visibleHeight)];
+    scroll.hasVerticalScroller = contentHeight > 380.0;
+    scroll.documentView        = document;
+
+    [_mappingWindow setContentSize:NSMakeSize(width, visibleHeight)];
+    _mappingWindow.contentView = scroll;
+}
+
+- (void)mappingRemovePressed:(NSButton*)sender
+{
+    const auto index = static_cast<NSUInteger>(sender.tag);
+    if (index >= _mappingRowIds.count)
+        return;
+
+    const project::EntityId mappingId{[_mappingRowIds[index] unsignedLongLongValue]};
+
+    if (_registry->execute(std::make_unique<app::RemoveMidiMappingCommand>(mappingId)))
+        [self rebuildGraph];
+
+    [self refreshMappingListContent];
 }
 
 // ── The project as a document ────────────────────────────────────────────────
@@ -2024,6 +2556,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     _live = project::CompiledProjectGraph{};
     for (NSWindow* window in [_panelWindows.allValues copy])
         [window close];
+    [_zoneWindow close];
+    [_mappingWindow close];
 
     // The undo stack was cleared along with the old contents; syncing the
     // watch keeps housekeeping from reading that as an edit. The caches the
@@ -2554,6 +3088,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                 action:@selector(grabAudioLog:)
                                          keyEquivalent:@""];
     grabItem.target = self;
+
+    [audioMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* mappingsItem = [audioMenu addItemWithTitle:@"MIDI Mappings…"
+                                                    action:@selector(showMidiMappings:)
+                                             keyEquivalent:@""];
+    mappingsItem.target = self;
 
     audioItem.submenu = audioMenu;
 

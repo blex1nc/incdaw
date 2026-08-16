@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 3.3
-Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT IN PROGRESS (increments 1-3 done)
+Version: 3.4
+Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT increments 1-4 done
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -1530,13 +1530,66 @@ recording and the Audio Logger all work. What remains in it is polish):
   UI-drive of the dialog was not attempted (prior sessions recorded
   synthetic clicks landing in whatever app is frontmost).
 
-  NEXT: increment 4 — mapping, zone and instrument editors (ROADMAP
-  "After the phases" §Increment 4): the MIDI mapping list UI, the
-  sampler zone-mapping editor over Channel::samplerZones, and builtin
-  INSTRUMENT parameter persistence + panel (the increment-2 deferral:
-  instruments have sinks but no StateIO — persistence design comes
-  first, likely Channel-serialised values or an instrument StateIO
-  wired into the compiler like inserts').
+  UI BUILD-OUT INCREMENT 4 IS DONE (2026-08-16): mapping, zone and
+  instrument editors — the increment-2 deferral resolved by D-034.
+    - PERSISTENCE FIRST (D-034, format 1.4 -> 1.5, additive, frozen
+      fixture v1.5): Channel::instrumentParameters ({id, plain value});
+      the COMPILER applies them through instrument->parameterSink()
+      right after construction. Model = source of truth at every
+      rebuild (the mixer's rule): survives rebuilds and save/load, and
+      makes the edits undoable. Hosted instruments will use their
+      instrumentStateFile blob instead when they arrive — model values
+      are builtin-only.
+    - SetInstrumentParameterCommand (ChannelCommands; mergeable;
+      undoing a never-touched parameter REMOVES the entry — "at the
+      default" and "stored at the default" stay distinct).
+    - Rack context menu "Edit Instrument…" -> the increment-2 panel
+      reused verbatim (rows from engine::findBuiltinInstrument — new
+      catalogue lookup; empty uid resolves to the reference synth);
+      writes = executeMerging + rebuildGraph. Panels are keyed by
+      channel id in the same _panelWindows table (entity ids share one
+      space, no collision); the rebuild sweep's valid-key set now
+      includes channels.
+    - Rack context menu "Sampler Zones…" -> zone editor window (one at
+      a time, _zoneWindow/_zoneChannelKey/_zoneRows): per-zone rows
+      (asset name, root, key lo/hi, vel lo/hi, gain, reverse, Remove) +
+      "Add Sample Layer…". Whole-row commit -> SetSamplerZoneCommand
+      (mergeable) / RemoveSamplerZoneCommand; layering ->
+      AddSamplerZoneCommand (refuses non-sampler channels; LoadSample
+      remains the convert-gesture; both share ONE extracted
+      asset-minting helper in SamplerCommands.cpp). Content rebuilt
+      from the model after every change, clamps visible. Zone
+      start/end/loop fields deliberately not in the first row layout.
+    - Audio > MIDI Mappings… -> _mappingWindow: "CC n (ch) ->
+      parameterKey · target display name" per row + undoable Remove;
+      refreshed on every rebuild while open (learn/forget elsewhere
+      stay in sync). Rows address mappings BY ID captured at refresh,
+      never by live index.
+    - adopt closes zone + mapping windows (cross-project ids);
+      rebuild sweep closes the zone editor when its channel vanishes.
+    - Tests: 7 new cases in InstrumentParameterTests.cpp — compile
+      application proven EQUAL to a live sink write (and audibly
+      different from defaults), format round-trip, frozen v1.5 fixture,
+      v1.4 now asserts migrated/migratedFrom (bump maintenance),
+      command undo/merge semantics, zone edit/remove undo, add-layer
+      asset sharing + undo-removes-minted-asset, catalogue lookup.
+      502 cases green Debug + Release; launch/quit smoke clean.
+    KNOWN LIMITS (recorded): zone editor is numeric (no graphical
+    key-range view; start/end/loop uneditable in UI); instrument panel
+    covers builtins only; panel value rows do not live-refresh while
+    automation moves the same parameter.
+
+  NEXT: the increment list in ROADMAP "After the phases" is complete
+  (1-4). Remaining recorded polish/gaps to draw from: progress/cancel
+  for long exports, insert reordering as a command, live-refreshing
+  panels, graphical zone view, per-zone envelopes/filters/LFOs,
+  automation point-editor surface + touch/latch modes, editor markers/
+  regions/cut-copy-paste, MIDI output (clock/sync/feedback), AU then
+  VST3 hosting (dependency-gated, §41), FLAC/MP3 export (dependency-
+  gated), spectrum analyzer, lookahead limiting, plugin params->flush
+  while idle + out_events -> recordable automation +
+  clap_host_latency.changed, sandboxed plugin processing. Pick by
+  user priority.
 
 Things to be careful about:
 

@@ -19,6 +19,7 @@ add_executable(incdaw_tests
     unit/ProjectSessionTests.cpp
     unit/PianoRollTests.cpp
     unit/InstrumentTests.cpp
+    unit/InstrumentParameterTests.cpp
     unit/BuiltinEffectTests.cpp
     unit/BuiltinInsertTests.cpp
     unit/FuzzTests.cpp

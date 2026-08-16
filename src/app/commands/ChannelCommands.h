@@ -148,6 +148,36 @@ private:
     double   previousVolume_ = 1.0;
 };
 
+/// One stored instrument parameter (Model.h ChannelInstrumentParameter).
+/// The value is plain, in the instrument's own terms; the compiler applies
+/// it through the instrument's sink at every build (D-034). Consecutive
+/// edits of the same parameter merge, so a slider drag is one undo entry.
+class SetInstrumentParameterCommand final : public Command {
+public:
+    SetInstrumentParameterCommand(EntityId channel, std::uint32_t parameterId, double value)
+        : channelId_(channel), parameterId_(parameterId), value_(value) {}
+
+    [[nodiscard]] const char* id() const noexcept override
+    {
+        return "channel.setInstrumentParameter";
+    }
+    [[nodiscard]] std::string name() const override { return "Set Instrument Parameter"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    [[nodiscard]] bool canMergeWith(const Command& next) const noexcept override;
+    void mergeWith(const Command& next) override;
+
+private:
+    EntityId      channelId_;
+    std::uint32_t parameterId_ = 0;
+    double        value_       = 0.0;
+
+    bool   existedBefore_ = false;
+    double previousValue_ = 0.0;
+};
+
 /// The pitch this channel's steps are written at.
 class SetChannelStepKeyCommand final : public Command {
 public:

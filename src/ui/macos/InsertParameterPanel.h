@@ -15,6 +15,12 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// AppKit's default coordinate system grows upward; a list reads downward.
+/// Shared by every hand-built row list in the shell (parameter panels, the
+/// zone editor, the mapping list).
+@interface INCDAWFlippedView : NSView
+@end
+
 /// Keys of one row dictionary: @"id" (unsigned), @"name" (NSString),
 /// @"min", @"max", @"value" (double), @"stepped" (BOOL).
 @interface INCDAWInsertParameterPanel : NSObject

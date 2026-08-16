@@ -1123,3 +1123,41 @@ is versioned, id-keyed and forward-tolerant.
 
 **Date:** 2026-08-16
 **Status:** ACCEPTED
+
+---
+
+## D-034 — Instrument parameter values live in the model, applied at compile
+
+**Decision:** A channel's instrument parameter values are ordinary model data
+(`Channel::instrumentParameters`, format 1.5): plain `{id, value}` pairs the
+compiler pushes through the instrument's `ParameterSink` right after
+constructing it. The instrument panel edits them with a mergeable command.
+
+**Context:** The insert parameter panel (increment 2) needed nothing new —
+inserts already carried StateIO, and their blobs ride the package. Instruments
+have sinks but no StateIO, so a panel value would have silently vanished at
+save/load, and the increment was deferred until persistence existed.
+
+**Options:**
+1. Give instruments StateIO and extend the state-file machinery to channels.
+2. Store values in the model and let the compiler apply them (chosen).
+3. Panel writes stay live-only (rejected outright: silent data loss).
+
+**Chosen:** Model storage. It is the rule the mixer already follows — the
+model is the source of truth at every compile, UI writes are undoable
+commands, automation and MIDI write the live objects and re-establish
+themselves. It costs one additive format bump and zero new persistence
+machinery, and it makes instrument panel edits UNDOABLE, which the state-blob
+route could not offer without inventing command-wrapped blob diffs.
+
+**Tradeoffs:** Two persistence mechanisms now exist side by side — inserts
+persist via opaque blobs (they must: hosted plugins own their state),
+instruments via model values (they can: builtin parameters are enumerable).
+A hosted INSTRUMENT will use its blob (`instrumentStateFile`, already in the
+format) when it arrives; the model values remain builtin-only. MIDI-driven
+changes still reset on rebuild for instruments exactly as they do for mixer
+strips — the hardware is the source of truth and the next CC re-establishes
+them.
+
+**Date:** 2026-08-16
+**Status:** ACCEPTED

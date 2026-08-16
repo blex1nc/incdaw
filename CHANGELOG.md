@@ -12,6 +12,48 @@ The twenty engineering phases produced a complete core; what follows is
 the UI build-out — FL-Studio-class workspaces over that core, in
 increments. Each increment ships working, tested behaviour.
 
+### UI build-out, increment 4 — mapping, zone and instrument editors — 2026-08-16
+
+The last of the recorded engine-side gaps a UI pass surfaces: instruments
+became editable and persistent, samplers became mappable, and MIDI
+mappings became visible.
+
+**Added**
+
+- Format 1.5 (additive, migration + frozen fixture): channels carry
+  `instrumentParameters[]` — stored plain values the compiler applies
+  through the instrument's ParameterSink after construction (D-034). The
+  model is the source of truth at every rebuild, exactly like mixer
+  volume, so the values survive rebuilds AND save/load — the persistence
+  the increment-2 deferral was waiting for.
+- `SetInstrumentParameterCommand` (mergeable — a slider drag is one undo
+  entry; undoing a never-touched parameter removes the entry rather than
+  storing the default). Channel rack context menu gained
+  "Edit Instrument…": the increment-2 panel reused verbatim over the
+  builtin instrument catalogue (sampler filter/LFO/ADSR, synth ADSR/gain
+  — the Phase 14 "engine + setters only" gap closed).
+- "Sampler Zones…" (rack context menu): the zone editor — one row per
+  zone with root key, key range, velocity range, gain, reverse and
+  Remove; "Add Sample Layer…" appends zones for multisampling
+  (`AddSamplerZoneCommand`, sharing LoadSampleCommand's asset rule via
+  one extracted minting helper — same file, same asset, never
+  duplicated). Every edit is a mergeable, undoable command
+  (`SetSamplerZoneCommand`/`RemoveSamplerZoneCommand`) and rebuilds the
+  graph immediately.
+- Audio > MIDI Mappings…: every mapping listed as
+  "CC n (channel) → parameter · target name", removable undoably; the
+  list refreshes on every rebuild while open, so learn and forget from
+  the mixer menu stay in sync with it.
+
+**Known limitation (recorded)**
+
+- The zone editor edits numbers, not pictures — a graphical key-range
+  layout view is future polish. Zone start/end/loop points are editable
+  only in the model (fields deliberately left off the first row layout).
+- Hosted instruments (when they arrive) will persist through
+  `instrumentStateFile` blobs, not model values; the panel covers
+  builtins only and beeps for anything else.
+
 ### UI build-out, increment 3 — export options dialog — 2026-08-16
 
 File > Export Audio… stops hardcoding master/float32/WAV/engine-rate.

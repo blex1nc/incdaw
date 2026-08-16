@@ -277,6 +277,19 @@ struct ChannelSamplerZone {
                                          const ChannelSamplerZone&) = default;
 };
 
+/// One stored instrument parameter value, in the instrument's own plain
+/// terms (the id comes from the builtin instrument catalogue, or a hosted
+/// instrument's discovery). The model is the source of truth the compiler
+/// applies at every build — the same contract mixer volume has — so a value
+/// survives rebuilds and save/load without any state blob.
+struct ChannelInstrumentParameter {
+    std::uint32_t parameterId = 0;
+    double        value       = 0.0;
+
+    [[nodiscard]] friend bool operator==(const ChannelInstrumentParameter&,
+                                         const ChannelInstrumentParameter&) = default;
+};
+
 /// A sound source: instrument, sampler, audio input, or external MIDI device.
 struct Channel {
     EntityId      id;
@@ -307,6 +320,11 @@ struct Channel {
     /// sampler. Kept on the channel rather than in opaque state because zones
     /// reference audio assets by id, and the relinker has to see that.
     std::vector<ChannelSamplerZone> samplerZones;
+
+    /// Instrument parameter values the user set (panel edits). Applied by the
+    /// compiler through the instrument's ParameterSink after construction;
+    /// parameters never touched are absent and play at their defaults.
+    std::vector<ChannelInstrumentParameter> instrumentParameters;
 
     [[nodiscard]] friend bool operator==(const Channel&, const Channel&) = default;
 };

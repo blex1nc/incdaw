@@ -161,6 +161,68 @@ void SetChannelVolumeCommand::mergeWith(const Command& next)
         volume_ = other->volume_;
 }
 
+// ── SetInstrumentParameterCommand ─────────────────────────────────────────────
+
+bool SetInstrumentParameterCommand::execute(Project& project)
+{
+    Channel* channel = project.findChannel(channelId_);
+    if (channel == nullptr)
+        return false;
+
+    for (project::ChannelInstrumentParameter& parameter : channel->instrumentParameters) {
+        if (parameter.parameterId != parameterId_)
+            continue;
+
+        if (parameter.value == value_)
+            return false;
+
+        existedBefore_  = true;
+        previousValue_  = parameter.value;
+        parameter.value = value_;
+        return true;
+    }
+
+    existedBefore_ = false;
+    channel->instrumentParameters.push_back({parameterId_, value_});
+    return true;
+}
+
+void SetInstrumentParameterCommand::undo(Project& project)
+{
+    Channel* channel = project.findChannel(channelId_);
+    if (channel == nullptr)
+        return;
+
+    auto& parameters = channel->instrumentParameters;
+
+    for (std::size_t index = 0; index < parameters.size(); ++index) {
+        if (parameters[index].parameterId != parameterId_)
+            continue;
+
+        // A parameter that had never been touched leaves no entry behind:
+        // "at its default" and "stored at the default's value" must stay
+        // distinguishable, or defaults could never change.
+        if (existedBefore_)
+            parameters[index].value = previousValue_;
+        else
+            parameters.erase(parameters.begin() + static_cast<std::ptrdiff_t>(index));
+        return;
+    }
+}
+
+bool SetInstrumentParameterCommand::canMergeWith(const Command& next) const noexcept
+{
+    const auto* other = dynamic_cast<const SetInstrumentParameterCommand*>(&next);
+    return other != nullptr && other->channelId_ == channelId_
+        && other->parameterId_ == parameterId_;
+}
+
+void SetInstrumentParameterCommand::mergeWith(const Command& next)
+{
+    if (const auto* other = dynamic_cast<const SetInstrumentParameterCommand*>(&next))
+        value_ = other->value_;
+}
+
 // ── SetChannelStepKeyCommand ──────────────────────────────────────────────────
 
 bool SetChannelStepKeyCommand::execute(Project& project)

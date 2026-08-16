@@ -421,6 +421,14 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         if (instrument == nullptr)
             continue;   // a channel with no working instrument is silent, not an error
 
+        // Stored parameter values apply through the same sink automation and
+        // MIDI mappings write to (D-034). The model is the source of truth at
+        // every compile, so a panel edit survives rebuilds the way a mixer
+        // fader does; an instrument without a sink simply keeps its defaults.
+        if (engine::ParameterSink* sink = instrument->parameterSink())
+            for (const ChannelInstrumentParameter& parameter : channel.instrumentParameters)
+                sink->setParameter(parameter.parameterId, parameter.value);
+
         auto node    = std::make_unique<engine::InstrumentNode>(std::move(instrument), tempoMap);
         auto* handle = node.get();
 

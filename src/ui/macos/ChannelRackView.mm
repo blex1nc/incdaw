@@ -307,6 +307,20 @@ enum class RackDrag { none, volume, paintSteps };
     loadSample.target = self;
     loadSample.representedObject = @(channelId.value());
 
+    NSMenuItem* editInstrument = [menu addItemWithTitle:@"Edit Instrument…"
+                                                 action:@selector(editInstrumentFromMenu:)
+                                          keyEquivalent:@""];
+    editInstrument.target = self;
+    editInstrument.representedObject = @(channelId.value());
+
+    NSMenuItem* editZones = [menu addItemWithTitle:@"Sampler Zones…"
+                                            action:@selector(editZonesFromMenu:)
+                                     keyEquivalent:@""];
+    editZones.target = self;
+    editZones.representedObject = @(channelId.value());
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem* rename = [menu addItemWithTitle:@"Rename Channel…"
                                          action:@selector(renameFromMenu:)
                                   keyEquivalent:@""];
@@ -338,6 +352,18 @@ enum class RackDrag { none, volume, paintSteps };
 
     [self commit:std::make_unique<app::LoadSampleCommand>(channelId,
                                                           panel.URL.path.UTF8String)];
+}
+
+- (void)editInstrumentFromMenu:(NSMenuItem*)item
+{
+    if (self.onEditInstrument != nil)
+        self.onEditInstrument([item.representedObject unsignedLongLongValue]);
+}
+
+- (void)editZonesFromMenu:(NSMenuItem*)item
+{
+    if (self.onEditSamplerZones != nil)
+        self.onEditSamplerZones([item.representedObject unsignedLongLongValue]);
 }
 
 - (void)renameFromMenu:(NSMenuItem*)item

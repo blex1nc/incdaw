@@ -445,11 +445,22 @@ chosen directory with sanitised, deduplicated names
 dialog; stems and tracks land as separate files without overwriting each
 other.
 
-### Increment 4 — mapping, zone and instrument editors (planned)
+### Increment 4 — mapping, zone and instrument editors — DONE 2026-08-16
 
-MIDI mapping list UI; a sampler zone-mapping editor over
-`Channel::samplerZones`; instrument parameter persistence + panel (the
-increment-2 deferral).
+Instrument parameter persistence landed first (D-034, format 1.5): values
+live in the model and the compiler applies them through the instrument's
+sink at every build — the mixer's source-of-truth rule, which also makes
+the edits undoable. On top of it: "Edit Instrument…" in the rack's context
+menu opens the generic parameter panel over the channel's builtin
+instrument; "Sampler Zones…" opens the zone editor (per-zone root/key
+range/velocity range/gain/reverse, remove, add layers —
+`AddSamplerZoneCommand` shares LoadSample's asset-minting); Audio > MIDI
+Mappings… lists every mapping with its target's name and removes them
+undoably.
+
+**Exit criterion (met):** a sampler's cutoff set in the panel survives
+save/load and rebuilds; a zone edit is one undo entry; a mapping removed
+from the list stops driving its parameter.
 
 Later increments are drawn from the same recorded gap list as needed
 (docs/RELEASE.md known limits, HANDOFF §22).
