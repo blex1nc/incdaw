@@ -77,7 +77,7 @@ bool CommandRegistry::execute(CommandPtr command)
     if (!command->execute(*project_))
         return false;   // a no-op must not leave an undo entry that does nothing
 
-    undoStack_.push_back(std::move(command));
+    undoStack_.push_back({std::move(command), ++nextSerial_});
 
     // History has diverged; the old future no longer describes this project.
     redoStack_.clear();
@@ -94,15 +94,17 @@ bool CommandRegistry::executeMerging(CommandPtr command)
     if (!command->execute(*project_))
         return false;
 
-    if (!undoStack_.empty() && undoStack_.back()->canMergeWith(*command)) {
+    if (!undoStack_.empty() && undoStack_.back().command->canMergeWith(*command)) {
         // Folded into the previous entry: one drag gesture is one undo, not
-        // one per mouse move.
-        undoStack_.back()->mergeWith(*command);
+        // one per mouse move. The fold changed what the entry produces, so it
+        // gets a fresh serial — the save point it may have matched is gone.
+        undoStack_.back().command->mergeWith(*command);
+        undoStack_.back().serial = ++nextSerial_;
         redoStack_.clear();
         return true;
     }
 
-    undoStack_.push_back(std::move(command));
+    undoStack_.push_back({std::move(command), ++nextSerial_});
     redoStack_.clear();
     trimToMaximumDepth();
     return true;
@@ -110,12 +112,12 @@ bool CommandRegistry::executeMerging(CommandPtr command)
 
 std::string CommandRegistry::undoName() const
 {
-    return undoStack_.empty() ? std::string{} : undoStack_.back()->name();
+    return undoStack_.empty() ? std::string{} : undoStack_.back().command->name();
 }
 
 std::string CommandRegistry::redoName() const
 {
-    return redoStack_.empty() ? std::string{} : redoStack_.back()->name();
+    return redoStack_.empty() ? std::string{} : redoStack_.back().command->name();
 }
 
 bool CommandRegistry::undo()
@@ -123,11 +125,11 @@ bool CommandRegistry::undo()
     if (undoStack_.empty())
         return false;
 
-    CommandPtr command = std::move(undoStack_.back());
+    StackEntry entry = std::move(undoStack_.back());
     undoStack_.pop_back();
 
-    command->undo(*project_);
-    redoStack_.push_back(std::move(command));
+    entry.command->undo(*project_);
+    redoStack_.push_back(std::move(entry));
     return true;
 }
 
@@ -136,17 +138,17 @@ bool CommandRegistry::redo()
     if (redoStack_.empty())
         return false;
 
-    CommandPtr command = std::move(redoStack_.back());
+    StackEntry entry = std::move(redoStack_.back());
     redoStack_.pop_back();
 
     // Re-executing must succeed: it succeeded once already, on the same state.
     // If it does not, the command is not a faithful inverse of its own undo and
     // the history is no longer trustworthy — so the entry is dropped rather
     // than left on a stack that would desynchronise on the next undo.
-    if (!command->execute(*project_))
+    if (!entry.command->execute(*project_))
         return false;
 
-    undoStack_.push_back(std::move(command));
+    undoStack_.push_back(std::move(entry));
     return true;
 }
 
@@ -154,6 +156,10 @@ void CommandRegistry::clearHistory() noexcept
 {
     undoStack_.clear();
     redoStack_.clear();
+
+    // Whatever replaced the model is not what was saved. The shell marks a
+    // new save point once it knows what the model now is (e.g. just loaded).
+    savedSerial_ = unreachableSerial;
 }
 
 void CommandRegistry::setMaximumDepth(std::size_t depth) noexcept

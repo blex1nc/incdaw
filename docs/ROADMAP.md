@@ -390,6 +390,78 @@ launches INCDAW successfully by the documented procedure.
 
 ---
 
+# UI build-out (post-0.9)
+
+Phases 0–20 built the core. What follows are the U-phases: FL-Studio-class
+workspaces over the finished engine, binding UI to surfaces that already
+exist (CompiledProjectGraph handles, the command registry, ParameterRegistry,
+the offline renderer, the sample cache). U-phases follow the same rules as
+engine phases: one coherent increment, a testable exit criterion, headless
+tests for everything that does not strictly need a window.
+
+## Phase U1 — Project safety
+
+Dirty-state tracking (save points in the command registry), a save prompt on
+quit, timed sidecar autosaves with crash recovery on the next launch, and an
+Open Recent menu.
+
+**Exit criterion:** killing the app with unsaved edits offers the autosave on
+the next launch; undoing back to the save point reads as clean, a merged
+gesture after it reads as dirty — asserted headlessly.
+
+## Phase U2 — Generic parameter panel
+
+Every parameter of a builtin effect, builtin instrument, or hosted plugin
+without its own editor is visible and editable from a generic panel driven by
+discovered `PluginParameterInfo` / registered `ParameterRegistry` keys.
+Edits are undoable commands and follow the same appliers automation uses.
+
+**Exit criterion:** a builtin effect parameter changed from the panel equals
+the same change made through its registry applier, and undoes in one step.
+
+## Phase U3 — Export options dialog
+
+The render library's options reach the user: master/stems/tracks/regions,
+sample rate, bit depth, dither, normalize, tail. The menu today renders
+master/float32/WAV only.
+
+**Exit criterion:** a stems export from the dialog produces the same files the
+library call produces headlessly.
+
+## Phase U4 — MIDI mapping list and channel-rack learn
+
+A window listing every mapping (key, target, range; remove/re-learn), and
+learn armable from the channel rack, not only the mixer menu.
+
+**Exit criterion:** a mapping created by learn appears in the list, and
+removing it there stops the CC from moving the parameter.
+
+## Phase U5 — Sampler zone editor
+
+A zone-mapping editor over `Channel::samplerZones`: key/velocity ranges,
+root, slice, loop points, per-zone audition. Filter/LFO parameter surface
+(engine setters exist since Phase 14; no UI reaches them).
+
+**Exit criterion:** a zone edited in the editor plays with the edited mapping
+after save/load.
+
+## Phase U6 — Browser
+
+Samples, presets, projects; folders, favorites, search, preview,
+drag-and-drop into channels and the playlist.
+
+**Exit criterion:** a sample dragged from the browser onto a channel loads as
+that channel's sampler program, undoably.
+
+## Phase U7 — Workspace
+
+Dockable panels, layout persistence, a shortcuts editor over the command
+registry, theme polish.
+
+**Exit criterion:** a rearranged layout survives relaunch.
+
+---
+
 ## Deliberately out of scope
 
 - **VST2 hosting** — not licensable (D-007)

@@ -6,6 +6,37 @@ public version yet.
 
 ---
 
+## [Unreleased] — the UI build-out
+
+The U-phases: FL-Studio-class workspaces over the finished core
+(docs/ROADMAP.md, "UI build-out").
+
+### Phase U1 — Project safety — PHASE U1 COMPLETE — 2026-08-16
+
+**Added**
+
+- Save points in the command registry (D-034): every undo-stack entry
+  carries a serial that follows it through undo and redo and is reassigned
+  on merge, so "modified since save" is exact — including the case
+  `undoDepth` cannot see, a merged drag at unchanged depth. Asserted in
+  CommandTests.
+- A quit prompt: quitting with unsaved changes offers Save / Don't Save /
+  Cancel, and a cancelled Save As cancels the quit. The window close
+  button shows the standard edited dot. Unsaved work is no longer lost
+  silently — the standing gap since the File menu appeared.
+- Timed sidecar autosave (`project/Autosave`, 3 min): ordinary `.incdaw`
+  packages under Application Support/INCDAW/Autosave, never touching the
+  user's file, pruned to the newest 10 per project. Skips when the model
+  is clean or unchanged since the last tick.
+- Crash recovery: a session that dies leaves its session-open flag set;
+  the next launch offers the autosave it named. A recovered project has
+  no path (Save asks where) and stays marked modified.
+- Open Recent in the File menu (`app/RecentProjects`): newest first,
+  deduplicated, capped at 10, persisted in NSUserDefaults; entries that
+  vanished from disk are dropped on use.
+
+---
+
 ## [0.9.0] — 2026-08-16 — the core is complete
 
 Every engineering phase of the roadmap (0–20) is done: the first

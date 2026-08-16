@@ -1123,3 +1123,52 @@ is versioned, id-keyed and forward-tolerant.
 
 **Date:** 2026-08-16
 **Status:** ACCEPTED
+
+---
+
+## D-034 — Dirty tracking by save-point serial; autosaves are sidecar packages
+
+**Context:** Phase U1. The shell needs "are there unsaved changes?" for the
+quit prompt and the autosave timer. The obvious source, `undoDepth()`, is
+wrong twice: a merge (drag gestures fold into the top command) changes the
+model without changing the depth, and trimming bounded history renumbers
+depths entirely. Autosave also needs a location policy: FL-style DAWs never
+let an automatic write touch the file the user owns.
+
+**Options:**
+
+1. Compare `undoDepth()` against the depth at save.
+2. Hash or snapshot the model at save and compare on demand.
+3. Give every undo-stack entry a serial that follows it through undo/redo
+   and is reassigned on merge; a save point records the top entry's serial,
+   and modified ⟺ the current top serial differs. `clearHistory` parks the
+   save point unreachable until the shell re-marks it.
+4. Autosave into the project package (e.g. `history/`), or overwrite the
+   project file itself on a timer.
+
+**Chosen:** option 3 for tracking; autosaves are ordinary `.incdaw`
+packages under Application Support/INCDAW/Autosave, named
+`<stem>.autosave-<localtime>.incdaw`, pruned to the newest 10 per project
+(`project/Autosave`). Recovery is offered once at launch when the previous
+session left its session-open flag set and named an autosave; a recovered
+project deliberately has no path (Save falls back to Save As) and stays
+marked modified.
+
+**Reason:** serials are exact where depth comparison lies (the merge case is
+asserted in CommandTests), cost one `size_t` per entry, and make "undo back
+to the save point" read clean — which snapshots would too, at wildly higher
+cost. Sidecar autosaves mean an interrupted or buggy automatic write can
+never damage the user's file; package-relative `stateFile` paths (D-030)
+already make a package self-contained wherever it is written.
+
+**Tradeoffs:** a save point trimmed out of bounded history reads modified
+forever even if the user undoes everything (conservative, safe). Autosaved
+packages reference plugin-state blobs captured at autosave time only for
+LIVE instances; a slot whose plugin is missing keeps a `stateFile` name
+whose blob exists in the original package, not the autosave — recovery of
+such a project logs the missing blob and plays defaults. Two INCDAW
+instances autosaving the same stem in the same second would collide; the
+staged rename in ProjectFile::save keeps that benign.
+
+**Date:** 2026-08-16
+**Status:** ACCEPTED

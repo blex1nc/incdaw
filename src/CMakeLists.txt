@@ -103,6 +103,7 @@ target_link_libraries(incdaw_plugins
 
 # ── project/ : data model, serialization, versioning ──────────────────────────
 add_library(incdaw_project STATIC
+    project/Autosave.cpp
     project/Identity.cpp
     project/Json.cpp
     project/Model.cpp
@@ -125,6 +126,7 @@ add_library(incdaw_app STATIC
     app/Version.cpp
     app/AutomationWriteSession.cpp
     app/CommandRegistry.cpp
+    app/RecentProjects.cpp
     app/PianoRollModel.cpp
     app/ChannelRackModel.cpp
     app/PlaylistModel.cpp

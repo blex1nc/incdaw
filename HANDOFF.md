@@ -1,7 +1,7 @@
 # INCDAW — HANDOFF
 
-Version: 3.0
-Status: ALL PHASES 0-20 COMPLETE — CORE DONE, v0.9.0 — UI BUILD-OUT NEXT
+Version: 3.1
+Status: ALL PHASES 0-20 COMPLETE — CORE DONE, v0.9.0 — UI BUILD-OUT IN PROGRESS (U1 COMPLETE)
 Last updated: 2026-08-16
 Project: INCDAW
 Reference DAW: FL Studio 2026
@@ -142,8 +142,8 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  424 test cases, 170,135 assertions, green in both Debug and Release.
-  Zero compiler warnings (-Werror is on).
+  493 test cases, 1,335,788 assertions, green in both Debug and Release
+  (verified 2026-08-16, post-U1). Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
     doctest.h  — see "Dependencies in tree"
@@ -1431,10 +1431,54 @@ recording and the Audio Logger all work. What remains in it is polish):
   will bind to is ready: CompiledProjectGraph handles (strips, meters,
   instruments, insert state), the command registry, ParameterRegistry
   (every builtin + hosted parameter), MIDI learn plumbing, the offline
-  renderer, SMF exchange, and the sample cache. Known engine-side gaps
-  a UI pass will surface first: builtin effect/instrument parameter
-  panels, an export options dialog, a zone-mapping editor, mapping
-  list UI, dirty-prompt on quit, autosave, recent projects.
+  renderer, SMF exchange, and the sample cache. The U-phase plan (U1
+  project safety … U7 workspace) is now recorded in docs/ROADMAP.md,
+  "UI build-out (post-0.9)".
+
+  PHASE U1 IS COMPLETE (2026-08-16). Project safety (D-034):
+    - CommandRegistry save points: stack entries carry serials that
+      follow them through undo/redo and are reassigned on merge;
+      markSavePoint/modifiedSinceSavePoint/stateSerial. Exact where
+      undoDepth lies (the merged-drag-at-unchanged-depth case is the
+      asserted one). clearHistory parks the save point unreachable
+      until the shell re-marks it.
+    - Quit prompt (applicationShouldTerminate): Save / Don't Save /
+      Cancel; a cancelled Save As cancels the quit. documentEdited dot
+      on the close button, updated from housekeeping independent of
+      audio readiness.
+    - project/Autosave + a 180 s shell timer: sidecar `.incdaw`
+      packages in Application Support/INCDAW/Autosave, named
+      <stem>.autosave-<localtime>.incdaw, pruned to newest 10 per
+      project; never touches the user's file. Skips when clean or
+      unchanged since the last tick (stateSerial gate).
+    - Crash recovery: session-open flag in NSUserDefaults + the last
+      autosave path; offered once at the next launch. A recovered
+      project has no path (Save → Save As) and stays modified.
+    - Open Recent (app/RecentProjects: pure list policy, tested):
+      newest first, deduped, capped 10, persisted in defaults; missing
+      entries are dropped on use with an alert.
+    - The shared write path (writeProjectPackageTo:) captures plugin
+      state BEFORE ProjectFile::save for BOTH manual saves and
+      autosaves; stateFile paths are package-relative (D-030), so an
+      autosave package is self-contained for live instances.
+    - Tests: save-point section in CommandTests.cpp (6 cases),
+      ProjectSafetyTests.cpp (Autosave naming/list/prune,
+      RecentProjects policy). 493 cases / 1,335,788 assertions green,
+      Debug and Release. Smoke-launched: Metal up, audio up, first
+      frame rendered, orderly SIGTERM exit.
+    Known U1 limits (recorded in D-034 tradeoffs): an autosave holds
+    blobs only for LIVE plugin instances — a missing plugin's blob
+    stays in the original package and recovery of that slot plays
+    defaults with a warning; a save point trimmed out of bounded
+    history reads modified forever (conservative).
+
+  NEXT: PHASE U2 — the generic parameter panel (ROADMAP "UI
+  build-out"): every builtin effect/instrument and GUI-less hosted
+  plugin parameter visible and editable from a generic panel over
+  discovered PluginParameterInfo / ParameterRegistry keys, as undoable
+  commands through the same appliers automation uses. The engine-side
+  surface exists already (parameter sinks, registry keys, insert
+  state); what U2 adds is UI + a SetParameter command family.
 
 Things to be careful about:
 
@@ -1444,9 +1488,10 @@ Things to be careful about:
     doctest command; D-027 has CLAP's).
   - RESOLVED (2026-08-15): the File menu exists — Open/Save/Save As call
     ProjectFile and PluginStateFiles in the documented order (capture before
-    save; restore after the rebuild). Still missing: dirty prompt on quit,
-    autosave, recent projects. Unsaved work is still lost silently on quit;
-    only SAVING became possible.
+    save; restore after the rebuild).
+    RESOLVED (2026-08-16, Phase U1): dirty prompt on quit, autosave and
+    recent projects all exist now (D-034). Unsaved work is prompted for at
+    quit and autosaved every 3 minutes; nothing is lost silently anymore.
   - tests/fixtures/v1.1/ does not exist. Format 1.1 is covered only by the
     save/load round trip, which proves the code agrees with itself and nothing
     more. docs/PROJECT_FORMAT.md §2 requires a hand-written fixture before 1.1

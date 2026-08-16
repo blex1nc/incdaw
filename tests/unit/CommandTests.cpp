@@ -531,3 +531,157 @@ TEST_CASE("commands targeting a pattern that no longer exists fail safely")
 
     CHECK(registry.undoDepth() == 0);
 }
+
+// ── Save points ───────────────────────────────────────────────────────────────
+//
+// Phase U1: the dirty flag the shell's quit prompt and autosave run on.
+// The definition under test: modified ⟺ the undo stack's top entry is not the
+// one that was on top at the save point — which undoDepth alone cannot express,
+// because a merge changes the state without changing the depth.
+
+namespace {
+
+/// Merges with any other MergingCommand, accumulating the delta — the shape of
+/// a drag gesture, reduced to arithmetic.
+class MergingCommand final : public Command {
+public:
+    explicit MergingCommand(int& counter, int delta) : counter_(&counter), delta_(delta) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "test.merging"; }
+    [[nodiscard]] std::string name() const override { return "Merge"; }
+
+    [[nodiscard]] bool execute(project::Project&) override { *counter_ += delta_; return true; }
+    void undo(project::Project&) override { *counter_ -= delta_; }
+
+    [[nodiscard]] bool canMergeWith(const Command& next) const noexcept override
+    {
+        return dynamic_cast<const MergingCommand*>(&next) != nullptr;
+    }
+
+    void mergeWith(const Command& next) override
+    {
+        delta_ += static_cast<const MergingCommand&>(next).delta_;
+    }
+
+private:
+    int* counter_;
+    int  delta_;
+};
+
+} // namespace
+
+TEST_CASE("a fresh registry is unmodified; edits, undo and redo track the save point")
+{
+    project::Project project;
+    CommandRegistry  registry{project};
+    int              counter = 0;
+
+    CHECK_FALSE(registry.modifiedSinceSavePoint());
+
+    CHECK(registry.execute(std::make_unique<CountingCommand>(counter)));
+    CHECK(registry.modifiedSinceSavePoint());
+
+    CHECK(registry.undo());
+    CHECK_FALSE(registry.modifiedSinceSavePoint());   // back to the saved state
+
+    CHECK(registry.redo());
+    CHECK(registry.modifiedSinceSavePoint());
+}
+
+TEST_CASE("a save point mid-history is reachable from both directions")
+{
+    project::Project project;
+    CommandRegistry  registry{project};
+    int              counter = 0;
+
+    CHECK(registry.execute(std::make_unique<CountingCommand>(counter)));
+    CHECK(registry.execute(std::make_unique<CountingCommand>(counter)));
+    registry.markSavePoint();
+    CHECK_FALSE(registry.modifiedSinceSavePoint());
+
+    CHECK(registry.execute(std::make_unique<CountingCommand>(counter)));
+    CHECK(registry.modifiedSinceSavePoint());
+
+    CHECK(registry.undo());                            // back down to the save point
+    CHECK_FALSE(registry.modifiedSinceSavePoint());
+
+    CHECK(registry.undo());                            // below it
+    CHECK(registry.modifiedSinceSavePoint());
+
+    CHECK(registry.redo());                            // and forward to it again
+    CHECK_FALSE(registry.modifiedSinceSavePoint());
+}
+
+TEST_CASE("a merge at unchanged depth still reads as modified")
+{
+    project::Project project;
+    CommandRegistry  registry{project};
+    int              counter = 0;
+
+    CHECK(registry.execute(std::make_unique<MergingCommand>(counter, 1)));
+    registry.markSavePoint();
+
+    const std::size_t depthAtSave = registry.undoDepth();
+    CHECK(registry.executeMerging(std::make_unique<MergingCommand>(counter, 2)));
+
+    CHECK(registry.undoDepth() == depthAtSave);        // folded, not pushed
+    CHECK(counter == 3);
+    CHECK(registry.modifiedSinceSavePoint());          // and still dirty
+
+    // Undoing the merged entry reverses the whole gesture — the state below
+    // the save point, so still modified.
+    CHECK(registry.undo());
+    CHECK(counter == 0);
+    CHECK(registry.modifiedSinceSavePoint());
+}
+
+TEST_CASE("a rejected no-op does not dirty the project")
+{
+    project::Project project;
+    CommandRegistry  registry{project};
+
+    registry.markSavePoint();
+    CHECK_FALSE(registry.execute(std::make_unique<NoOpCommand>()));
+    CHECK_FALSE(registry.modifiedSinceSavePoint());
+}
+
+TEST_CASE("clearHistory reads as modified until a new save point is marked")
+{
+    project::Project project;
+    CommandRegistry  registry{project};
+    int              counter = 0;
+
+    CHECK(registry.execute(std::make_unique<CountingCommand>(counter)));
+    registry.markSavePoint();
+
+    // The model was just replaced wholesale (an Open): nothing reachable is
+    // what was saved, including the empty stack.
+    registry.clearHistory();
+    CHECK(registry.modifiedSinceSavePoint());
+
+    registry.markSavePoint();
+    CHECK_FALSE(registry.modifiedSinceSavePoint());
+}
+
+TEST_CASE("a save point trimmed out of history can no longer read as clean")
+{
+    project::Project project;
+    CommandRegistry  registry{project};
+    int              counter = 0;
+
+    registry.setMaximumDepth(2);
+
+    CHECK(registry.execute(std::make_unique<CountingCommand>(counter)));
+    registry.markSavePoint();
+
+    CHECK(registry.execute(std::make_unique<CountingCommand>(counter)));
+    CHECK(registry.execute(std::make_unique<CountingCommand>(counter)));   // trims the saved entry
+
+    CHECK(registry.undo());
+    CHECK(registry.undo());
+    CHECK_FALSE(registry.canUndo());
+
+    // The stack is empty, but empty is not the saved state — the saved state
+    // is unreachable, and claiming cleanliness here would lose real edits.
+    CHECK(registry.modifiedSinceSavePoint());
+}

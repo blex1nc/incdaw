@@ -25,6 +25,8 @@
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
 #include "plugins/PluginRegistry.h"
+#include "app/RecentProjects.h"
+#include "project/Autosave.h"
 #include "project/MidiFile.h"
 #include "project/Model.h"
 #include "project/OfflineRender.h"
@@ -93,6 +95,34 @@ std::filesystem::path incdawSupportDirectory()
 
     return failed ? std::filesystem::path{} : directory;
 }
+
+/// Where sidecar autosaves live: never inside or over the user's project
+/// (docs/DECISIONS.md D-034). Empty when Application Support is unavailable,
+/// in which case autosaving is silently off rather than pointed somewhere odd.
+std::filesystem::path incdawAutosaveDirectory()
+{
+    const std::filesystem::path support = incdawSupportDirectory();
+    if (support.empty())
+        return {};
+
+    std::filesystem::path directory = support / "Autosave";
+
+    std::error_code failed;
+    std::filesystem::create_directories(directory, failed);
+
+    return failed ? std::filesystem::path{} : directory;
+}
+
+/// NSUserDefaults keys. `SessionOpen` is set for the whole life of a run and
+/// cleared on orderly termination — finding it already set at launch means the
+/// previous session died, which is what makes an autosave worth offering.
+NSString* const kDefaultsRecentProjects = @"INCDAWRecentProjects";
+NSString* const kDefaultsSessionOpen    = @"INCDAWSessionOpen";
+NSString* const kDefaultsLastAutosave   = @"INCDAWLastAutosave";
+
+/// Autosave cadence. Three minutes loses at most a verse; writing is staged
+/// and cheap enough (Phase 18 measurements) that more would still be fine.
+constexpr NSTimeInterval kAutosaveInterval = 180.0;
 
 } // namespace
 
@@ -175,6 +205,14 @@ std::filesystem::path incdawSupportDirectory()
     /// Where the project lives on disk. Empty until the first Save As or
     /// Open; Save falls back to Save As while it is.
     std::filesystem::path _projectPath;
+
+    /// Project safety (Phase U1). The timer writes sidecar autosaves; the
+    /// serial remembers which model state the last one captured, so an idle
+    /// project is not rewritten every tick. The menu lists recent projects
+    /// from NSUserDefaults.
+    NSTimer*    _autosaveTimer;
+    std::size_t _autosavedSerial;
+    NSMenu*     _openRecentMenu;
 
     /// The scanned plugin catalogue as menu fodder, built once at launch.
     NSArray<NSDictionary*>* _availableInserts;
@@ -483,6 +521,24 @@ std::filesystem::path incdawSupportDirectory()
     [self.window makeKeyAndOrderFront:nil];
     [self.window makeFirstResponder:self.pianoRoll];
     [NSApp activateIgnoringOtherApps:YES];
+
+    // Project safety (Phase U1). The starter content is the baseline, not an
+    // unsaved edit; recovery is offered BEFORE this session raises the
+    // session-open flag it will clear on orderly termination.
+    _registry->markSavePoint();
+    _autosavedSerial = _registry->stateSerial();
+
+    [self offerAutosaveRecovery];
+
+    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kDefaultsSessionOpen];
+
+    __weak INCDAWAppDelegate* weakAutosaveSelf = self;
+    _autosaveTimer = [NSTimer scheduledTimerWithTimeInterval:kAutosaveInterval
+                                                     repeats:YES
+                                                       block:^(NSTimer* timer) {
+        (void)timer;
+        [weakAutosaveSelf autosaveTick];
+    }];
 }
 
 /// Points both editors at a channel. The rack owns the highlight, the Piano
@@ -1240,15 +1296,23 @@ std::filesystem::path incdawSupportDirectory()
     [self rebuildGraph];
 }
 
-/// The save itself. Live plugin state is captured FIRST, so the stateFile
-/// paths land in the project.json this save writes (docs/PLUGIN_HOST.md §6).
-- (void)writeProjectToPath
+/// The write itself, shared by Save and autosave. Live plugin state is
+/// captured FIRST, so the stateFile paths land in the project.json this save
+/// writes (docs/PLUGIN_HOST.md §6). Those paths are package-relative, which is
+/// what lets an autosave package be written elsewhere and stay self-contained.
+- (project::ProjectFile::Result)writeProjectPackageTo:(const std::filesystem::path&)path
 {
-    for (const std::string& warning :
-         project::capturePluginState(*_project, _live, _projectPath))
+    for (const std::string& warning : project::capturePluginState(*_project, _live, path))
         NSLog(@"INCDAW: save: %s", warning.c_str());
 
-    const auto result = project::ProjectFile::save(*_project, _projectPath);
+    return project::ProjectFile::save(*_project, path);
+}
+
+/// A user-initiated save to the project's own path: the save point moves, the
+/// path lands in Open Recent, and failure is said out loud rather than logged.
+- (void)writeProjectToPath
+{
+    const auto result = [self writeProjectPackageTo:_projectPath];
 
     if (!result) {
         NSAlert* alert        = [[NSAlert alloc] init];
@@ -1258,8 +1322,45 @@ std::filesystem::path incdawSupportDirectory()
         return;
     }
 
+    _registry->markSavePoint();
+    _autosavedSerial = _registry->stateSerial();   // disk is current; no autosave due
+
+    [self noteRecentProject:_projectPath];
+
     self.window.title =
         [NSString stringWithFormat:@"INCDAW — %s", _projectPath.stem().string().c_str()];
+}
+
+/// Timed sidecar autosave (docs/DECISIONS.md D-034). Quiet by design: it runs
+/// unattended, so failure is a log line, never a dialog over the user's work.
+- (void)autosaveTick
+{
+    if (!_registry->modifiedSinceSavePoint())
+        return;   // what is on disk is current
+
+    if (_registry->stateSerial() == _autosavedSerial)
+        return;   // dirty, but already captured by the previous tick
+
+    const std::filesystem::path directory = incdawAutosaveDirectory();
+    if (directory.empty())
+        return;
+
+    const std::string stem = _projectPath.empty() ? "Untitled" : _projectPath.stem().string();
+    const std::filesystem::path target =
+        project::Autosave::pathFor(directory, stem, std::chrono::system_clock::now());
+
+    const auto result = [self writeProjectPackageTo:target];
+    if (!result) {
+        NSLog(@"INCDAW: autosave failed: %s", result.error.c_str());
+        return;
+    }
+
+    _autosavedSerial = _registry->stateSerial();
+
+    [[NSUserDefaults standardUserDefaults] setObject:@(target.string().c_str())
+                                              forKey:kDefaultsLastAutosave];
+
+    (void)project::Autosave::prune(directory, stem, project::Autosave::defaultKeepCount);
 }
 
 - (void)openProject:(id)sender
@@ -1284,9 +1385,21 @@ std::filesystem::path incdawSupportDirectory()
         return;
     }
 
-    // Loaded IN PLACE: every view holds a pointer to this project object, and
-    // ProjectFile::load replaces its contents wholesale. Undo history against
-    // the previous contents no longer applies to what is now here.
+    [self loadProjectAtPath:chosen markSaved:YES];
+}
+
+/// The load itself, shared by the open panel, Open Recent and crash recovery.
+///
+/// Loaded IN PLACE: every view holds a pointer to this project object, and
+/// ProjectFile::load replaces its contents wholesale. Undo history against
+/// the previous contents no longer applies to what is now here.
+///
+/// `markSaved` distinguishes a real open (memory now equals the file — a
+/// clean save point) from recovering an autosave, where the content exists
+/// nowhere the user owns yet: that stays modified, so the quit prompt and the
+/// autosave timer keep protecting it, and Save falls back to Save As.
+- (void)loadProjectAtPath:(const std::filesystem::path&)chosen markSaved:(BOOL)markSaved
+{
     const auto result = project::ProjectFile::load(*_project, chosen);
 
     if (!result) {
@@ -1300,10 +1413,149 @@ std::filesystem::path incdawSupportDirectory()
     if (result.migrated)
         NSLog(@"INCDAW: project migrated from format %s", result.migratedFrom.c_str());
 
-    _registry->clearHistory();
-    _projectPath = chosen;
+    _registry->clearHistory();   // save point parked unreachable until re-marked
+
+    if (markSaved) {
+        _projectPath = chosen;
+        _registry->markSavePoint();
+        [self noteRecentProject:chosen];
+    } else {
+        _projectPath.clear();
+        self.window.title =
+            [NSString stringWithFormat:@"INCDAW — recovered %s", chosen.stem().string().c_str()];
+    }
 
     [self adoptLoadedProject];
+}
+
+/// Offered once at launch when the previous session never cleared its
+/// session-open flag — a crash or a force quit — and it left an autosave.
+- (void)offerAutosaveRecovery
+{
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+
+    if (![defaults boolForKey:kDefaultsSessionOpen])
+        return;   // the previous session ended cleanly
+
+    NSString* stored = [defaults stringForKey:kDefaultsLastAutosave];
+    if (stored == nil)
+        return;
+
+    const std::filesystem::path autosave{stored.UTF8String};
+    if (!project::ProjectFile::isProjectPackage(autosave))
+        return;
+
+    NSAlert* alert        = [[NSAlert alloc] init];
+    alert.messageText     = @"INCDAW did not quit cleanly";
+    alert.informativeText = [NSString
+        stringWithFormat:@"An autosave from the previous session exists:\n%s\n\nOpen it? "
+                         @"Saving afterwards will ask where — the autosave itself is never "
+                         @"overwritten.",
+                         autosave.filename().string().c_str()];
+    [alert addButtonWithTitle:@"Open Autosave"];
+    [alert addButtonWithTitle:@"Ignore"];
+
+    if ([alert runModal] == NSAlertFirstButtonReturn)
+        [self loadProjectAtPath:autosave markSaved:NO];
+
+    // One-shot either way: the offer belongs to the crashed session, not to
+    // every launch after it. The autosave files themselves stay on disk.
+    [defaults removeObjectForKey:kDefaultsLastAutosave];
+}
+
+/// Reads the recents list from defaults, mutates it with the pure policy in
+/// app/RecentProjects, writes it back, and refreshes the menu.
+- (void)noteRecentProject:(const std::filesystem::path&)path
+{
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+
+    std::vector<std::string> list;
+    for (NSString* entry in [defaults stringArrayForKey:kDefaultsRecentProjects])
+        list.push_back(entry.UTF8String);
+
+    list = app::RecentProjects::updated(std::move(list), path.string());
+
+    NSMutableArray<NSString*>* stored = [NSMutableArray arrayWithCapacity:list.size()];
+    for (const std::string& entry : list)
+        [stored addObject:@(entry.c_str())];
+
+    [defaults setObject:stored forKey:kDefaultsRecentProjects];
+    [self rebuildOpenRecentMenu];
+}
+
+- (void)dropRecentProject:(const std::filesystem::path&)path
+{
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+
+    std::vector<std::string> list;
+    for (NSString* entry in [defaults stringArrayForKey:kDefaultsRecentProjects])
+        list.push_back(entry.UTF8String);
+
+    list = app::RecentProjects::without(std::move(list), path.string());
+
+    NSMutableArray<NSString*>* stored = [NSMutableArray arrayWithCapacity:list.size()];
+    for (const std::string& entry : list)
+        [stored addObject:@(entry.c_str())];
+
+    [defaults setObject:stored forKey:kDefaultsRecentProjects];
+    [self rebuildOpenRecentMenu];
+}
+
+- (void)openRecentProject:(NSMenuItem*)sender
+{
+    NSString* stored = sender.representedObject;
+    if (stored == nil)
+        return;
+
+    const std::filesystem::path chosen{stored.UTF8String};
+
+    if (!project::ProjectFile::isProjectPackage(chosen)) {
+        NSAlert* alert        = [[NSAlert alloc] init];
+        alert.messageText     = @"Project is no longer there";
+        alert.informativeText = @(chosen.string().c_str());
+        [alert runModal];
+
+        [self dropRecentProject:chosen];
+        return;
+    }
+
+    [self loadProjectAtPath:chosen markSaved:YES];
+}
+
+- (void)clearRecentProjects:(id)sender
+{
+    (void)sender;
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:kDefaultsRecentProjects];
+    [self rebuildOpenRecentMenu];
+}
+
+- (void)rebuildOpenRecentMenu
+{
+    if (_openRecentMenu == nil)
+        return;
+
+    [_openRecentMenu removeAllItems];
+
+    NSArray<NSString*>* recents =
+        [[NSUserDefaults standardUserDefaults] stringArrayForKey:kDefaultsRecentProjects];
+
+    for (NSString* path in recents) {
+        NSMenuItem* item =
+            [_openRecentMenu addItemWithTitle:path.lastPathComponent.stringByDeletingPathExtension
+                                       action:@selector(openRecentProject:)
+                                keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = path;
+        item.toolTip           = path;
+    }
+
+    if (recents.count > 0)
+        [_openRecentMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* clear = [_openRecentMenu addItemWithTitle:@"Clear Menu"
+                                                   action:@selector(clearRecentProjects:)
+                                            keyEquivalent:@""];
+    clear.target = self;
 }
 
 /// Points everything at what was just loaded: tempo, views, the graph — and
@@ -1564,6 +1816,14 @@ std::filesystem::path incdawSupportDirectory()
 
 - (void)housekeeping
 {
+    // The close button's dot. Independent of audio: a machine with no output
+    // device still edits, so it still has unsaved work to signal.
+    if (_registry != nullptr) {
+        const BOOL edited = _registry->modifiedSinceSavePoint() ? YES : NO;
+        if (self.window.documentEdited != edited)
+            self.window.documentEdited = edited;
+    }
+
     if (!_audioReady)
         return;
 
@@ -1670,6 +1930,15 @@ std::filesystem::path incdawSupportDirectory()
 
     NSMenu* fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
     [fileMenu addItemWithTitle:@"Open…" action:@selector(openProject:) keyEquivalent:@"o"];
+
+    NSMenuItem* openRecentItem = [[NSMenuItem alloc] initWithTitle:@"Open Recent"
+                                                            action:nil
+                                                     keyEquivalent:@""];
+    _openRecentMenu       = [[NSMenu alloc] initWithTitle:@"Open Recent"];
+    openRecentItem.submenu = _openRecentMenu;
+    [fileMenu addItem:openRecentItem];
+    [self rebuildOpenRecentMenu];
+
     [fileMenu addItem:[NSMenuItem separatorItem]];
     [fileMenu addItemWithTitle:@"Save" action:@selector(saveProject:) keyEquivalent:@"s"];
     [fileMenu addItemWithTitle:@"Save As…" action:@selector(saveProjectAs:) keyEquivalent:@"S"];
@@ -1824,9 +2093,46 @@ std::filesystem::path incdawSupportDirectory()
     NSApp.mainMenu = menuBar;
 }
 
+/// The quit prompt. Losing work silently was the standing gap the whole time
+/// the File menu existed; this is where it closes.
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender
+{
+    (void)sender;
+
+    if (_registry == nullptr || !_registry->modifiedSinceSavePoint())
+        return NSTerminateNow;
+
+    NSAlert* alert        = [[NSAlert alloc] init];
+    alert.messageText     = @"Save changes before quitting?";
+    alert.informativeText = @"Unsaved changes will be lost otherwise.";
+    [alert addButtonWithTitle:@"Save"];
+    [alert addButtonWithTitle:@"Don't Save"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    const NSModalResponse choice = [alert runModal];
+
+    if (choice == NSAlertThirdButtonReturn)
+        return NSTerminateCancel;
+
+    if (choice == NSAlertSecondButtonReturn)
+        return NSTerminateNow;
+
+    [self saveProject:nil];
+
+    // Save can fall through to Save As, and Save As can be cancelled —
+    // quitting then would lose exactly what the user just declined to write.
+    return _registry->modifiedSinceSavePoint() ? NSTerminateCancel : NSTerminateNow;
+}
+
 - (void)applicationWillTerminate:(NSNotification*)notification
 {
     (void)notification;
+
+    // An orderly exit: the next launch must not offer recovery.
+    [[NSUserDefaults standardUserDefaults] setBool:NO forKey:kDefaultsSessionOpen];
+
+    [_autosaveTimer invalidate];
+    _autosaveTimer = nil;
 
     // Stop the device before the graph it is reading goes away. A recording
     // in flight is finished first — quitting must not truncate a take's file.
