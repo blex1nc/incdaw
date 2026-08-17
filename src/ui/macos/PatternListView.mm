@@ -3,6 +3,7 @@
 #include "app/CommandRegistry.h"
 #include "app/commands/PatternCommands.h"
 #include "project/Model.h"
+#include "ui/macos/Theme.h"
 
 #include <memory>
 #include <string>
@@ -10,32 +11,15 @@
 
 using namespace incdaw;
 
+namespace theme = incdaw::ui::theme;
+
 namespace {
 
-constexpr CGFloat rowHeight = 26.0;
-constexpr CGFloat swatch    = 5.0;
+using theme::Ink;
+
+constexpr CGFloat rowHeight = 30.0;
+constexpr CGFloat swatch    = 4.0;
 constexpr CGFloat padding   = 8.0;
-
-NSColor* grey(CGFloat white) { return [NSColor colorWithCalibratedWhite:white alpha:1.0]; }
-
-NSColor* colourFrom(std::uint32_t argb)
-{
-    return [NSColor colorWithCalibratedRed:static_cast<CGFloat>((argb >> 16) & 0xFFu) / 255.0
-                                     green:static_cast<CGFloat>((argb >> 8) & 0xFFu) / 255.0
-                                      blue:static_cast<CGFloat>(argb & 0xFFu) / 255.0
-                                     alpha:1.0];
-}
-
-void drawText(NSString* text, NSRect rect, NSColor* colour)
-{
-    NSMutableParagraphStyle* style = [[NSMutableParagraphStyle alloc] init];
-    style.lineBreakMode = NSLineBreakByTruncatingTail;
-
-    [text drawInRect:rect
-      withAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:12.0],
-                       NSForegroundColorAttributeName: colour,
-                       NSParagraphStyleAttributeName: style}];
-}
 
 } // namespace
 
@@ -62,18 +46,19 @@ void drawText(NSString* text, NSRect rect, NSColor* colour)
 
 - (std::size_t)rowAtPoint:(NSPoint)point
 {
-    if (point.y < 0.0)
+    // 26 points of section heading sit above the first row.
+    const CGFloat y = point.y - 26.0;
+    if (y < 0.0)
         return static_cast<std::size_t>(-1);
 
-    return static_cast<std::size_t>(point.y / rowHeight);
+    return static_cast<std::size_t>(y / rowHeight);
 }
 
 - (void)drawRect:(NSRect)dirtyRect
 {
     (void)dirtyRect;
 
-    [grey(0.115) setFill];
-    NSRectFill(self.bounds);
+    theme::fillRect(self.bounds, theme::ink(Ink::panel));
 
     if (_project == nullptr)
         return;
@@ -81,31 +66,56 @@ void drawText(NSString* text, NSRect rect, NSColor* colour)
     const std::vector<project::Pattern>& patterns = _project->patterns();
     const CGFloat width = self.bounds.size.width;
 
+    theme::drawText(@"PATTERNS", NSMakeRect(padding, 8.0, width - padding * 2.0, 14.0),
+                    theme::ink(Ink::textDim), theme::labelFont(9.5, NSFontWeightBold));
+
+    const CGFloat top = 26.0;
+
     for (std::size_t row = 0; row < patterns.size(); ++row) {
         const project::Pattern& pattern = patterns[row];
         const bool selected = pattern.id.value() == _selectedPatternIdValue;
 
-        const NSRect rect = NSMakeRect(0, static_cast<CGFloat>(row) * rowHeight, width, rowHeight - 1.0);
+        const NSRect rect = NSMakeRect(4.0, top + static_cast<CGFloat>(row) * rowHeight,
+                                       width - 8.0, rowHeight - 3.0);
 
-        [(selected ? grey(0.22) : grey(0.16)) setFill];
-        NSRectFill(rect);
+        NSColor* colour = theme::fromArgb(pattern.colour);
 
-        [colourFrom(pattern.colour) setFill];
-        NSRectFill(NSMakeRect(0, rect.origin.y, swatch, rect.size.height));
+        if (selected) {
+            theme::fillGradient(rect, theme::metrics::radiusControl,
+                                theme::mix(theme::ink(Ink::rowSelected), colour, 0.20),
+                                theme::ink(Ink::rowSelected), true);
+            theme::strokeRounded(rect, theme::metrics::radiusControl,
+                                 theme::withAlpha(theme::ink(Ink::accent), 0.8));
+        } else {
+            theme::fillRounded(rect, theme::metrics::radiusControl, theme::ink(Ink::rowOdd));
+        }
 
-        drawText(@(pattern.name.c_str()),
-                 NSMakeRect(swatch + padding, rect.origin.y + 5.0,
-                            width - swatch - padding * 2.0, rowHeight - 8.0),
-                 selected ? grey(0.95) : grey(0.75));
+        // The colour spine: enough to identify the pattern in the playlist by
+        // eye, not enough to become the row itself.
+        theme::fillRounded(NSMakeRect(NSMinX(rect) + 4.0, NSMinY(rect) + 5.0, swatch,
+                                      rect.size.height - 10.0),
+                           swatch / 2.0, colour);
+
+        theme::drawTextCentred(@(pattern.name.c_str()),
+                               NSMakeRect(NSMinX(rect) + swatch + padding + 2.0, NSMinY(rect),
+                                          rect.size.width - swatch - padding * 2.0,
+                                          rect.size.height),
+                               selected ? theme::ink(Ink::textPrimary)
+                                        : theme::ink(Ink::textSecondary),
+                               theme::labelFont(12.0, selected ? NSFontWeightSemibold
+                                                               : NSFontWeightRegular));
     }
 
-    const NSRect addRow = NSMakeRect(0, static_cast<CGFloat>(patterns.size()) * rowHeight,
-                                     width, rowHeight - 1.0);
-    [grey(0.135) setFill];
-    NSRectFill(addRow);
-    drawText(@"＋  New pattern",
-             NSMakeRect(swatch + padding, addRow.origin.y + 5.0, width - swatch - padding, rowHeight - 8.0),
-             grey(0.55));
+    const NSRect addRow = NSMakeRect(4.0, top + static_cast<CGFloat>(patterns.size()) * rowHeight,
+                                     width - 8.0, rowHeight - 3.0);
+
+    theme::strokeRounded(addRow, theme::metrics::radiusControl,
+                         theme::withAlpha(theme::ink(Ink::textDim), 0.35));
+
+    theme::drawTextCentred(@"＋  New pattern",
+                           NSMakeRect(NSMinX(addRow) + swatch + padding + 2.0, NSMinY(addRow),
+                                      addRow.size.width - padding, addRow.size.height),
+                           theme::ink(Ink::textSecondary), theme::labelFont(12.0));
 }
 
 - (void)mouseDown:(NSEvent*)event

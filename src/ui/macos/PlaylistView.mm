@@ -7,6 +7,7 @@
 #include "engine/audio/WaveformOverview.h"
 #include "project/PatternCompiler.h"
 #include "project/Model.h"
+#include "ui/macos/Theme.h"
 
 #include <algorithm>
 #include <cmath>
@@ -19,46 +20,24 @@ using namespace incdaw;
 using incdaw::engine::Tick;
 using incdaw::engine::ticksPerQuarterNote;
 
+namespace theme = incdaw::ui::theme;
+
 namespace {
+
+using theme::Ink;
 
 /// Track headers down the left edge, and the ruler across the top. Both are
 /// pinned: the grid scrolls under them.
-constexpr CGFloat headerWidth = 150.0;
-constexpr CGFloat rulerHeight = 22.0;
+constexpr CGFloat headerWidth = 176.0;
+constexpr CGFloat rulerHeight = theme::metrics::rulerHeight;
 
 /// The row below the last track, which creates one.
-constexpr CGFloat addRowHeight = 26.0;
+constexpr CGFloat addRowHeight = 28.0;
 
-constexpr CGFloat buttonWidth = 18.0;
-constexpr CGFloat padding     = 6.0;
+constexpr CGFloat buttonWidth = 20.0;
+constexpr CGFloat padding     = 7.0;
 
-NSColor* grey(CGFloat white) { return [NSColor colorWithCalibratedWhite:white alpha:1.0]; }
-
-NSColor* colourFrom(std::uint32_t argb, CGFloat brightness = 1.0)
-{
-    return [NSColor colorWithCalibratedRed:static_cast<CGFloat>((argb >> 16) & 0xFFu) / 255.0 * brightness
-                                     green:static_cast<CGFloat>((argb >> 8) & 0xFFu) / 255.0 * brightness
-                                      blue:static_cast<CGFloat>(argb & 0xFFu) / 255.0 * brightness
-                                     alpha:1.0];
-}
-
-void fillRect(NSRect rect, NSColor* colour)
-{
-    [colour setFill];
-    NSRectFill(rect);
-}
-
-void drawText(NSString* text, NSRect rect, NSColor* colour, CGFloat size, BOOL centred = NO)
-{
-    NSMutableParagraphStyle* style = [[NSMutableParagraphStyle alloc] init];
-    style.lineBreakMode = NSLineBreakByTruncatingTail;
-    style.alignment     = centred ? NSTextAlignmentCenter : NSTextAlignmentLeft;
-
-    [text drawInRect:rect
-      withAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:size],
-                       NSForegroundColorAttributeName: colour,
-                       NSParagraphStyleAttributeName: style}];
-}
+using theme::fillRect;
 
 enum class PlaylistDrag { none, move, resize, boxSelect };
 
@@ -144,7 +123,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 {
     (void)dirtyRect;
 
-    fillRect(self.bounds, grey(0.10));
+    fillRect(self.bounds, theme::ink(Ink::panel));
 
     if (_project == nullptr)
         return;
@@ -160,16 +139,18 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
                                       std::abs(_dragCurrent.x - _dragOrigin.x),
                                       std::abs(_dragCurrent.y - _dragOrigin.y));
 
-        [[NSColor colorWithCalibratedWhite:1.0 alpha:0.10] setFill];
-        NSRectFillUsingOperation(box, NSCompositingOperationSourceOver);
-        [[NSColor colorWithCalibratedWhite:1.0 alpha:0.35] setStroke];
-        NSFrameRect(box);
+        theme::fillRounded(box, 3.0, theme::ink(Ink::selectionFill));
+        theme::strokeRounded(box, 3.0, theme::ink(Ink::selectionStroke));
     }
 }
 
 - (void)drawRuler
 {
-    fillRect(NSMakeRect(0, 0, self.bounds.size.width, rulerHeight), grey(0.14));
+    const NSRect ruler = NSMakeRect(0, 0, self.bounds.size.width, rulerHeight);
+
+    theme::fillGradient(ruler, 0.0, theme::ink(Ink::panelRaisedTop),
+                        theme::ink(Ink::panelRaised), true);
+    theme::drawSeparator(NSMakeRect(0, rulerHeight - 1.0, self.bounds.size.width, 1.0));
 
     const auto& viewport = _model->viewport();
     const Tick barTicks  = ticksPerQuarterNote * 4;
@@ -182,10 +163,20 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         if (x < headerWidth)
             continue;
 
-        fillRect(NSMakeRect(x, 0, 1.0, rulerHeight), grey(0.30));
+        const bool fourBar = (tick / barTicks) % 4 == 0;
 
-        drawText([NSString stringWithFormat:@"%lld", static_cast<long long>(tick / barTicks) + 1],
-                 NSMakeRect(x + 3.0, 4.0, 40.0, 14.0), grey(0.55), 10.0);
+        // Every fourth bar gets a full-height tick and the rest a stub, so the
+        // ruler can be counted without reading each number.
+        fillRect(NSMakeRect(x, fourBar ? 4.0 : rulerHeight - 8.0, 1.0,
+                            fourBar ? rulerHeight - 5.0 : 7.0),
+                 fourBar ? theme::ink(Ink::textDim) : theme::ink(Ink::gridLineStrong));
+
+        if (fourBar || _model->pointsPerTick() * static_cast<double>(barTicks) > 42.0)
+            theme::drawText([NSString stringWithFormat:@"%lld",
+                                                       static_cast<long long>(tick / barTicks) + 1],
+                            NSMakeRect(x + 4.0, 5.0, 40.0, 13.0),
+                            fourBar ? theme::ink(Ink::textSecondary) : theme::ink(Ink::textDim),
+                            theme::numericFont(9.5, NSFontWeightSemibold));
     }
 }
 
@@ -202,39 +193,46 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         if (y + height < rulerHeight || y > self.bounds.size.height)
             continue;
 
+        NSColor* colour = theme::fromArgb(track.colour);
+
         // The lane behind the clips, so an empty track is still a place rather
         // than a gap.
         fillRect(NSMakeRect(headerWidth, y, self.bounds.size.width - headerWidth, height - 1.0),
-                 (row % 2) == 0 ? grey(0.135) : grey(0.125));
+                 (row % 2) == 0 ? theme::ink(Ink::rowEven) : theme::ink(Ink::rowOdd));
 
         [self drawBarLinesInLaneAt:y height:height - 1.0];
 
-        fillRect(NSMakeRect(0, y, headerWidth, height - 1.0), grey(0.17));
-        fillRect(NSMakeRect(0, y, 4.0, height - 1.0),
-                 colourFrom(track.colour, track.muted ? 0.4 : 1.0));
+        // ── The track's header ───────────────────────────────────────────────
+        const NSRect header = NSMakeRect(2.0, y + 1.0, headerWidth - 5.0, height - 4.0);
+        theme::drawPanel(header, theme::metrics::radiusControl, false, true);
 
-        drawText(@(track.name.c_str()),
-                 NSMakeRect(10.0, y + 5.0, headerWidth - 2.0 * buttonWidth - 3.0 * padding, 16.0),
-                 track.muted ? grey(0.45) : grey(0.88), 12.0);
+        theme::fillGradient(NSMakeRect(NSMinX(header) + 5.0, NSMinY(header) + 5.0, 8.0,
+                                       header.size.height - 10.0),
+                            2.5, theme::lighten(colour, 0.25),
+                            theme::darken(colour, track.muted ? 0.65 : 0.15), true);
 
-        const NSRect mute = [self muteRectForRow:row];
-        fillRect(mute, track.muted ? [NSColor colorWithCalibratedRed:0.75 green:0.30 blue:0.25 alpha:1.0]
-                                   : grey(0.24));
-        drawText(@"M", NSMakeRect(mute.origin.x, mute.origin.y + 2.0, mute.size.width, mute.size.height),
-                 grey(0.9), 10.0, YES);
+        theme::drawText(@(track.name.c_str()),
+                        NSMakeRect(NSMinX(header) + 20.0, NSMinY(header) + 6.0,
+                                   header.size.width - 2.0 * buttonWidth - 3.0 * padding, 16.0),
+                        track.muted ? theme::ink(Ink::textDim) : theme::ink(Ink::textPrimary),
+                        theme::labelFont(12.0, NSFontWeightMedium));
 
-        const NSRect solo = [self soloRectForRow:row];
-        fillRect(solo, track.soloed ? [NSColor colorWithCalibratedRed:0.85 green:0.70 blue:0.25 alpha:1.0]
-                                    : grey(0.24));
-        drawText(@"S", NSMakeRect(solo.origin.x, solo.origin.y + 2.0, solo.size.width, solo.size.height),
-                 track.soloed ? grey(0.1) : grey(0.9), 10.0, YES);
+        theme::drawToggle([self muteRectForRow:row], @"M", track.muted, theme::ink(Ink::mute), true);
+        theme::drawToggle([self soloRectForRow:row], @"S", track.soloed, theme::ink(Ink::solo), true);
     }
 
     const NSRect addRow = [self addTrackRect];
     if (addRow.origin.y < self.bounds.size.height) {
-        fillRect(addRow, grey(0.13));
-        drawText(@"＋  Add track",
-                 NSMakeRect(10.0, addRow.origin.y + 6.0, headerWidth, 16.0), grey(0.55), 12.0);
+        const NSRect rect = NSMakeRect(2.0, addRow.origin.y + 2.0, headerWidth - 5.0,
+                                       addRow.size.height - 6.0);
+
+        theme::strokeRounded(rect, theme::metrics::radiusControl,
+                             theme::withAlpha(theme::ink(Ink::textDim), 0.35));
+
+        theme::drawTextCentred(@"＋  Add track",
+                               NSMakeRect(NSMinX(rect) + 10.0, NSMinY(rect), rect.size.width,
+                                          rect.size.height),
+                               theme::ink(Ink::textSecondary), theme::labelFont(12.0));
     }
 }
 
@@ -252,7 +250,8 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
             continue;
 
         const bool fourBar = (tick / barTicks) % 4 == 0;
-        fillRect(NSMakeRect(x, y, 1.0, height), fourBar ? grey(0.24) : grey(0.175));
+        fillRect(NSMakeRect(x, y, 1.0, height),
+                 fourBar ? theme::ink(Ink::gridLineStrong) : theme::ink(Ink::gridLine));
     }
 }
 
@@ -261,32 +260,24 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     _model->collectVisibleClips(*_project, _visible);
 
     for (const auto& clip : _visible) {
-        const NSRect rect = NSMakeRect(clip.rect.x + headerWidth, clip.rect.y + rulerHeight,
-                                       std::max(2.0, clip.rect.width), clip.rect.height);
-
-        fillRect(rect, colourFrom(clip.colour, clip.muted ? 0.45 : 0.75));
-
-        // A lighter cap at the top, so overlapping clips stay readable and the
-        // name has something to sit on.
-        fillRect(NSMakeRect(rect.origin.x, rect.origin.y, rect.size.width, 14.0),
-                 colourFrom(clip.colour, clip.muted ? 0.55 : 1.0));
+        const NSRect rect = NSMakeRect(clip.rect.x + headerWidth, clip.rect.y + rulerHeight + 1.0,
+                                       std::max(2.0, clip.rect.width),
+                                       std::max(2.0, clip.rect.height - 3.0));
 
         const project::Clip& model = _project->clips()[clip.index];
 
+        // One region shape for every kind of clip; what is drawn inside it is
+        // what says whether it holds notes, audio or an automation ride.
+        const NSRect body = theme::drawRegion(rect, theme::fromArgb(clip.colour),
+                                              @(model.name.c_str()), clip.selected, clip.muted,
+                                              true);
+
         if (model.type == project::ClipType::audio)
-            [self drawWaveformFor:model inRect:rect];
+            [self drawWaveformFor:model inBody:body];
         else if (model.type == project::ClipType::automation)
-            [self drawAutomationCurveFor:model inRect:rect];
-
-        drawText(@(model.name.c_str()),
-                 NSMakeRect(rect.origin.x + 4.0, rect.origin.y + 1.0,
-                            std::max(0.0, rect.size.width - 8.0), 13.0),
-                 grey(0.08), 10.0);
-
-        if (clip.selected) {
-            [grey(1.0) setStroke];
-            NSFrameRect(rect);
-        }
+            [self drawAutomationCurveFor:model inBody:body];
+        else
+            [self drawPatternPreviewFor:model inBody:body];
     }
 }
 
@@ -312,16 +303,14 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     return &slot;
 }
 
-- (void)drawWaveformFor:(const project::Clip&)model inRect:(NSRect)rect
+- (void)drawWaveformFor:(const project::Clip&)model inBody:(NSRect)body
 {
     const engine::WaveformOverview* overview = [self overviewForAsset:model.source.value()];
     if (overview->bucketCount() == 0 || overview->channelCount == 0 || model.length <= 0)
         return;
 
-    // Below the name cap; folded to mono — a clip body is a reminder of what
-    // the audio looks like, not the editor.
-    const NSRect body = NSMakeRect(rect.origin.x, rect.origin.y + 15.0,
-                                   rect.size.width, rect.size.height - 17.0);
+    // Folded to mono — a clip body is a reminder of what the audio looks like,
+    // not the editor.
     if (body.size.height < 6.0 || body.size.width < 2.0)
         return;
 
@@ -329,7 +318,9 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     const double scale  = body.size.height * 0.45;
     const double framesPerPoint = static_cast<double>(model.length) / body.size.width;
 
-    [[NSColor colorWithCalibratedWhite:0.05 alpha:0.5] setFill];
+    // Light on the region's own colour, the way a waveform reads inside a
+    // coloured block rather than as a hole cut through it.
+    [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.62] setFill];
 
     for (double x = 0.0; x < body.size.width; x += 1.0) {
         const auto from = model.sourceOffset
@@ -369,7 +360,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 /// The lane's envelope across the clip's window, as a thumbnail polyline.
 /// Linear between points — curve shapes are an editing-surface concern; the
 /// clip body only has to say "this is the shape of the ride".
-- (void)drawAutomationCurveFor:(const project::Clip&)model inRect:(NSRect)rect
+- (void)drawAutomationCurveFor:(const project::Clip&)model inBody:(NSRect)body
 {
     const project::AutomationLane* lane = nullptr;
     for (const project::AutomationLane& candidate : _project->automation())
@@ -379,8 +370,6 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     if (lane == nullptr || lane->points.empty() || model.lengthTicks <= 0)
         return;
 
-    const NSRect body = NSMakeRect(rect.origin.x, rect.origin.y + 15.0,
-                                   rect.size.width, rect.size.height - 17.0);
     if (body.size.height < 6.0 || body.size.width < 2.0)
         return;
 
@@ -427,8 +416,61 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
             [path lineToPoint:point];
     }
 
-    [[NSColor colorWithCalibratedWhite:0.05 alpha:0.7] setStroke];
+    [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.75] setStroke];
     [path stroke];
+}
+
+/// A pattern clip shows the notes it will play, at the scale of the clip. It is
+/// the same information the Piano Roll draws, reduced to what fits: without it
+/// every pattern clip in an arrangement looks identical.
+- (void)drawPatternPreviewFor:(const project::Clip&)model inBody:(NSRect)body
+{
+    if (body.size.height < 8.0 || body.size.width < 6.0 || model.lengthTicks <= 0)
+        return;
+
+    const project::Pattern* pattern = _project->findPattern(model.source);
+    if (pattern == nullptr)
+        return;
+
+    int lowest  = 127;
+    int highest = 0;
+
+    for (const auto& content : pattern->channels)
+        for (const project::MidiEvent& event : content.events) {
+            if (event.type != project::MidiEventType::note)
+                continue;
+
+            lowest  = std::min(lowest, static_cast<int>(event.key));
+            highest = std::max(highest, static_cast<int>(event.key));
+        }
+
+    if (lowest > highest)
+        return;
+
+    const double span   = std::max(1, highest - lowest + 1);
+    const double scale  = body.size.width / static_cast<double>(model.lengthTicks);
+    const double height = std::max(1.0, std::min(3.0, body.size.height / span));
+
+    [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.55] setFill];
+
+    for (const auto& content : pattern->channels)
+        for (const project::MidiEvent& event : content.events) {
+            if (event.type != project::MidiEventType::note)
+                continue;
+
+            const Tick from = event.tick - model.sourceOffsetTicks;
+            if (from < 0 || from >= model.lengthTicks)
+                continue;
+
+            const double x = body.origin.x + static_cast<double>(from) * scale;
+            const double width = std::max(1.0, static_cast<double>(event.duration) * scale);
+            const double y = body.origin.y + body.size.height
+                           - (static_cast<double>(event.key - lowest) + 1.0)
+                                 * (body.size.height / span);
+
+            NSRectFillUsingOperation(NSMakeRect(x, y, std::min(width, NSMaxX(body) - x), height),
+                                     NSCompositingOperationSourceOver);
+        }
 }
 
 - (void)drawPlayhead
@@ -440,8 +482,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     if (x < headerWidth || x > self.bounds.size.width)
         return;
 
-    fillRect(NSMakeRect(x, 0, 1.5, self.bounds.size.height),
-             [NSColor colorWithCalibratedRed:0.95 green:0.85 blue:0.35 alpha:1.0]);
+    theme::drawPlayhead(x, self.bounds, rulerHeight - 6.0, true);
 }
 
 // ── Header geometry ──────────────────────────────────────────────────────────
@@ -449,13 +490,15 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 - (NSRect)muteRectForRow:(std::size_t)row
 {
     const CGFloat y = rulerHeight + _model->trackY(_project->tracks(), row);
-    return NSMakeRect(headerWidth - 2.0 * buttonWidth - 2.0 * padding, y + 5.0, buttonWidth, 16.0);
+    return NSMakeRect(headerWidth - 2.0 * buttonWidth - 2.0 * padding - 3.0, y + 6.0,
+                      buttonWidth, buttonWidth);
 }
 
 - (NSRect)soloRectForRow:(std::size_t)row
 {
     const NSRect mute = [self muteRectForRow:row];
-    return NSMakeRect(mute.origin.x + buttonWidth + padding, mute.origin.y, buttonWidth, 16.0);
+    return NSMakeRect(mute.origin.x + buttonWidth + padding, mute.origin.y, buttonWidth,
+                      buttonWidth);
 }
 
 - (NSRect)addTrackRect

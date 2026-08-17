@@ -6,6 +6,7 @@
 #include "app/commands/SamplerCommands.h"
 #include "app/commands/StepCommands.h"
 #include "project/Model.h"
+#include "ui/macos/Theme.h"
 
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -18,39 +19,17 @@
 using namespace incdaw;
 using incdaw::engine::Tick;
 
+namespace theme = incdaw::ui::theme;
+
 namespace {
 
-NSColor* colourFrom(std::uint32_t argb, CGFloat brightness = 1.0)
+using theme::Ink;
+
+/// The rack draws in the model's coordinates; this is the only place they turn
+/// into AppKit rectangles.
+NSRect box(app::ChannelRackModel::Rect rect)
 {
-    const CGFloat red   = static_cast<CGFloat>((argb >> 16) & 0xFFu) / 255.0;
-    const CGFloat green = static_cast<CGFloat>((argb >> 8) & 0xFFu) / 255.0;
-    const CGFloat blue  = static_cast<CGFloat>(argb & 0xFFu) / 255.0;
-
-    return [NSColor colorWithCalibratedRed:red * brightness
-                                     green:green * brightness
-                                      blue:blue * brightness
-                                     alpha:1.0];
-}
-
-NSColor* grey(CGFloat white) { return [NSColor colorWithCalibratedWhite:white alpha:1.0]; }
-
-void fill(app::ChannelRackModel::Rect rect, NSColor* colour)
-{
-    [colour setFill];
-    NSRectFill(NSMakeRect(rect.x, rect.y, rect.width, rect.height));
-}
-
-void drawText(NSString* text, app::ChannelRackModel::Rect rect, NSColor* colour, CGFloat size,
-              BOOL centred = NO)
-{
-    NSMutableParagraphStyle* style = [[NSMutableParagraphStyle alloc] init];
-    style.lineBreakMode = NSLineBreakByTruncatingTail;
-    style.alignment     = centred ? NSTextAlignmentCenter : NSTextAlignmentLeft;
-
-    [text drawInRect:NSMakeRect(rect.x, rect.y, rect.width, rect.height)
-      withAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:size],
-                       NSForegroundColorAttributeName: colour,
-                       NSParagraphStyleAttributeName: style}];
+    return NSMakeRect(rect.x, rect.y, rect.width, rect.height);
 }
 
 /// What a drag started on, so that dragging keeps doing the same thing even
@@ -110,14 +89,20 @@ enum class RackDrag { none, volume, paintSteps };
 {
     (void)dirtyRect;
 
-    [grey(0.10) setFill];
-    NSRectFill(self.bounds);
+    theme::fillRect(self.bounds, theme::ink(Ink::panel));
 
     if (_project == nullptr)
         return;
 
     const project::Pattern* pattern = [self currentPattern];
     const auto& layout = _model->layout();
+
+    // The step grid sits in a well that runs the height of the rack, so the
+    // pads read as one instrument rather than as loose buttons per row.
+    const NSRect gridArea = NSMakeRect(layout.headerWidth - 4.0, 0.0,
+                                       self.bounds.size.width - layout.headerWidth + 4.0,
+                                       self.bounds.size.height);
+    theme::fillRect(gridArea, theme::ink(Ink::panelSunken));
 
     // Only the steps that fit are drawn; a 512-step pattern must not cost 512
     // rectangles per row per frame.
@@ -131,65 +116,93 @@ enum class RackDrag { none, volume, paintSteps };
 
     const std::vector<project::Channel>& channels = _project->channels();
 
+    // Bar lines behind the pads: four beats of sixteenths, the division a step
+    // sequencer is counted in.
+    for (int step = _model->firstStep(); step <= lastStep; ++step) {
+        if (step % 16 != 0)
+            continue;
+
+        const auto cell = _model->stepRect(0, step);
+        theme::fillRect(NSMakeRect(cell.x - layout.stepGap / 2.0 - 0.5, 0.0, 1.0,
+                                   self.bounds.size.height),
+                        theme::ink(Ink::gridLineStrong));
+    }
+
     for (std::size_t row = 0; row < channels.size(); ++row) {
         const project::Channel& channel = channels[row];
         const bool selected = channel.id.value() == _selectedChannelIdValue;
 
-        fill(_model->rowRect(row), selected ? grey(0.20) : grey(0.145));
-        fill(_model->swatchRect(row), colourFrom(channel.colour, channel.muted ? 0.4 : 1.0));
+        NSColor* colour = theme::fromArgb(channel.colour);
 
-        drawText(@(channel.name.c_str()), _model->nameRect(row),
-                 channel.muted ? grey(0.45) : grey(0.88), 12.0);
+        // ── Header: the channel's own strip ──────────────────────────────────
+        const NSRect header = NSInsetRect(box(_model->rowRect(row)), 2.0, 0.0);
+        theme::drawPanel(header, theme::metrics::radiusControl, selected, true);
 
-        const auto mute = _model->muteRect(row);
-        fill(mute, channel.muted ? [NSColor colorWithCalibratedRed:0.75 green:0.30 blue:0.25 alpha:1.0]
-                                 : grey(0.24));
-        drawText(@"M", {mute.x, mute.y + 2.0, mute.width, mute.height}, grey(0.9), 10.0, YES);
+        if (selected)
+            theme::strokeRounded(header, theme::metrics::radiusControl, theme::ink(Ink::accent));
 
-        const auto solo = _model->soloRect(row);
-        fill(solo, channel.soloed ? [NSColor colorWithCalibratedRed:0.85 green:0.70 blue:0.25 alpha:1.0]
-                                  : grey(0.24));
-        drawText(@"S", {solo.x, solo.y + 2.0, solo.width, solo.height},
-                 channel.soloed ? grey(0.1) : grey(0.9), 10.0, YES);
+        // The colour tile: a channel is identified by its colour before it is
+        // read by its name, which is why it gets a lit tile and not a hairline.
+        const NSRect swatch = NSMakeRect(NSMinX(header) + 5.0, NSMinY(header) + 5.0,
+                                         layout.swatchWidth,
+                                         header.size.height - 10.0);
 
-        const auto volume = _model->volumeRect(row);
-        fill(volume, grey(0.22));
-        fill({volume.x, volume.y, volume.width * channel.volume, volume.height}, grey(0.55));
+        theme::fillGradient(swatch, 2.5, theme::lighten(colour, 0.25),
+                            theme::darken(colour, channel.muted ? 0.65 : 0.15), true);
+
+        theme::drawTextCentred(@(channel.name.c_str()), box(_model->nameRect(row)),
+                               channel.muted ? theme::ink(Ink::textDim)
+                                             : theme::ink(Ink::textPrimary),
+                               theme::labelFont(12.0, NSFontWeightMedium));
+
+        theme::drawToggle(box(_model->muteRect(row)), @"M", channel.muted,
+                          theme::ink(Ink::mute), true);
+
+        theme::drawToggle(box(_model->soloRect(row)), @"S", channel.soloed,
+                          theme::ink(Ink::solo), true);
+
+        theme::drawSlider(box(_model->volumeRect(row)), channel.volume,
+                          channel.muted ? theme::ink(Ink::textDim) : colour, true);
 
         if (pattern == nullptr)
             continue;
 
+        // ── Steps ────────────────────────────────────────────────────────────
         const std::vector<project::MidiEvent>* events = pattern->events(channel.id);
 
         for (int step = _model->firstStep(); step < lastStep; ++step) {
-            const auto cell = _model->stepRect(row, step);
-
             const bool on = events != nullptr
                          && app::noteAtStep(*events, _model->tickForStep(step), _model->stepTicks(),
                                             channel.stepKey) != app::noStep;
 
             // Every fourth step is lighter, so the beat is readable without a
             // ruler above the grid.
-            const bool downbeat = (step % 4) == 0;
-            NSColor* off = downbeat ? grey(0.235) : grey(0.175);
-
-            fill(cell, on ? colourFrom(channel.colour, channel.muted ? 0.5 : 1.0) : off);
-
-            if (step == playheadStep) {
-                [[NSColor colorWithCalibratedWhite:1.0 alpha:0.18] setFill];
-                NSRectFillUsingOperation(NSMakeRect(cell.x, cell.y, cell.width, cell.height),
-                                         NSCompositingOperationPlusLighter);
-            }
+            theme::drawStepPad(box(_model->stepRect(row, step)), colour, on, (step % 4) == 0,
+                               step == playheadStep, true);
         }
+    }
+
+    if (playheadStep >= _model->firstStep() && playheadStep < lastStep) {
+        const auto cell = _model->stepRect(0, static_cast<int>(playheadStep));
+        theme::fillRect(NSMakeRect(cell.x - 1.0, 0.0, 1.0, self.bounds.size.height),
+                        theme::withAlpha(theme::ink(Ink::playhead), 0.75));
     }
 
     // The add row, so a rack with one channel does not look like a rack that
     // cannot have two.
     auto addRow = _model->rowRect(channels.size());
     addRow.width = self.bounds.size.width;
-    fill(addRow, grey(0.13));
-    drawText(@"＋  Add channel", {addRow.x + layout.padding, addRow.y + 6.0,
-                                  addRow.width, addRow.height}, grey(0.55), 12.0);
+
+    const NSRect addRect = NSInsetRect(box(addRow), 2.0, 2.0);
+    theme::fillRounded(addRect, theme::metrics::radiusControl,
+                       theme::withAlpha(theme::ink(Ink::panelRaised), 0.55));
+    theme::strokeRounded(addRect, theme::metrics::radiusControl,
+                         theme::withAlpha(theme::ink(Ink::textDim), 0.35));
+
+    theme::drawTextCentred(@"＋  Add channel",
+                           NSMakeRect(NSMinX(addRect) + layout.padding, NSMinY(addRect),
+                                      addRect.size.width, addRect.size.height),
+                           theme::ink(Ink::textSecondary), theme::labelFont(12.0));
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────

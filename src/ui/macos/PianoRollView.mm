@@ -1,5 +1,7 @@
 #include "ui/macos/PianoRollView.h"
 
+#include "ui/macos/Theme.h"
+
 #include "app/CommandRegistry.h"
 #include "app/PianoRollModel.h"
 #include "app/commands/NoteCommands.h"
@@ -31,7 +33,8 @@ bool isBlackKey(int key) noexcept
 }
 
 ui::Rect makeRect(double x, double y, double width, double height,
-                  double red, double green, double blue, double alpha = 1.0)
+                  double red, double green, double blue, double alpha = 1.0,
+                  double radius = 0.0)
 {
     ui::Rect rectangle;
     rectangle.x      = static_cast<float>(x);
@@ -42,7 +45,35 @@ ui::Rect makeRect(double x, double y, double width, double height,
     rectangle.green  = static_cast<float>(green);
     rectangle.blue   = static_cast<float>(blue);
     rectangle.alpha  = static_cast<float>(alpha);
+    rectangle.radius = static_cast<float>(radius);
     return rectangle;
+}
+
+/// The Piano Roll draws on the GPU and cannot call into the AppKit drawing
+/// helpers, so palette entries are unpacked into components once and used as
+/// numbers. The colours themselves still come from theme::ink — there is one
+/// palette in the application, not two.
+struct Rgb {
+    double red = 0.0;
+    double green = 0.0;
+    double blue = 0.0;
+};
+
+Rgb components(NSColor* colour)
+{
+    NSColor* srgb = [colour colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+    if (srgb == nil)
+        return {};
+
+    return {static_cast<double>(srgb.redComponent),
+            static_cast<double>(srgb.greenComponent),
+            static_cast<double>(srgb.blueComponent)};
+}
+
+ui::Rect makeRect(double x, double y, double width, double height, Rgb colour,
+                  double alpha = 1.0, double radius = 0.0)
+{
+    return makeRect(x, y, width, height, colour.red, colour.green, colour.blue, alpha, radius);
 }
 
 enum class DragMode { none, move, resize, boxSelect };
@@ -227,30 +258,66 @@ enum class DragMode { none, move, resize, boxSelect };
 
 - (void)buildRectangles
 {
+    namespace theme = incdaw::ui::theme;
+    using theme::Ink;
+
     _rectangles.clear();
 
     const auto&  viewport = _model->viewport();
     const double rowHeight = _model->keyHeight();
     const double gridWidth = viewport.width;
 
+    const Rgb whiteRow  = components(theme::mix(theme::ink(Ink::panel),
+                                                theme::ink(Ink::panelRaised), 0.35));
+    const Rgb blackRow  = components(theme::darken(theme::ink(Ink::panel), 0.45));
+    const Rgb whiteKey  = components(theme::ink(Ink::textPrimary));
+    const Rgb blackKey  = components(theme::darken(theme::ink(Ink::panelSunken), 0.4));
+    const Rgb octave    = components(theme::ink(Ink::accent));
+    const Rgb beatLine  = components(theme::ink(Ink::gridLine));
+    const Rgb barLine   = components(theme::ink(Ink::gridLineStrong));
+    const Rgb selection = components(theme::ink(Ink::selectionStroke));
+    const Rgb playhead  = components(theme::ink(Ink::playhead));
+
+    // Notes carry the channel's colour, the way a channel is identified
+    // everywhere else in the window.
+    const project::Channel* channel = _project != nullptr
+        ? _project->findChannel(project::EntityId{_channelIdValue})
+        : nullptr;
+
+    const Rgb noteColour = components(theme::fromArgb(channel != nullptr ? channel->colour
+                                                                        : 0xFF3AA9FFu));
+    const Rgb selectedNote = components(theme::lighten(theme::ink(Ink::accent), 0.35));
+
+    // The keyboard's own ground, so that the dark keys read as keys rather than
+    // as gaps in the strip.
+    _rectangles.push_back(makeRect(0.0, 0.0, keyboardWidth, viewport.height,
+                                   components(theme::ink(Ink::panelRaised))));
+
     // Key rows. Black-key rows are darker, which is what makes the pitch axis
     // readable without labelling every line.
     for (int key = viewport.lowestKey; key < viewport.lowestKey + viewport.visibleKeys; ++key) {
         const double y = _model->keyToY(key);
-        const double shade = isBlackKey(key) ? 0.13 : 0.17;
-
-        _rectangles.push_back(makeRect(keyboardWidth, y, gridWidth, rowHeight, shade, shade, shade + 0.01));
-
-        // Keyboard strip.
         const bool black = isBlackKey(key);
-        const double keyShade = black ? 0.10 : 0.86;
-        _rectangles.push_back(makeRect(0.0, y + 0.5, keyboardWidth - 2.0, rowHeight - 1.0,
-                                       keyShade, keyShade, keyShade));
+
+        _rectangles.push_back(makeRect(keyboardWidth, y, gridWidth, rowHeight,
+                                       black ? blackRow : whiteRow));
+
+        // Octave separators, so twelve rows read as one octave.
+        if (key % 12 == 0)
+            _rectangles.push_back(makeRect(keyboardWidth, y, gridWidth, 1.0, barLine, 0.55));
+
+        // Keyboard strip: white keys full width, black keys short and dark, the
+        // proportions of a keyboard rather than a colour-coded list.
+        const double keyWidth = black ? (keyboardWidth - 2.0) * 0.62 : keyboardWidth - 2.0;
+
+        _rectangles.push_back(makeRect(0.0, y + 0.5, keyWidth, rowHeight - 1.0,
+                                       black ? blackKey : whiteKey, 1.0,
+                                       std::min(2.5, rowHeight / 3.0)));
 
         // C rows get a marker, so octaves are countable at a glance.
         if (key % 12 == 0)
-            _rectangles.push_back(makeRect(keyboardWidth - 8.0, y + 1.0, 4.0, rowHeight - 2.0,
-                                           0.35, 0.55, 0.80));
+            _rectangles.push_back(makeRect(keyboardWidth - 7.0, y + 1.5, 4.0,
+                                           std::max(1.0, rowHeight - 3.0), octave, 1.0, 1.5));
     }
 
     // Grid lines: beats faint, bars stronger.
@@ -266,9 +333,8 @@ enum class DragMode { none, move, resize, boxSelect };
             continue;
 
         const bool isBar = (tick % bar) == 0;
-        const double shade = isBar ? 0.34 : 0.23;
         _rectangles.push_back(makeRect(x, 0.0, isBar ? 1.5 : 1.0, viewport.height,
-                                       shade, shade, shade));
+                                       isBar ? barLine : beatLine));
     }
 
     // Notes.
@@ -280,14 +346,24 @@ enum class DragMode { none, move, resize, boxSelect };
             // should be visible without opening an editor for it.
             const double intensity = 0.45 + 0.55 * (static_cast<double>(visible.velocity) / 127.0);
 
-            const double red   = visible.selected ? 1.00 : 0.30 * intensity;
-            const double green = visible.selected ? 0.80 : 0.72 * intensity;
-            const double blue  = visible.selected ? 0.35 : 0.95 * intensity;
+            const Rgb base = visible.selected ? selectedNote : noteColour;
+            const double scale = visible.selected ? 1.0 : intensity;
 
-            _rectangles.push_back(makeRect(keyboardWidth + visible.x, visible.y + 1.0,
-                                           std::max(2.0, visible.width - 1.0),
-                                           std::max(2.0, visible.height - 2.0),
-                                           red, green, blue));
+            const double x = keyboardWidth + visible.x;
+            const double y = visible.y + 1.0;
+            const double width  = std::max(2.0, visible.width - 1.0);
+            const double height = std::max(2.0, visible.height - 2.0);
+            const double radius = std::min(3.0, std::min(width, height) / 2.0);
+
+            _rectangles.push_back(makeRect(x, y, width, height,
+                                           {base.red * scale, base.green * scale,
+                                            base.blue * scale}, 1.0, radius));
+
+            // A lit top edge: the same treatment a step pad gets, so a note and
+            // a step read as the same material.
+            if (height >= 6.0)
+                _rectangles.push_back(makeRect(x + 1.0, y + 1.0, std::max(1.0, width - 2.0),
+                                               height * 0.32, {1.0, 1.0, 1.0}, 0.16, radius));
         }
     }
 
@@ -298,14 +374,14 @@ enum class DragMode { none, move, resize, boxSelect };
         const double width  = std::abs(_dragCurrent.x - _dragOrigin.x);
         const double height = std::abs(_dragCurrent.y - _dragOrigin.y);
 
-        _rectangles.push_back(makeRect(x, y, width, height, 0.4, 0.7, 1.0, 0.20));
+        _rectangles.push_back(makeRect(x, y, width, height, selection, 0.22, 3.0));
     }
 
     // Playhead.
     if (_playheadTick >= 0) {
         const double x = keyboardWidth + _model->tickToX(_playheadTick);
         if (x >= keyboardWidth && x <= keyboardWidth + gridWidth)
-            _rectangles.push_back(makeRect(x, 0.0, 2.0, viewport.height, 1.0, 0.85, 0.25));
+            _rectangles.push_back(makeRect(x, 0.0, 2.0, viewport.height, playhead));
     }
 }
 

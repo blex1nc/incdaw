@@ -63,19 +63,27 @@ ChannelRackModel::Rect ChannelRackModel::muteRect(std::size_t row) const noexcep
     const double x = layout_.headerWidth - layout_.padding - layout_.volumeWidth
                    - 2.0 * layout_.buttonWidth - 2.0 * layout_.padding;
 
-    return {x, rowY(row) + 4.0, layout_.buttonWidth, layout_.rowHeight - 8.0};
+    // Square and centred in the row: a mute switch that stretches with the row
+    // height stops looking like a switch as soon as rows grow.
+    const double size  = std::min(layout_.buttonWidth, layout_.rowHeight - 8.0);
+    const double inset = (layout_.rowHeight - size) / 2.0;
+
+    return {x, rowY(row) + inset, size, size};
 }
 
 ChannelRackModel::Rect ChannelRackModel::soloRect(std::size_t row) const noexcept
 {
     const Rect mute = muteRect(row);
     return {mute.x + layout_.buttonWidth + layout_.padding, mute.y, mute.width, mute.height};
+
 }
 
 ChannelRackModel::Rect ChannelRackModel::volumeRect(std::size_t row) const noexcept
 {
     const double x = layout_.headerWidth - layout_.padding - layout_.volumeWidth;
-    return {x, rowY(row) + 8.0, layout_.volumeWidth, layout_.rowHeight - 16.0};
+    const double height = std::min(14.0, layout_.rowHeight - 12.0);
+
+    return {x, rowY(row) + (layout_.rowHeight - height) / 2.0, layout_.volumeWidth, height};
 }
 
 ChannelRackModel::Rect ChannelRackModel::stepRect(std::size_t row, int step) const noexcept
@@ -83,7 +91,8 @@ ChannelRackModel::Rect ChannelRackModel::stepRect(std::size_t row, int step) con
     const double pitch = layout_.stepWidth + layout_.stepGap;
     const double x = layout_.headerWidth + static_cast<double>(step - firstStep_) * pitch;
 
-    return {x, rowY(row) + 3.0, layout_.stepWidth, layout_.rowHeight - 6.0};
+    const double inset = std::min(5.0, layout_.rowHeight / 6.0);
+    return {x, rowY(row) + inset, layout_.stepWidth, layout_.rowHeight - 2.0 * inset};
 }
 
 double ChannelRackModel::contentHeight(std::size_t channelCount) const noexcept

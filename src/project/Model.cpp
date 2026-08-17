@@ -5,6 +5,33 @@
 #include <utility>
 
 namespace incdaw::project {
+namespace {
+
+/// Default colours for new material, rotated by creation order.
+///
+/// A project in which every channel, pattern and track is the same grey forces
+/// the user to colour their own work before the window can be read at a glance;
+/// both of the workflows INCDAW takes as reference assign a colour on creation
+/// instead. These are INCDAW's own hues — not sampled from anyone's product —
+/// and they are ordinary project data the user can overwrite at any time.
+constexpr std::uint32_t defaultColours[] = {
+    0xFF3AA9FFu,   // blue
+    0xFF46D97Fu,   // green
+    0xFFFFC24Au,   // amber
+    0xFFFF6B5Eu,   // coral
+    0xFFC07BFFu,   // violet
+    0xFF34D6C8u,   // teal
+    0xFFFF9FD1u,   // pink
+    0xFF9BE45Cu,   // lime
+};
+
+[[nodiscard]] std::uint32_t colourForIndex(std::size_t index) noexcept
+{
+    return defaultColours[index % (sizeof(defaultColours) / sizeof(defaultColours[0]))];
+}
+
+} // namespace
+
 
 Project::Project()
 {
@@ -23,6 +50,7 @@ Track& Project::addTrack(TrackType type, std::string name)
     track.id   = ids_.next();
     track.type = type;
     track.name = std::move(name);
+    track.colour = colourForIndex(tracks_.size());
     track.outputMixerNode = master_;
 
     tracks_.push_back(std::move(track));
@@ -34,6 +62,7 @@ Channel& Project::addChannel(std::string name)
     Channel channel;
     channel.id   = ids_.next();
     channel.name = std::move(name);
+    channel.colour = colourForIndex(channels_.size());
     channel.outputMixerNode = master_;
 
     channels_.push_back(std::move(channel));
@@ -302,6 +331,11 @@ MixerNode& Project::addMixerNode(MixerNodeType type, std::string name)
     node.type = type;
     node.name = std::move(name);
 
+    // The master keeps a neutral plate; inserts and buses take the rotation, so
+    // a strip can be found by colour the same way its channel can.
+    node.colour = type == MixerNodeType::master ? 0xFF8894A6u
+                                                : colourForIndex(mixerNodes_.size());
+
     mixerNodes_.push_back(std::move(node));
     return mixerNodes_.back();
 }
@@ -311,6 +345,7 @@ Pattern& Project::addPattern(std::string name)
     Pattern pattern;
     pattern.id   = ids_.next();
     pattern.name = std::move(name);
+    pattern.colour = colourForIndex(patterns_.size());
 
     patterns_.push_back(std::move(pattern));
     return patterns_.back();

@@ -514,3 +514,31 @@ TEST_CASE("a full recompile stays well inside an edit's budget")
     MESSAGE("16 channels x 500 notes x 32 placements recompiled in " << elapsed << " ms");
     CHECK(elapsed < 250.0);   // generous: this also runs under a Debug build
 }
+
+// ── Default colours (UI design, Phase 21) ────────────────────────────────────
+//
+// Material that is created without a colour still has to be distinguishable:
+// the window identifies a channel, a pattern and a track by colour before it
+// reads their names. The rotation is project data, so it is asserted here
+// rather than in a view.
+
+TEST_CASE("new material is given rotating default colours")
+{
+    project::Project project;
+
+    const std::uint32_t first  = project.addChannel("A").colour;
+    const std::uint32_t second = project.addChannel("B").colour;
+    const std::uint32_t third  = project.addChannel("C").colour;
+
+    CHECK(first != second);
+    CHECK(second != third);
+    CHECK((first & 0xFF000000u) == 0xFF000000u);   // opaque
+
+    // Patterns and tracks rotate on their own counts, not on a shared one.
+    CHECK(project.addPattern("P1").colour == first);
+    CHECK(project.addPattern("P2").colour == second);
+
+    const std::uint32_t master = project.mixerNodes().front().colour;
+    CHECK(project.mixerNodes().front().type == project::MixerNodeType::master);
+    CHECK(master != first);   // the master keeps its own neutral plate
+}

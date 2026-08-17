@@ -36,6 +36,8 @@
 #include "app/commands/AudioEditCommands.h"
 #include "ui/macos/AudioEditorView.h"
 #include "ui/macos/ChannelRackView.h"
+#include "ui/macos/ControlBarView.h"
+#include "ui/macos/Theme.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
 #include "ui/macos/MixerView.h"
@@ -102,11 +104,10 @@ std::filesystem::path incdawSupportDirectory()
 @property (strong) INCDAWPlaylistView*      playlist;
 @property (strong) INCDAWMixerView*         mixer;
 @property (strong) INCDAWAudioEditorView*   audioEditor;
-@property (strong) NSSegmentedControl*      editorSelector;
-@property (strong) NSSegmentedControl*      transportModeSelector;
+@property (strong) INCDAWControlBarView*    controlBar;
 @property (strong) INCDAWChannelRackView*   channelRack;
 @property (strong) INCDAWPatternListView*   patternList;
-@property (strong) NSTextField*             statusField;
+@property (strong) INCDAWStatusBarView*     statusBar;
 @end
 
 @implementation INCDAWAppDelegate {
@@ -243,7 +244,7 @@ std::filesystem::path incdawSupportDirectory()
     clip.name        = pattern.name;
     clip.colour      = pattern.colour;
 
-    const NSRect frame = NSMakeRect(0, 0, 1180, 720);
+    const NSRect frame = NSMakeRect(0, 0, 1280, 800);
 
     self.window = [[NSWindow alloc]
         initWithContentRect:frame
@@ -253,15 +254,22 @@ std::filesystem::path incdawSupportDirectory()
                       defer:NO];
 
     self.window.title = @"INCDAW — Pattern 1";
-    self.window.backgroundColor = [NSColor colorWithCalibratedWhite:0.10 alpha:1.0];
+    self.window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
+
+    // The shell paints its own dark surfaces; telling AppKit the same thing is
+    // what keeps scrollers, menus, sheets and text fields from arriving in the
+    // light scheme on top of them.
+    self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    self.window.titlebarAppearsTransparent = YES;
+
     [self.window center];
 
     NSView* content = self.window.contentView;
 
-    constexpr CGFloat statusHeight  = 26.0;
-    constexpr CGFloat toolbarHeight = 30.0;
-    constexpr CGFloat listWidth     = 150.0;
-    constexpr CGFloat rackHeight    = 220.0;
+    constexpr CGFloat statusHeight  = ui::theme::metrics::statusBarHeight;
+    constexpr CGFloat toolbarHeight = ui::theme::metrics::controlBarHeight;
+    constexpr CGFloat listWidth     = 172.0;
+    constexpr CGFloat rackHeight    = 244.0;
 
     const NSRect body = NSMakeRect(0, statusHeight, frame.size.width,
                                    frame.size.height - statusHeight - toolbarHeight);
@@ -394,34 +402,34 @@ std::filesystem::path incdawSupportDirectory()
     [workspace adjustSubviews];
     [editors adjustSubviews];
 
-    self.editorSelector = [NSSegmentedControl
-        segmentedControlWithLabels:@[@"Piano Roll", @"Playlist", @"Mixer", @"Editor"]
-                      trackingMode:NSSegmentSwitchTrackingSelectOne
-                            target:self
-                            action:@selector(editorChanged:)];
-    self.editorSelector.selectedSegment = 0;
-    self.editorSelector.frame = NSMakeRect(10, frame.size.height - toolbarHeight + 3, 320, 24);
+    // The control bar: transport, mode, centre display and the editor tabs.
+    // It reports intent through blocks and holds no engine state of its own.
+    self.controlBar = [[INCDAWControlBarView alloc]
+        initWithFrame:NSMakeRect(0, frame.size.height - toolbarHeight,
+                                 frame.size.width, toolbarHeight)];
 
-    self.transportModeSelector = [NSSegmentedControl
-        segmentedControlWithLabels:@[@"Pattern", @"Song"]
-                      trackingMode:NSSegmentSwitchTrackingSelectOne
-                            target:self
-                            action:@selector(transportModeChanged:)];
-    self.transportModeSelector.selectedSegment = 0;
-    self.transportModeSelector.frame = NSMakeRect(340, frame.size.height - toolbarHeight + 3, 150, 24);
+    self.controlBar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
+    [content addSubview:self.controlBar];
 
-    self.editorSelector.autoresizingMask        = NSViewMinYMargin;
-    self.transportModeSelector.autoresizingMask = NSViewMinYMargin;
+    self.statusBar = [[INCDAWStatusBarView alloc]
+        initWithFrame:NSMakeRect(0, 0, frame.size.width, statusHeight)];
 
-    [content addSubview:self.editorSelector];
-    [content addSubview:self.transportModeSelector];
+    self.statusBar.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
+    [content addSubview:self.statusBar];
 
-    self.statusField = [NSTextField labelWithString:@""];
-    self.statusField.frame = NSMakeRect(10, 4, frame.size.width - 20, statusHeight - 8);
-    self.statusField.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
-    self.statusField.textColor = [NSColor colorWithCalibratedWhite:0.62 alpha:1.0];
-    self.statusField.autoresizingMask = NSViewWidthSizable;
-    [content addSubview:self.statusField];
+    __weak INCDAWAppDelegate* weakBarSelf = self;
+
+    self.controlBar.onTransport = ^(INCDAWTransportAction action) {
+        [weakBarSelf handleTransportAction:action];
+    };
+
+    self.controlBar.onSelectEditor = ^(NSInteger index) {
+        [weakBarSelf showEditorAtSegment:index];
+    };
+
+    self.controlBar.onSelectMode = ^(BOOL songMode) {
+        [weakBarSelf setSongMode:songMode];
+    };
 
     __weak INCDAWAppDelegate* weakSelf = self;
 
@@ -519,14 +527,12 @@ std::filesystem::path incdawSupportDirectory()
 - (void)showPianoRoll:(id)sender
 {
     (void)sender;
-    self.editorSelector.selectedSegment = 0;
     [self showEditorAtSegment:0];
 }
 
 - (void)showPlaylist:(id)sender
 {
     (void)sender;
-    self.editorSelector.selectedSegment = 1;
     [self showEditorAtSegment:1];
 }
 
@@ -539,31 +545,61 @@ std::filesystem::path incdawSupportDirectory()
 - (void)showMixer:(id)sender
 {
     (void)sender;
-    self.editorSelector.selectedSegment = 2;
     [self showEditorAtSegment:2];
+}
+
+/// The control bar's transport cluster. Rewind and stop are separate actions
+/// rather than one toggle, because a stopped transport that is already at zero
+/// still has to be able to stay there.
+- (void)handleTransportAction:(INCDAWTransportAction)action
+{
+    if (!_audioReady)
+        return;
+
+    auto& transport = _audio->transport();
+
+    switch (action) {
+        case INCDAWTransportPlay:
+            [self toggleTransport];
+            break;
+
+        case INCDAWTransportStop:
+            transport.stop();
+            transport.seek(0);
+            break;
+
+        case INCDAWTransportRewind:
+            transport.seek(0);
+            break;
+
+        case INCDAWTransportRecord:
+            [self toggleRecord:nil];
+            break;
+
+        case INCDAWTransportLoop:
+            transport.setLoopEnabled(!transport.isLoopEnabled());
+            break;
+    }
+
+    [self refreshStatus];
 }
 
 - (void)usePatternMode:(id)sender
 {
     (void)sender;
-    self.transportModeSelector.selectedSegment = 0;
-    [self transportModeChanged:self.transportModeSelector];
+    [self setSongMode:NO];
 }
 
 - (void)useSongMode:(id)sender
 {
     (void)sender;
-    self.transportModeSelector.selectedSegment = 1;
-    [self transportModeChanged:self.transportModeSelector];
-}
-
-- (void)editorChanged:(NSSegmentedControl*)sender
-{
-    [self showEditorAtSegment:sender.selectedSegment];
+    [self setSongMode:YES];
 }
 
 - (void)showEditorAtSegment:(NSInteger)segment
 {
+    self.controlBar.editorIndex = segment;
+
     self.pianoRoll.hidden   = segment != 0;
     self.playlist.hidden    = segment != 1;
     self.mixer.hidden       = segment != 2;
@@ -588,7 +624,6 @@ std::filesystem::path incdawSupportDirectory()
 - (void)showAudioEditor:(id)sender
 {
     (void)sender;
-    self.editorSelector.selectedSegment = 3;
     [self showEditorAtSegment:3];
 }
 
@@ -801,9 +836,13 @@ std::filesystem::path incdawSupportDirectory()
 ///
 /// This is a compile-time distinction, not a UI one: the graph is rebuilt with
 /// a different source, so the audio thread never learns there are two modes.
-- (void)transportModeChanged:(NSSegmentedControl*)sender
+- (void)setSongMode:(BOOL)songMode
 {
-    _songMode = sender.selectedSegment == 1;
+    if (_songMode == songMode)
+        return;
+
+    _songMode = songMode;
+    self.controlBar.songMode = songMode;
 
     const BOOL wasPlaying = _audioReady && _audio->transport().isPlaying();
     if (wasPlaying)
@@ -1077,6 +1116,11 @@ std::filesystem::path incdawSupportDirectory()
         if ([plugin[@"uid"] isEqualToString:title])
             title = plugin[@"name"];
     window.title = title;
+
+    // A plugin's own window is INCDAW's window: same ground, same scheme, so a
+    // hosted editor does not arrive as a light rectangle over a dark session.
+    window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
+    window.appearance      = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
 
     [window center];
     [window makeKeyAndOrderFront:nil];
@@ -1640,15 +1684,64 @@ std::filesystem::path incdawSupportDirectory()
     const project::Channel* channel =
         _project->findChannel(project::EntityId{self.pianoRoll.channelIdValue});
 
-    self.statusField.stringValue = [NSString stringWithFormat:
-        @"INCDAW %s  ·  %@  ·  %s / %s  ·  %lu notes  ·  %lu clips  ·  %@  ·  %@  ·  "
+    self.statusBar.text = [NSString stringWithFormat:
+        @"INCDAW %s  ·  %s / %s  ·  %lu notes  ·  %lu clips  ·  %@  ·  %@  ·  "
         @"space: play   r: rec   ⌘Z: undo",
         app::Version::string(),
-        _songMode ? @"song" : @"pattern",
         pattern != nullptr ? pattern->name.c_str() : "—",
         channel != nullptr ? channel->name.c_str() : "—",
         static_cast<unsigned long>(noteCount),
         static_cast<unsigned long>(_project->clips().size()), audio, undo];
+
+    [self refreshControlBarWithPattern:pattern];
+}
+
+/// Hands the chrome the handful of numbers it displays. Everything here is read
+/// from the engine or the project — the bar caches none of it, so a stale
+/// display is impossible.
+- (void)refreshControlBarWithPattern:(const project::Pattern*)pattern
+{
+    INCDAWControlBarView* bar = self.controlBar;
+    if (bar == nil)
+        return;
+
+    bar.songMode    = _songMode;
+    bar.recording   = _recording.isRecording();
+    bar.contextName = _songMode
+        ? @"Arrangement"
+        : @(pattern != nullptr ? pattern->name.c_str() : "—");
+
+    bar.alert = _lastGraphError != nil ? _lastGraphError : _lastRecordError;
+
+    if (!_audioReady) {
+        bar.playing = NO;
+        bar.tempo   = _project->tempoMap().tempoAtTick(0);
+        [bar setNeedsDisplay:YES];
+        return;
+    }
+
+    const auto& transport = _audio->transport();
+
+    bar.playing      = transport.isPlaying();
+    bar.looping      = transport.isLoopEnabled();
+    bar.playheadTick = transport.isPlaying()
+                           ? transport.tempoMap().tickForFrame(transport.position())
+                           : -1;
+
+    bar.tempo   = transport.tempoMap().tempoAtFrame(transport.position());
+    bar.cpuLoad = _audio->profiler().peakLoad();
+
+    // The output meter reads the master strip of the graph that is rendering
+    // right now; between rebuilds there is simply nothing to read.
+    if (engine::dsp::MixerStripNode* master = _live.stripFor(_project->masterMixerNode())) {
+        bar.masterPeak = std::min(1.0, static_cast<double>(master->meter().peak()));
+        bar.masterRms  = std::min(1.0, static_cast<double>(master->meter().rms()));
+    } else {
+        bar.masterPeak = 0.0;
+        bar.masterRms  = 0.0;
+    }
+
+    [bar setNeedsDisplay:YES];
 }
 
 - (void)buildMenu

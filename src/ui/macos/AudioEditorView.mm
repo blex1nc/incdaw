@@ -3,6 +3,7 @@
 #include "app/CommandRegistry.h"
 #include "engine/audio/WaveformOverview.h"
 #include "project/Model.h"
+#include "ui/macos/Theme.h"
 
 #include <algorithm>
 #include <string>
@@ -111,21 +112,23 @@ using namespace incdaw;
 {
     (void)dirty;
 
-    [[NSColor colorWithCalibratedWhite:0.08 alpha:1.0] setFill];
-    NSRectFill(self.bounds);
+    namespace theme = incdaw::ui::theme;
+    using theme::Ink;
+
+    theme::fillRect(self.bounds, theme::ink(Ink::panel));
 
     if (!_loaded) {
-        NSDictionary* attributes = @{
-            NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.45 alpha:1.0],
-            NSFontAttributeName: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular],
-        };
-        NSString* hint = @"Audio editor — double-click an audio clip in the Playlist to open it";
-        const NSSize size = [hint sizeWithAttributes:attributes];
-        [hint drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2.0,
-                                      (self.bounds.size.height - size.height) / 2.0)
-            withAttributes:attributes];
+        theme::drawTextCentred(@"Audio editor — double-click an audio clip in the Playlist to open it",
+                               self.bounds, theme::ink(Ink::textDim), theme::labelFont(12.0),
+                               theme::Align::centre);
         return;
     }
+
+    // The waveform lives in a well, the way every other grid in the window does.
+    const NSRect canvas = NSInsetRect(self.bounds, 8.0, 8.0);
+    theme::drawWell(NSMakeRect(NSMinX(canvas), NSMinY(canvas) + 22.0, canvas.size.width,
+                               std::max(CGFloat{0.0}, canvas.size.height - 22.0)),
+                    theme::metrics::radiusControl, true);
 
     const double width      = self.bounds.size.width;
     const double laneHeight = self.bounds.size.height / static_cast<double>(_overview.channelCount);
@@ -136,14 +139,18 @@ using namespace incdaw;
         const double right = std::min(width, [self xForFrame:_selectionTo]);
 
         if (right > left) {
-            [[NSColor colorWithCalibratedRed:0.35 green:0.55 blue:0.85 alpha:0.25] setFill];
-            NSRectFillUsingOperation(NSMakeRect(left, 0, right - left, self.bounds.size.height),
-                                     NSCompositingOperationSourceOver);
+            const NSRect selection = NSMakeRect(left, 0, right - left, self.bounds.size.height);
+            theme::fillRect(selection, theme::ink(Ink::selectionFill));
+
+            theme::fillRect(NSMakeRect(NSMinX(selection), 0, 1.0, selection.size.height),
+                            theme::ink(Ink::selectionStroke));
+            theme::fillRect(NSMakeRect(NSMaxX(selection) - 1.0, 0, 1.0, selection.size.height),
+                            theme::ink(Ink::selectionStroke));
         }
     }
 
-    NSColor* wave   = [NSColor colorWithCalibratedRed:0.45 green:0.75 blue:0.55 alpha:1.0];
-    NSColor* centre = [NSColor colorWithCalibratedWhite:0.22 alpha:1.0];
+    NSColor* wave   = theme::ink(Ink::audio);
+    NSColor* centre = theme::ink(Ink::gridLineStrong);
 
     for (std::size_t channel = 0; channel < _overview.channelCount; ++channel) {
         const double top    = static_cast<double>(channel) * laneHeight;
@@ -201,10 +208,13 @@ using namespace incdaw;
                     asset->absolutePath.c_str(), seconds];
         }
 
-        [info drawAtPoint:NSMakePoint(8, 6) withAttributes:@{
-            NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.6 alpha:1.0],
-            NSFontAttributeName: [NSFont monospacedSystemFontOfSize:10 weight:NSFontWeightRegular],
-        }];
+        const NSRect bar = NSMakeRect(0, 0, self.bounds.size.width, 22.0);
+        theme::fillGradient(bar, 0.0, theme::ink(Ink::panelRaisedTop),
+                            theme::ink(Ink::panelRaised), true);
+        theme::drawSeparator(NSMakeRect(0, 21.0, self.bounds.size.width, 1.0));
+
+        theme::drawTextCentred(info, NSInsetRect(bar, 10.0, 0.0), theme::ink(Ink::textSecondary),
+                               theme::numericFont(10.0, NSFontWeightRegular));
     }
 }
 
