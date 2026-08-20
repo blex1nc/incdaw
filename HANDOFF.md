@@ -1118,6 +1118,112 @@ All systems must share the same underlying transport, timing, project state and 
 
 # 22. CURRENT HANDOFF MESSAGE
 
+## 2026-08-20 — the work lines merged, the hum killed, the design finished
+
+Three sessions had worked from `main` in parallel worktrees and none had
+merged back. They are one line now (this branch), and the two things the
+user asked for on top of it are done.
+
+### The consolidation
+
+Merged, in this order, with the conflicts resolved semantically:
+
+1. `claude/onay-devam-6548af` — UI build-out increments 1-10 (project
+   lifecycle safety, the generic insert parameter panel, the export
+   options dialog, mapping/zone/instrument editors, touch and latch
+   automation, insert reordering, the lookahead limiter, the spectrum
+   analyzer). Fast-forward.
+2. `claude/continue-after-analysis-0b7236` — the FL2026 feature wave
+   (chord and note tools, clip splitting, markers and regions, sidechain
+   routing, EBU R128, modulation effects and the transient splitter,
+   WSOLA time stretching, the slicer, the Browser, Audio Unit hosting).
+   19 conflicting files.
+3. `claude/fl-garageband-ui-design-99cf4d` — the drawn design language
+   (Theme, ControlBarView). 8 conflicting files.
+
+The decisions that were NOT textual:
+
+- **Project format**: both lines had claimed 1.5. Instrument parameters
+  keep 1.5; markers, regions and stereo width became **1.6**, with the
+  additive migration and `tests/fixtures/v1.6/` rebased to match.
+- **D-034** stays with instrument parameter values; the design language
+  became **D-035** (Theme.h and ARCHITECTURE.md follow).
+- `plugins::HostedPlugin` gained `readParameter` and
+  `refreshLatencyIfChanged` as virtuals with honest defaults, so the
+  live panels and latency.changed work over the AU-era interface.
+- The builtin catalogue kept the sample-rate-taking factory and gained
+  the five effects from the other line; `CompressorEffect` kept both its
+  gain-reduction meter and its external key.
+
+`claude/kalindan-devam-f7d82f` was NOT merged: its single commit (Phase
+U1 project safety) is superseded by UI build-out increment 1.
+
+### The hum at idle — fixed
+
+Opening INCDAW made a sound. The default project's first note is on tick
+0, the playhead parks on tick 0, and every block re-triggered it.
+
+Stop does not stop the callback, so the transport keeps handing the
+graph one segment while stopped — with the SAME playPosition every
+block. `InstrumentNode` re-collected the note under the playhead ~94
+times a second (hard-killing the voice in between, because a parked
+position looks like a seek to the discontinuity check) and
+`AudioClipNode` replayed the frames under the playhead forever.
+
+`ProcessContext::playing` now carries the transport's state to every
+node. Timeline readers render nothing while parked; instrument voices,
+effect tails and input monitoring go on; the sequence's notes are ended
+ONCE, so a keyboard played into a parked project sustains. Offline
+rendering is untouched (the flag defaults to true).
+
+Regression tests: `tests/unit/StoppedTransportTests.cpp`, all three
+verified to fail against the old behaviour. Contract written down in
+docs/AUDIO_ENGINE.md §5.
+
+### The UI design — finished
+
+- The Browser, insert parameter panel and spectrum analyzer draw through
+  the theme; **no view in the shell declares a colour of its own**.
+- **Metronome**: `MetronomeNode` (which existed since Phase 3 and was in
+  no graph) compiles in when the toggle is on, mixed into the master so
+  it can never reach a render. Button, Audio menu, checkmark.
+- **Tempo**: drag the readout, double-click to type, Shift+Cmd+T to tap.
+  `SetTempoCommand` merges, so a drag is one undo entry.
+- **Time signature**: read from the project (it has been in the tempo
+  map and the file format since the beginning), pickable from the
+  readout, undoable, and the position readout counts bars in it.
+- **Channel Rack**: a numbered step ruler over the grid.
+- **Mixer**: the insert chain is in the strip — four slots, lamp to
+  bypass, name to open, empty slot to add.
+
+Engine change under the tempo work: **a compiled project graph owns its
+own copy of the tempo map** (`CompiledProjectGraph::tempoMap`). Nodes
+point into it while they render, so the caller's map may be rewritten
+the moment the graph is replaced. This is what makes editing the tempo
+while audio runs safe; before it, the transport's map was shared with
+the nodes and a vector reallocation under a binary search was a crash
+waiting for someone to drag a tempo.
+
+### State
+
+621 tests pass (Debug), layering passes, the app builds, launches and
+was inspected on screen. `third_party/` was copied into this worktree
+from the main checkout (it is gitignored).
+
+### Not done, recorded
+
+- The light theme. The `Ink` indirection allows a second table; the
+  scheme is deliberately dark-only for now (CLAUDE.md §25 asks for a
+  dark professional interface).
+- A tempo MAP editor (tempo changes partway through a song). The model
+  and the engine support it; only the readout at tick 0 is editable.
+  That belongs to the ruler, not to the chrome.
+- Insert reordering is still context-menu only; the inline rack does not
+  drag-reorder yet.
+- `main` has NOT been moved. This branch is the consolidated line; the
+  merge into `main` is the user's call.
+
+
 ## 2026-08-17 — UI build-out, part 1: the design language
 
 The shell is now drawn through one visual vocabulary instead of per-pane
