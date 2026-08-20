@@ -136,6 +136,36 @@ private:
     std::vector<project::FrameCount> previousFrameLengths_;
 };
 
+/// Resizes audio clips by re-stretching their content instead of trimming
+/// it — the resize-vs-stretch distinction FL Studio 2026 draws at the clip
+/// edge. Length and stretch ratio scale together, so the clip keeps playing
+/// the same source span, slower or faster. Mergeable, like resize.
+class StretchClipsCommand final : public Command {
+public:
+    StretchClipsCommand(ClipIds clips, Tick lengthDelta)
+        : clips_(std::move(clips)), lengthDelta_(lengthDelta) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.stretch"; }
+    [[nodiscard]] std::string name() const override { return "Stretch Clips"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    [[nodiscard]] bool canMergeWith(const Command& next) const noexcept override;
+    void mergeWith(const Command& next) override;
+
+private:
+    ClipIds clips_;
+    Tick    lengthDelta_ = 0;
+
+    struct Snapshot {
+        EntityId                id;
+        project::FrameCount     previousLength = 0;
+        double                  previousRatio  = 1.0;
+    };
+    std::vector<Snapshot> previous_;   ///< captured once, before the gesture
+};
+
 /// Copies clips, offset in time and tracks.
 class DuplicateClipsCommand final : public Command {
 public:
@@ -159,6 +189,35 @@ private:
     std::vector<Clip> created_;
     ClipIds           createdIds_;
     bool              minted_ = false;
+};
+
+/// Splits one clip in two at a timeline tick.
+///
+/// The left half keeps the clip's identity, fade-in and start; the right half
+/// is a new clip whose source offset advances by the left half's length, so
+/// both halves keep playing exactly what they played before the cut. Audio
+/// clips split on the frame the tick lands on — sample-accurate, and undone
+/// from a snapshot because tick→frame does not invert exactly.
+class SplitClipCommand final : public Command {
+public:
+    SplitClipCommand(EntityId clip, Tick splitTick) : clip_(clip), splitTick_(splitTick) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.split"; }
+    [[nodiscard]] std::string name() const override { return "Split Clip"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    /// The created right half, valid after the first execute.
+    [[nodiscard]] EntityId rightClipId() const noexcept { return right_.id; }
+
+private:
+    EntityId clip_;
+    Tick     splitTick_ = 0;
+
+    Clip     previous_;        ///< the unsplit original, for undo
+    Clip     right_;           ///< the created half; id minted once, stable across redo
+    bool     minted_ = false;
 };
 
 class SetClipMutedCommand final : public Command {

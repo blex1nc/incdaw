@@ -1,8 +1,11 @@
 #include "ui/macos/PlaylistView.h"
 
+#include "app/Browser.h"
 #include "app/CommandRegistry.h"
 #include "app/PlaylistModel.h"
 #include "app/commands/ClipCommands.h"
+#include "app/commands/ImportCommands.h"
+#include "app/commands/MarkerCommands.h"
 #include "app/commands/TrackCommands.h"
 #include "engine/audio/WaveformOverview.h"
 #include "project/PatternCompiler.h"
@@ -72,6 +75,11 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
     std::vector<app::PlaylistModel::VisibleClip> _visible;
 
+    /// Track row a dragged sample is hovering, and the tick it would land on.
+    /// Drawn while the drag is in flight so the drop is aimed, not guessed.
+    std::size_t   _dropTrack;
+    project::Tick _dropTick;
+
     /// Waveform overviews per asset, built lazily on first draw. Invalidated
     /// by the host after any edit that may have rewritten an asset's file —
     /// the view cannot see a file change, only the host knows one happened.
@@ -84,6 +92,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     Tick         _dragAppliedTicks;
     int          _dragAppliedTracks;
     Tick         _dragAppliedLength;
+    BOOL         _stretchResize;   ///< Option at the handle: stretch, not trim
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -111,6 +120,10 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     viewport.height       = frame.size.height - rulerHeight;
     _model->setViewport(viewport);
     _model->setSnap(ticksPerQuarterNote * 4);               // one bar
+
+    _dropTrack = app::PlaylistModel::noTrack;
+    _dropTick  = 0;
+    [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
 
     return self;
 }
@@ -154,6 +167,23 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     [self drawClips];
     [self drawPlayhead];
 
+    // Where a dragged sample would land: the lane, and the exact tick.
+    if (_dropTrack != app::PlaylistModel::noTrack && _dropTrack < _project->tracks().size()) {
+        const project::Track& track = _project->tracks()[_dropTrack];
+
+        const NSRect lane = NSMakeRect(headerWidth,
+                                       _model->trackY(_project->tracks(), _dropTrack) + rulerHeight,
+                                       self.bounds.size.width - headerWidth,
+                                       app::PlaylistModel::trackHeight(track));
+
+        [[NSColor colorWithCalibratedRed:0.45 green:0.72 blue:1.0 alpha:0.12] setFill];
+        NSRectFillUsingOperation(lane, NSCompositingOperationSourceOver);
+
+        const auto x = static_cast<CGFloat>(headerWidth + _model->tickToX(_dropTick));
+        [[NSColor colorWithCalibratedRed:0.45 green:0.72 blue:1.0 alpha:0.9] setFill];
+        NSRectFill(NSMakeRect(x, lane.origin.y, 2.0, lane.size.height));
+    }
+
     if (_drag == PlaylistDrag::boxSelect) {
         const NSRect box = NSMakeRect(std::min(_dragOrigin.x, _dragCurrent.x) + headerWidth,
                                       std::min(_dragOrigin.y, _dragCurrent.y) + rulerHeight,
@@ -186,6 +216,32 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
         drawText([NSString stringWithFormat:@"%lld", static_cast<long long>(tick / barTicks) + 1],
                  NSMakeRect(x + 3.0, 4.0, 40.0, 14.0), grey(0.55), 10.0);
+    }
+
+    // Markers and regions live on the ruler: a region shades its span, a
+    // marker plants a flag, and both carry their name.
+    for (const project::TimelineMarker& marker : _project->markers()) {
+        const CGFloat x = headerWidth + _model->tickToX(marker.tick);
+
+        if (marker.length > 0) {
+            const CGFloat right = headerWidth + _model->tickToX(marker.tick + marker.length);
+            const CGFloat clippedLeft  = std::max(x, headerWidth);
+            const CGFloat clippedRight = std::min(right, self.bounds.size.width);
+
+            if (clippedRight > clippedLeft) {
+                [[colourFrom(marker.colour) colorWithAlphaComponent:0.22] setFill];
+                NSRectFillUsingOperation(NSMakeRect(clippedLeft, 0, clippedRight - clippedLeft,
+                                                    rulerHeight),
+                                         NSCompositingOperationSourceOver);
+            }
+        }
+
+        if (x < headerWidth || x > self.bounds.size.width)
+            continue;
+
+        fillRect(NSMakeRect(x, 0, 2.0, rulerHeight), colourFrom(marker.colour));
+        drawText(@(marker.name.c_str()), NSMakeRect(x + 4.0, 4.0, 90.0, 14.0),
+                 colourFrom(marker.colour, 1.2), 9.0);
     }
 }
 
@@ -467,6 +523,86 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     return NSMakeRect(0, y, self.bounds.size.width, addRowHeight);
 }
 
+// ── Dropping a sample ───────────────────────────────────────────────────────
+
+/// The dragged file, if INCDAW can read it. The same answer the Channel Rack
+/// gives, from the same place: what is on the pasteboard, not who started the
+/// drag — a drop from Finder behaves exactly like one from the Browser.
+static NSString* droppedAudioPath(id<NSDraggingInfo> info)
+{
+    NSArray<NSURL*>* urls = [info.draggingPasteboard
+        readObjectsForClasses:@[ [NSURL class] ]
+                      options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+
+    if (urls.count != 1)
+        return nil;
+
+    NSString* path = urls.firstObject.path;
+
+    return path != nil && incdaw::app::Browser::canDecodeAudio(std::filesystem::path{path.UTF8String})
+               ? path
+               : nil;
+}
+
+- (project::Tick)dropTickForGrid:(NSPoint)grid
+{
+    const project::Tick tick    = _model->xToTick(grid.x > 0.0 ? grid.x : 0.0);
+    const project::Tick snapped = _model->snapTick(tick > 0 ? tick : 0);
+    return snapped > 0 ? snapped : 0;
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info
+{
+    return [self draggingUpdated:info];
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info
+{
+    if (droppedAudioPath(info) == nil || _project == nullptr) {
+        _dropTrack = app::PlaylistModel::noTrack;
+        return NSDragOperationNone;
+    }
+
+    const NSPoint point = [self convertPoint:info.draggingLocation fromView:nil];
+    const NSPoint grid  = NSMakePoint(point.x - headerWidth, point.y - rulerHeight);
+
+    _dropTrack = _model->trackAtY(_project->tracks(), grid.y);
+    _dropTick  = [self dropTickForGrid:grid];
+
+    [self setNeedsDisplay:YES];
+
+    return _dropTrack == app::PlaylistModel::noTrack ? NSDragOperationNone : NSDragOperationCopy;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)info
+{
+    (void)info;
+    _dropTrack = app::PlaylistModel::noTrack;
+    [self setNeedsDisplay:YES];
+}
+
+/// A sample dropped on a lane becomes an audio clip there, snapped like every
+/// other placement in this view, as long as the file itself. It is the clip a
+/// recording would have produced — arrived at by dragging.
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info
+{
+    NSString* path = droppedAudioPath(info);
+
+    const std::size_t   row  = _dropTrack;
+    const project::Tick tick = _dropTick;
+
+    _dropTrack = app::PlaylistModel::noTrack;
+    [self setNeedsDisplay:YES];
+
+    if (path == nil || _project == nullptr || row == app::PlaylistModel::noTrack
+        || row >= _project->tracks().size())
+        return NO;
+
+    [self commit:std::make_unique<app::ImportAudioClipCommand>(_project->tracks()[row].id,
+                                                               path.UTF8String, tick)];
+    return YES;
+}
+
 // ── Input ────────────────────────────────────────────────────────────────────
 
 - (void)mouseDown:(NSEvent*)event
@@ -509,6 +645,16 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     const project::Clip&    clicked = _project->clips()[index];
     const project::EntityId clipId  = clicked.id;
 
+    // Option-click cuts the clip where the mouse is — the slice gesture.
+    if ((event.modifierFlags & NSEventModifierFlagOption) != 0) {
+        const Tick cut = _model->snapTick(_model->xToTick(grid.x));
+        if (_registry->execute(std::make_unique<app::SplitClipCommand>(clipId, cut)))
+            _model->setSelection({clipId});
+
+        [self changed];
+        return;
+    }
+
     // Double-clicking an audio clip opens its asset in the audio editor —
     // the clip is the handle, the recording is the thing being edited.
     if (event.clickCount == 2 && clicked.type == project::ClipType::audio) {
@@ -524,6 +670,11 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
     _drag = _model->isOverResizeHandle(*_project, index, grid.x, grid.y) ? PlaylistDrag::resize
                                                                         : PlaylistDrag::move;
+
+    // Option at the resize handle stretches the audio to the new length
+    // instead of trimming it — FL Studio 2026's resize-vs-stretch split.
+    _stretchResize = _drag == PlaylistDrag::resize
+                  && (event.modifierFlags & NSEventModifierFlagOption) != 0;
 
     [self setNeedsDisplay:YES];
 }
@@ -554,8 +705,14 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         if (delta == 0)
             return;
 
-        if (_registry->executeMerging(std::make_unique<app::ResizeClipsCommand>(
-                _model->selection(), delta))) {
+        const bool applied =
+            _stretchResize
+                ? _registry->executeMerging(std::make_unique<app::StretchClipsCommand>(
+                      _model->selection(), delta))
+                : _registry->executeMerging(std::make_unique<app::ResizeClipsCommand>(
+                      _model->selection(), delta));
+
+        if (applied) {
             _dragAppliedLength = wanted;
             [self changed];
         }
@@ -667,6 +824,24 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
     if (command && character == 'd' && !_model->selection().empty()) {
         [self duplicateSelection];
+        return;
+    }
+
+    // M drops a marker at the playhead (or the viewport's left edge when the
+    // transport has never rolled); Shift+M makes it a one-bar region.
+    if (!command && (character == 'm' || character == 'M')) {
+        const Tick tick   = _playheadTick >= 0 ? static_cast<Tick>(_playheadTick)
+                                               : _model->viewport().firstTick;
+        const Tick length = shift ? ticksPerQuarterNote * 4 : 0;
+
+        const std::size_t count = _project->markers().size() + 1;
+        NSString* name = [NSString stringWithFormat:@"%s %lu", shift ? "Region" : "Marker",
+                                                    static_cast<unsigned long>(count)];
+
+        if (_registry->execute(std::make_unique<app::AddMarkerCommand>(
+                tick, std::string(name.UTF8String), length)))
+            [self changed];
+
         return;
     }
 
@@ -901,6 +1076,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     if (self.onChange != nil)
         self.onChange();
 }
+
 
 - (void)setPatternIdValue:(unsigned long long)value
 {

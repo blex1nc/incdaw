@@ -24,6 +24,12 @@ ParameterRegistry ParameterRegistry::withBuiltins()
         strip.setPan(static_cast<double>(value) * 2.0 - 1.0);
     }});
 
+    registry.registerParameter("stereoSeparation",
+                               StripApplier{[](engine::dsp::MixerStripNode& strip, float value) {
+                                   strip.setStereoSeparation(static_cast<double>(value) * 2.0
+                                                             - 1.0);
+                               }});
+
     return registry;
 }
 

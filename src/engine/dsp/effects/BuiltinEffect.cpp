@@ -17,6 +17,13 @@ void sumInputsInto(const ProcessContext& context) noexcept
         context.output.addFrom(context.input(index));
 }
 
+void sumInputsInto(const ProcessContext& context, std::size_t skippedInput) noexcept
+{
+    for (std::size_t index = 0; index < context.inputCount; ++index)
+        if (index != skippedInput)
+            context.output.addFrom(context.input(index));
+}
+
 namespace {
 
 constexpr std::uint32_t stateVersion = 1;

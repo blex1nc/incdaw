@@ -48,6 +48,16 @@ double linkedPeakAt(const ProcessContext& context, FrameCount frame,
     return peak;
 }
 
+/// The same linked detector, reading an arbitrary view — the external key.
+double linkedPeakOf(const AudioBufferView& view, FrameCount frame) noexcept
+{
+    double peak = 0.0;
+    for (std::size_t channel = 0; channel < view.channelCount(); ++channel)
+        peak = std::max(peak, std::fabs(static_cast<double>(view.channel(channel)[frame])));
+
+    return peak;
+}
+
 } // namespace
 
 // ── CompressorEffect ─────────────────────────────────────────────────────────
@@ -63,7 +73,15 @@ void CompressorEffect::prepare(SampleRate sampleRate, FrameCount maxBlockSize)
 
 void CompressorEffect::process(const ProcessContext& context) noexcept
 {
-    sumInputsInto(context);
+    // With an external key wired in, that input feeds the detector only — it
+    // must never reach the audio path.
+    const bool keyed = keyInput_ != noKeyInput && keyInput_ < context.inputCount
+                    && context.input(keyInput_).channelCount() > 0;
+
+    if (keyed)
+        sumInputsInto(context, keyInput_);
+    else
+        sumInputsInto(context);
 
     const double threshold = valueAt(0);
     const double ratioVal  = std::max(1.0, valueAt(1));
@@ -78,11 +96,12 @@ void CompressorEffect::process(const ProcessContext& context) noexcept
 
     const std::size_t channels = context.output.channelCount();
     const double      slope    = 1.0 / ratioVal - 1.0;
+    const AudioBufferView key  = keyed ? context.input(keyInput_) : AudioBufferView{};
 
     double worstReduction = 0.0;
 
     for (FrameCount frame = 0; frame < context.frameCount; ++frame) {
-        const double peak   = linkedPeakAt(context, frame, channels);
+        const double peak   = keyed ? linkedPeakOf(key, frame) : linkedPeakAt(context, frame, channels);
         const double peakDb = peak > 1.0e-10 ? 20.0 * std::log10(peak) : -200.0;
 
         const double overDb      = peakDb - threshold;
@@ -236,6 +255,75 @@ void LookaheadLimiterEffect::process(const ProcessContext& context) noexcept
 
         writeIndex_ = (writeIndex_ + 1) % delay_[0].size();
         ++frameClock_;
+    }
+}
+
+// ── TransientSplitEffect ──────────────────────────────────────────────────────
+
+namespace {
+constexpr EffectParameter transientSplitParameters[] = {
+    {TransientSplitEffect::output,      "Output",    0.0,   2.0,  0.0, true},
+    {TransientSplitEffect::transientDb, "Transient", -24.0, 24.0, 0.0, false},
+    {TransientSplitEffect::sustainDb,   "Sustain",   -24.0, 24.0, 0.0, false},
+};
+} // namespace
+
+TransientSplitEffect::TransientSplitEffect()
+    : BuiltinEffect(transientSplitParameters, std::size(transientSplitParameters)) {}
+
+void TransientSplitEffect::prepare(SampleRate sampleRate, FrameCount maxBlockSize)
+{
+    (void)maxBlockSize;
+    sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    fast_       = 0.0;
+    slow_       = 0.0;
+}
+
+void TransientSplitEffect::process(const ProcessContext& context) noexcept
+{
+    sumInputsInto(context);
+
+    const auto   mode          = static_cast<int>(valueAt(0) + 0.5);
+    const double transientGain = dbToGain(valueAt(1));
+    const double sustainGain   = dbToGain(valueAt(2));
+
+    // Both components at 0 dB reassemble to exactly the input.
+    if (mode == static_cast<int>(Output::both) && transientGain == 1.0 && sustainGain == 1.0)
+        return;
+
+    // A fast and a slow envelope race the same linked peak; where the fast
+    // one leads, the signal is a transient.
+    const double fastCoefficient = coefficientFor(1.0, sampleRate_);
+    const double slowCoefficient = coefficientFor(40.0, sampleRate_);
+
+    const std::size_t channels = context.output.channelCount();
+
+    for (FrameCount frame = 0; frame < context.frameCount; ++frame) {
+        const double peak = linkedPeakAt(context, frame, channels);
+
+        fast_ = peak + fastCoefficient * (fast_ - peak);
+        slow_ = peak + slowCoefficient * (slow_ - peak);
+
+        const double transientness =
+            fast_ > 1.0e-9 ? std::clamp(1.0 - slow_ / fast_, 0.0, 1.0) : 0.0;
+
+        double gain = 0.0;
+        switch (static_cast<Output>(mode)) {
+            case Output::both:
+                gain = transientness * transientGain + (1.0 - transientness) * sustainGain;
+                break;
+            case Output::transientsOnly:
+                gain = transientness * transientGain;
+                break;
+            case Output::sustainOnly:
+                gain = (1.0 - transientness) * sustainGain;
+                break;
+        }
+
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+            Sample* samples = context.output.channel(channel);
+            samples[frame] = static_cast<Sample>(static_cast<double>(samples[frame]) * gain);
+        }
     }
 }
 

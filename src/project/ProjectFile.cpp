@@ -246,6 +246,7 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("muted", node.muted);
         json.set("soloed", node.soloed);
         json.set("polarityFlip", node.polarityFlip);
+        json.set("stereoSeparation", node.stereoSeparation);
 
         Json inserts = Json::array();
         for (const PluginSlot& slot : node.inserts)
@@ -393,6 +394,18 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         mappings.append(std::move(json));
     }
     document.set("midiMappings", std::move(mappings));
+
+    Json markers = Json::array();
+    for (const TimelineMarker& marker : project.markers()) {
+        Json json = Json::object();
+        json.set("id", toJson(marker.id));
+        json.set("tick", static_cast<std::int64_t>(marker.tick));
+        json.set("length", static_cast<std::int64_t>(marker.length));
+        json.set("name", marker.name);
+        json.set("colour", static_cast<std::int64_t>(marker.colour));
+        markers.append(std::move(json));
+    }
+    document.set("markers", std::move(markers));
 
     Json routing = Json::array();
     for (const RoutingConnection& connection : project.routing()) {
@@ -616,6 +629,7 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         node.muted        = json["muted"].asBool(false);
         node.soloed       = json["soloed"].asBool(false);
         node.polarityFlip = json["polarityFlip"].asBool(false);
+        node.stereoSeparation = json["stereoSeparation"].asDouble(0.0);
 
         for (const Json& slot : json["inserts"].elements())
             node.inserts.push_back(pluginSlotFrom(slot));
@@ -754,6 +768,16 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         mapping.minValue     = json["minValue"].asDouble(0.0);
         mapping.maxValue     = json["maxValue"].asDouble(1.0);
         project.midiMappings().push_back(std::move(mapping));
+    }
+
+    for (const Json& json : document["markers"].elements()) {
+        TimelineMarker marker;
+        marker.id     = idFrom(json["id"]);
+        marker.tick   = json["tick"].asInt(0);
+        marker.length = json["length"].asInt(0);
+        marker.name   = json["name"].asString();
+        marker.colour = static_cast<std::uint32_t>(json["colour"].asInt(0xFFCC8844));
+        project.markers().push_back(std::move(marker));
     }
 
     for (const Json& json : document["routing"].elements()) {
@@ -896,6 +920,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // from a 1.4 document and reads back empty — those instruments played at
     // their defaults, and still do.
     if (major == 1 && minor == 4) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.5 -> 1.6. Purely additive: `markers` is absent from a 1.5 document and
+    // reads back empty, and a mixer node without `stereoWidth` reads back at
+    // unity — those projects had no timeline markers and untouched width.
+    if (major == 1 && minor == 5) {
         result.succeeded = true;
         return result;
     }

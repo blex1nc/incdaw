@@ -1,5 +1,7 @@
 #include "plugins/PluginInstanceManager.h"
 
+#include "plugins/au/AudioUnitInstance.h"
+
 #include "plugins/PluginNode.h"
 
 #include <algorithm>
@@ -28,7 +30,7 @@ std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(
         return nullptr;
     }
 
-    if (identifier.format != Format::clap) {
+    if (identifier.format != Format::clap && identifier.format != Format::audioUnit) {
         // Named rather than silently ignored: the project file is telling the
         // truth about what the user loaded, and the UI should say which format
         // is missing instead of showing an empty slot (D-007 orders the work).
@@ -58,6 +60,36 @@ std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(
         instances_.erase(found);
     }
 
+    // Audio Units are not scanned into the registry and have no library on
+    // disk to open: the system's component registry IS the catalogue, and the
+    // identifier is enough to instantiate one (docs/PLUGIN_HOST.md).
+    std::unique_ptr<HostedPlugin> instance;
+
+    if (identifier.format == Format::audioUnit) {
+        instance = AudioUnitInstance::create(identifier.uid, sampleRate, maxFrames, error);
+
+        if (instance == nullptr)
+            return nullptr;
+
+        return [&]() -> std::unique_ptr<engine::Node> {
+            if (carryState)
+                (void)instance->loadState(carriedState.data(), carriedState.size());
+
+            parameters_.try_emplace(identifier.uid, instance->parameters());
+
+            Held held;
+            held.instance   = std::move(instance);
+            held.uid        = identifier.uid;
+            held.sampleRate = sampleRate;
+            held.maxFrames  = maxFrames;
+
+            HostedPlugin* borrowed = held.instance.get();
+            instances_[slotKey]    = std::move(held);
+
+            return std::make_unique<PluginNode>(borrowed);
+        }();
+    }
+
     const PluginRegistry::Located located = registry_->find(identifier.uid);
     if (located.library == nullptr) {
         // `find` already skips blacklisted libraries, so this covers both "never
@@ -70,7 +102,7 @@ std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(
     if (library == nullptr)
         return nullptr;
 
-    auto instance = library->create(identifier.uid, sampleRate, maxFrames, error);
+    instance = library->create(identifier.uid, sampleRate, maxFrames, error);
     if (instance == nullptr)
         return nullptr;
 
@@ -87,7 +119,7 @@ std::unique_ptr<engine::Node> PluginInstanceManager::createInsert(
     held.sampleRate = sampleRate;
     held.maxFrames  = maxFrames;
 
-    ClapInstance* borrowed = held.instance.get();
+    HostedPlugin* borrowed = held.instance.get();
     instances_[slotKey]    = std::move(held);
 
     return std::make_unique<PluginNode>(borrowed);
@@ -105,7 +137,7 @@ void PluginInstanceManager::retainOnlyInstances(const std::vector<std::uint64_t>
     }
 }
 
-ClapInstance* PluginInstanceManager::instanceFor(std::uint64_t slotKey) const
+HostedPlugin* PluginInstanceManager::instanceFor(std::uint64_t slotKey) const
 {
     const std::lock_guard<std::mutex> lock(mutex_);
 

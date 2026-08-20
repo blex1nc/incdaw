@@ -1,6 +1,7 @@
 #include "engine/dsp/effects/BuiltinEffects.h"
 
 #include "engine/dsp/effects/DynamicsEffects.h"
+#include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
@@ -49,6 +50,13 @@ const std::vector<CatalogueEntry>& catalogue()
         add("incdaw.analyzer",   "Analyzer",   [](SampleRate) { return std::make_unique<AnalyzerEffect>(); });
         add("incdaw.limiterla",  "Limiter (Lookahead)",
             [](SampleRate rate) { return std::make_unique<LookaheadLimiterEffect>(rate); });
+        add("incdaw.loudness",   "Loudness Meter",
+            [](SampleRate) { return std::make_unique<LoudnessMeterEffect>(); });
+        add("incdaw.chorus",     "Chorus",     [](SampleRate) { return std::make_unique<ChorusEffect>(); });
+        add("incdaw.flanger",    "Flanger",    [](SampleRate) { return std::make_unique<FlangerEffect>(); });
+        add("incdaw.phaser",     "Phaser",     [](SampleRate) { return std::make_unique<PhaserEffect>(); });
+        add("incdaw.transientsplit", "Transient Split",
+            [](SampleRate) { return std::make_unique<TransientSplitEffect>(); });
 
         return rows;
     }();

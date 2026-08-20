@@ -47,6 +47,14 @@ public:
         return polarityInverted_.load(std::memory_order_relaxed);
     }
 
+    /// Mid/side width: -1 collapses to mono, 0 passes through, +1 doubles the
+    /// side. Applied before pan, so width shaping and placement compose.
+    void setStereoSeparation(double separation) noexcept;
+    [[nodiscard]] double stereoSeparation() const noexcept
+    {
+        return separation_.load(std::memory_order_relaxed);
+    }
+
     /// Metering, written on the audio thread and read by the UI.
     [[nodiscard]] const LevelMeter& meter() const noexcept { return meter_; }
 
@@ -63,6 +71,12 @@ private:
     std::atomic<double> pan_{0.0};
     std::atomic<bool>   muted_{false};
     std::atomic<bool>   polarityInverted_{false};
+    std::atomic<double> separation_{0.0};
+
+    /// The side gain's own one-pole ramp, same idiom as Smoother: a width
+    /// jump would otherwise step the stereo image audibly.
+    Sample sideCurrent_     = Sample{1};
+    Sample sideCoefficient_ = Sample{1};
 
     Smoother   left_;
     Smoother   right_;

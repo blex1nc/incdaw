@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/AudioAssetImport.h"
 #include "app/Command.h"
 #include "project/Identity.h"
 #include "project/Model.h"
@@ -32,7 +33,7 @@ public:
     void undo(Project& project) override;
 
     /// Valid only after the first successful execute.
-    [[nodiscard]] EntityId assetId() const noexcept { return assetId_; }
+    [[nodiscard]] EntityId assetId() const noexcept { return import_.id; }
 
 private:
     EntityId    channelId_;
@@ -41,11 +42,8 @@ private:
     // Captured on the first execute and replayed on redo, id included —
     // minting a fresh asset id per redo would orphan the zones written by
     // commands above this one in the redo stack.
-    bool                minted_  = false;
-    bool                created_ = false;
-    EntityId            assetId_;
-    project::AudioAsset asset_;
-    std::size_t         assetIndex_ = 0;
+    bool             minted_ = false;
+    AudioAssetImport import_;
 
     plugins::PluginIdentifier                previousInstrument_;
     std::string                              previousStateFile_;

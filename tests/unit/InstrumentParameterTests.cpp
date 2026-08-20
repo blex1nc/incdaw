@@ -151,7 +151,7 @@ TEST_CASE("the v1.5 fixture still loads")
     project::Project project;
     const auto       result = project::ProjectFile::load(project, fixture);
     REQUIRE(result);
-    CHECK(!result.migrated);
+    CHECK(result.migrated);   // 1.5 predates markers and stereo width (1.6)
 
     CHECK(project.metadata().title == "Format v1.5 fixture");
 

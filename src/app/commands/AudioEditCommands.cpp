@@ -1,5 +1,6 @@
 #include "app/commands/AudioEditCommands.h"
 
+#include "engine/dsp/TimeStretch.h"
 #include "engine/audio/WavFile.h"
 
 namespace incdaw::app {
@@ -316,6 +317,115 @@ void InsertAudioCommand::undo(Project& project)
 
     if (WavFile::write(assetFilePath(*asset), data))
         asset->frameCount = data.frameCount;
+}
+
+// ── StretchAssetCommand ───────────────────────────────────────────────────────
+
+namespace {
+
+/// The file with [from, from + spanLength) replaced by `replacement`.
+AudioFileData withSpanReplaced(const AudioFileData& data, FrameCount from, FrameCount spanLength,
+                               const std::vector<std::vector<Sample>>& replacement)
+{
+    const auto replacementFrames =
+        replacement.empty() ? FrameCount{0} : static_cast<FrameCount>(replacement[0].size());
+
+    AudioFileData result;
+    result.sampleRate   = data.sampleRate;
+    result.channelCount = data.channelCount;
+    result.frameCount   = data.frameCount - spanLength + replacementFrames;
+    result.channels.assign(result.channelCount,
+                           std::vector<Sample>(static_cast<std::size_t>(result.frameCount)));
+
+    for (std::size_t channel = 0; channel < result.channelCount; ++channel) {
+        auto destination = result.channels[channel].begin();
+
+        destination = std::copy(data.channels[channel].begin(),
+                                data.channels[channel].begin()
+                                    + static_cast<std::ptrdiff_t>(from),
+                                destination);
+
+        if (channel < replacement.size())
+            destination = std::copy(replacement[channel].begin(), replacement[channel].end(),
+                                    destination);
+
+        std::copy(data.channels[channel].begin()
+                      + static_cast<std::ptrdiff_t>(from + spanLength),
+                  data.channels[channel].end(), destination);
+    }
+
+    return result;
+}
+
+} // namespace
+
+bool StretchAssetCommand::execute(Project& project)
+{
+    project::AudioAsset* asset = nullptr;
+    for (project::AudioAsset& candidate : project.audioAssets())
+        if (candidate.id == asset_)
+            asset = &candidate;
+
+    if (asset == nullptr)
+        return false;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return false;
+
+    if (!minted_) {
+        applied_ = engine::edits::clampedRegion(data, region_);
+        if (applied_.length() <= 0 || (ratio_ == 1.0 && pitchSemitones_ == 0.0))
+            return false;
+
+        before_ = snapshotRegion(data, applied_);
+
+        AudioFileData regionData;
+        regionData.sampleRate   = data.sampleRate;
+        regionData.channelCount = data.channelCount;
+        regionData.frameCount   = applied_.length();
+        regionData.channels     = before_;
+
+        engine::dsp::StretchOptions options;
+        options.ratio          = ratio_;
+        options.pitchSemitones = pitchSemitones_;
+
+        after_  = engine::dsp::timeStretch(regionData, options).channels;
+        minted_ = true;
+    }
+
+    const AudioFileData spliced =
+        withSpanReplaced(data, applied_.from, applied_.length(), after_);
+
+    if (!WavFile::write(assetFilePath(*asset), spliced))
+        return false;
+
+    asset->frameCount = spliced.frameCount;
+    return true;
+}
+
+void StretchAssetCommand::undo(Project& project)
+{
+    project::AudioAsset* asset = nullptr;
+    for (project::AudioAsset& candidate : project.audioAssets())
+        if (candidate.id == asset_)
+            asset = &candidate;
+
+    if (asset == nullptr)
+        return;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return;
+
+    const auto renderedFrames =
+        after_.empty() ? FrameCount{0} : static_cast<FrameCount>(after_[0].size());
+
+    const AudioFileData restored =
+        withSpanReplaced(data, applied_.from, renderedFrames, before_);
+
+    if (WavFile::write(assetFilePath(*asset), restored))
+        asset->frameCount = restored.frameCount;
 }
 
 } // namespace incdaw::app

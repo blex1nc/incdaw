@@ -170,7 +170,9 @@ TEST_CASE("the instance manager surfaces any changed latency exactly once")
 
     CHECK_FALSE(manager.refreshChangedLatencies());
 
-    manager.instanceFor(1)->noteLatencyChanged();
+    // The `changed` callback is CLAP's, not the generic interface's: the test
+    // reaches through the format it created.
+    static_cast<plugins::ClapInstance*>(manager.instanceFor(1))->noteLatencyChanged();
     CHECK(manager.refreshChangedLatencies());
     CHECK_FALSE(manager.refreshChangedLatencies());
 }

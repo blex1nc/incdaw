@@ -211,6 +211,91 @@ recent projects.
   host-callback work (`clap_host_state.mark_dirty`, PLUGIN_HOST §6)
   lands.
 
+### FL Studio 2026 feature parity, wave 1 — 2026-08-16
+
+Eight feature blocks closing gaps against the FL Studio 2026 functional
+reference (docs/FL2026_GAP.md holds the full analysis and status table).
+
+**Added**
+
+- **Piano Roll chord toolkit** (`app::music`, `ChordCommands`): chord
+  detection with inversion naming (Chord Panel equivalent), Chord Stamp
+  with bottom-up/top-down voicings, movement-minimising voice-leading,
+  diatonic progression nudge. Wired: Option-click stamps, `1`–`8` pick
+  the shape, `V` flips voicing, `C` names the selection, `[`/`]` nudge.
+- **Note tools** (`NoteToolCommands`): strum with anchored ends,
+  arpeggiate (up/down/up-down), legato to the next start, note labels
+  (F2) on the per-note property that has serialized since Phase 5.
+- **Clip splitting and timeline markers** (format v1.5): frame-exact
+  audio splits with advancing source offsets, tick-exact pattern and
+  automation splits, compile-equivalence asserted; `TimelineMarker`
+  (region = marker with length) with add/edit/remove commands, ruler
+  drawing, Option-click slice and `M`/Shift+`M` gestures.
+- **Sidechain routing**: sidechain edges now compile into detector-only
+  key inputs on the destination's compressor inserts, PDC-aligned,
+  never summed into audio; "Sidechain Into" in the mixer strip menu.
+- **EBU R128 loudness** (`incdaw.loudness`): BS.1770-4 K-weighting
+  designed per sample rate, momentary/short-term/gated integrated via a
+  constant-memory histogram, calibrated to the −3.01 LUFS reference.
+- **Stereo separation** on every strip (mid/side, −1 mono … +1 wide,
+  click-free ramp, automation key `stereoSeparation`) and **true
+  pre-fader sends** through a unity tap spliced ahead of the fader.
+- **Modulation effects**: chorus, flanger, phaser — bit-exact null at
+  defaults; **Transient Split** (Transmitter equivalent): fast/slow
+  envelope race, both/transients/sustain outputs, exact reassembly.
+- **Time-stretch subsystem** (`engine::dsp::timeStretch`): offline
+  WSOLA with transient locking (clicks survive both directions exactly
+  once), stereo-coherent alignment, pitch shift via windowed-sinc;
+  editor verbs Time Stretch…/Pitch Shift… with bit-exact undo of the
+  file; Option-drag stretch at the clip edge (`StretchClipsCommand`);
+  warped clips render at compile time and play through the graph.
+- **Slicer**: `engine::audio::detectOnsets` plus `SliceAssetCommand` —
+  one undo lands a sampler channel (a zone per slice, chromatic keys)
+  and the pattern replaying the loop's timing; "Slice to New Channel"
+  in the editor's Audio menu.
+- **Browser** (`app::Browser` + `INCDAWBrowserView`): the pane INCDAW
+  never had. Roots (the user's own folders on a first launch), listings
+  that put folders first and hide dot-files, recursive name search
+  capped at 500 results and 8 levels, favourites and recents — all
+  persisted beside the plugin catalogue, never inside a project.
+  Project packages and plugin bundles are named as themselves and never
+  descended into. Leftmost in the workspace, hidden and shown from
+  View > Browser (⌘B); a double-click opens a project or imports a MIDI
+  file.
+- **Preview** (`engine::AuditionPlayer`): a click in the Browser auditions
+  the sample, mixed by the engine after the project graph — it sounds with
+  the transport stopped and never costs a graph rebuild. The audio thread
+  reads a raw pointer; the decoded buffer is released only once the block
+  counter has passed the swap, the same grace a retired graph gets.
+  Cross-rate files are repitched by interpolated reading; NaN containment
+  now covers the preview too.
+- **Drag into the project**: browser rows are drag sources, and the
+  Channel Rack and Playlist accept file drops (from Finder as well). A
+  sample dropped on a channel replaces its sound, on empty rack space
+  becomes a sampler channel, on a playlist lane becomes an audio clip at
+  the snapped drop tick, as long as the file. Each is one undo with ids
+  that survive redo; asset import is now one shared helper
+  (`app::AudioAssetImport`) rather than a copy per command.
+
+- **Audio Unit hosting** (`platform::AudioUnitHost`, `plugins::AudioUnitInstance`):
+  macOS's own plugin format, hosted as effects. Components are enumerated
+  from the system registry — no scan, no plugin code run — and appear in
+  the mixer's Add Insert menu beside the scanned CLAP plugins. Stereo
+  float in-place rendering, parameters, reported latency into the existing
+  PDC, ClassInfo state through the same StateIO seam project files
+  already use, and the format's generic editor view.
+- **`plugins::HostedPlugin`**: the interface the second format forced.
+  PluginNode, the instance manager, delay compensation, plugin state
+  files and the shell's editor windows are written against it; CLAP and
+  AU are two implementations of it and nothing above the interface knows
+  which is which.
+
+**Tests**
+
+- 483 → 580 cases; every feature carries its own quality gates
+  (calibrated LUFS, analytic sidechain levels, WSOLA click preservation,
+  chord-theory pins, format round-trips and the v1.5 fixture).
+
 ---
 
 ## [0.9.0] — 2026-08-16 — the core is complete

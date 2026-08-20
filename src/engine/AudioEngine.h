@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/audio/AudioLogger.h"
+#include "engine/audio/AuditionPlayer.h"
 #include "engine/core/CallbackProfiler.h"
 #include "engine/core/SampleRingBuffer.h"
 #include "engine/graph/RenderGraph.h"
@@ -119,6 +120,12 @@ public:
     [[nodiscard]] AudioLogger&       logger()       noexcept { return logger_; }
     [[nodiscard]] const AudioLogger& logger() const noexcept { return logger_; }
 
+    /// The Browser's preview source, mixed after the project graph.
+    ///
+    /// Deliberately not a graph node: a preview must sound with the transport
+    /// stopped and must never cost a rebuild (engine/audio/AuditionPlayer.h).
+    [[nodiscard]] AuditionPlayer& audition() noexcept { return audition_; }
+
     /// The most recent block's host-time <-> timeline correlation.
     ///
     /// Published from the audio thread through a seqlock — the audio thread
@@ -217,6 +224,7 @@ private:
     std::atomic<std::uint64_t> anchorVersion_{0};
     TimelineAnchor             anchor_;
 
+    AuditionPlayer      audition_;
     SampleRingBuffer    monitorRing_;
     std::vector<Sample> monitorScratch_;   ///< interleave scratch, sized on start
     std::atomic<bool>   monitorEnabled_{false};

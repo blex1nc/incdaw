@@ -4,6 +4,7 @@
 #include "plugins/PluginIdentifier.h"
 #include "plugins/PluginParameterInfo.h"
 #include "plugins/PluginRegistry.h"
+#include "plugins/HostedPlugin.h"
 #include "plugins/clap/ClapLibrary.h"
 
 #include <cstdint>
@@ -63,7 +64,7 @@ public:
 
     /// The live instance for a slot, or nullptr. Borrowed: valid until the
     /// slot leaves the project and a retain pass runs.
-    [[nodiscard]] ClapInstance* instanceFor(std::uint64_t slotKey) const;
+    [[nodiscard]] HostedPlugin* instanceFor(std::uint64_t slotKey) const;
 
     /// Parameters of `uid` as discovered by its first instantiation, or
     /// nullptr before one has succeeded. Discovery is per plugin TYPE —
@@ -88,7 +89,7 @@ public:
 
 private:
     struct Held {
-        std::unique_ptr<ClapInstance> instance;
+        std::unique_ptr<HostedPlugin> instance;
         std::string                   uid;
         double                        sampleRate = 0.0;
         std::uint32_t                 maxFrames  = 0;

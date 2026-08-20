@@ -4,7 +4,9 @@
 #include "engine/audio/InputMonitorNode.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
+#include "engine/dsp/TimeStretch.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
+#include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/graph/ParameterSink.h"
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
@@ -152,6 +154,19 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
     engine::NodeIndex master = engine::invalidNode;
 
+    /// Compressor inserts that can accept an external key, by the mixer node
+    /// that owns them, with the number of edges already wired into each — the
+    /// key's input index is the connection count at the moment it lands.
+    struct KeyReceiver {
+        engine::NodeIndex              node = engine::invalidNode;
+        engine::dsp::CompressorEffect* compressor = nullptr;
+        std::size_t                    inputsSoFar = 0;
+    };
+    std::unordered_map<EntityId, std::vector<KeyReceiver>> keyReceivers;
+
+    /// Where a pre-fader send taps each strip, when one asked for it.
+    std::unordered_map<EntityId, engine::NodeIndex> preFaderTaps;
+
     for (const MixerNode& node : project.mixerNodes()) {
         auto strip  = std::make_unique<engine::dsp::MixerStripNode>();
         auto* handle = strip.get();
@@ -167,6 +182,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         handle->setPan(node.pan);
         handle->setMuted(silenced);
         handle->setPolarityInverted(node.polarityFlip);
+        handle->setStereoSeparation(node.stereoSeparation);
 
         const auto index = builder.addNode(std::move(strip));
         stripIndices.emplace(node.id, index);
@@ -222,19 +238,54 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             builtInsertSlotIds.push_back(slot.id);
             builtInsertNodes.push_back(insertNode.get());
 
-            chain.push_back(builder.addNode(std::move(insertNode)));
+            engine::dsp::CompressorEffect* compressor =
+                slot.plugin.format == plugins::Format::builtin
+                        && slot.plugin.uid == "incdaw.compressor"
+                    ? static_cast<engine::dsp::CompressorEffect*>(insertNode.get())
+                    : nullptr;
+
+            const engine::NodeIndex inserted = builder.addNode(std::move(insertNode));
+            if (compressor != nullptr)
+                keyReceivers[node.id].push_back({ inserted, compressor, 0 });
+
+            chain.push_back(inserted);
         }
 
-        engine::NodeIndex chainInput = index;
+        // A pre-fader send taps the signal after the inserts and before the
+        // fader. The tap is a unity gain node, spliced in only when a send
+        // actually asks for it — ordinary strips keep their direct wiring.
+        const bool needsPreFaderTap =
+            std::any_of(project.routing().begin(), project.routing().end(),
+                        [&node](const RoutingConnection& connection) {
+                            return connection.isSend && connection.preFader
+                                && connection.source == node.id;
+                        });
+
+        engine::NodeIndex preFaderTap = engine::invalidNode;
+        if (needsPreFaderTap) {
+            preFaderTap = builder.addNode(
+                std::make_unique<engine::dsp::GainNode>(engine::Sample{1}));
+            builder.connect(preFaderTap, index);
+        }
+
+        const engine::NodeIndex stripEntry = needsPreFaderTap ? preFaderTap : index;
+        engine::NodeIndex       chainInput = stripEntry;
 
         if (!chain.empty()) {
             for (std::size_t position = 0; position + 1 < chain.size(); ++position)
                 builder.connect(chain[position], chain[position + 1]);
 
-            builder.connect(chain.back(), index);
+            builder.connect(chain.back(), stripEntry);
             chainInput = chain.front();
+
+            // Every non-head chain node now has exactly one wired input.
+            if (auto found = keyReceivers.find(node.id); found != keyReceivers.end())
+                for (KeyReceiver& receiver : found->second)
+                    if (receiver.node != chain.front())
+                        receiver.inputsSoFar = 1;
         }
 
+        preFaderTaps.emplace(node.id, preFaderTap);
         stripInputIndices.emplace(node.id, chainInput);
 
         mixerIds.push_back(node.id);
@@ -267,6 +318,16 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         masterInput = found->second;
 
     // ── Routing between mixer nodes ─────────────────────────────────────────
+
+    // Keyed inserts at a chain's head keep receiving edges below; their key
+    // index is the number of edges wired in before the key arrives.
+    const auto countEdgeIntoHead = [&](EntityId destinationId, engine::NodeIndex head) {
+        if (auto found = keyReceivers.find(destinationId); found != keyReceivers.end())
+            for (auto& receiver : found->second)
+                if (receiver.node == head)
+                    ++receiver.inputsSoFar;
+    };
+
     for (const RoutingConnection& connection : project.routing()) {
         // Out of the source's fader, into the head of the destination's
         // insert chain.
@@ -276,21 +337,57 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         if (source == stripIndices.end() || destination == stripInputIndices.end())
             continue;   // an edge naming something that is not a mixer node
 
-        if (connection.sidechain)
-            continue;   // sidechain has no meaning until a plugin can receive it
+        if (connection.sidechain) {
+            // A key edge: out of the source's fader, into the detector input
+            // of the destination's keyed inserts. The builder treats it as
+            // any other edge, so delay compensation aligns the key with the
+            // audio it ducks.
+            const auto receivers = keyReceivers.find(connection.destination);
+            if (receivers == keyReceivers.end() || receivers->second.empty()) {
+                const MixerNode* named = project.findMixerNode(connection.destination);
+                compiled.warnings.push_back(
+                    "sidechain into \"" + (named != nullptr ? named->name : std::string{"?"})
+                    + "\" is silent: no compressor insert to key");
+                continue;
+            }
+
+            for (auto& receiver : receivers->second) {
+                if (receiver.compressor->keyInput()
+                    != engine::dsp::CompressorEffect::noKeyInput) {
+                    compiled.warnings.push_back(
+                        "second sidechain into the same compressor ignored");
+                    continue;
+                }
+
+                builder.connect(source->second, receiver.node);
+                receiver.compressor->setKeyInput(receiver.inputsSoFar);
+                ++receiver.inputsSoFar;
+            }
+            continue;
+        }
 
         if (!connection.isSend) {
             builder.connect(source->second, destination->second);
+            countEdgeIntoHead(connection.destination, destination->second);
             continue;
         }
 
         // A send is a second edge with its own gain, so it needs a node to
-        // carry that gain.
+        // carry that gain. Pre-fader sends leave from the tap ahead of the
+        // fader; post-fader sends leave from the strip's output.
+        engine::NodeIndex from = source->second;
+        if (connection.preFader) {
+            if (const auto tap = preFaderTaps.find(connection.source);
+                tap != preFaderTaps.end() && tap->second != engine::invalidNode)
+                from = tap->second;
+        }
+
         const auto send = builder.addNode(std::make_unique<engine::dsp::GainNode>(
             static_cast<engine::Sample>(connection.gain)));
 
-        builder.connect(source->second, send);
+        builder.connect(from, send);
         builder.connect(send, destination->second);
+        countEdgeIntoHead(connection.destination, destination->second);
     }
 
     // ── Asset decoding ──────────────────────────────────────────────────────
@@ -574,7 +671,14 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
                 engine::AudioClipNode::PlacedClip placed;
 
-                if (shouldStream(clip.source)) {
+                // A warped clip (stretch or pitch) renders its span offline at
+                // compile time and plays the result preloaded — streaming a
+                // stretch would mean realtime WSOLA, which is a later, second
+                // implementation behind the same options (CLAUDE.md §16).
+                const bool warped =
+                    clip.stretchRatio != 1.0 || clip.pitchSemitones != 0.0;
+
+                if (!warped && shouldStream(clip.source)) {
                     placed.stream = openStream(clip.source, clip.sourceOffset);
                     if (placed.stream == nullptr)
                         continue;
@@ -590,6 +694,39 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 placed.gain          = static_cast<engine::Sample>(clip.gain);
                 placed.fadeInFrames  = clip.fadeInFrames;
                 placed.fadeOutFrames = clip.fadeOutFrames;
+
+                if (warped && placed.audio != nullptr && clip.stretchRatio > 0.0) {
+                    // The source span that fills the clip's timeline length at
+                    // this ratio.
+                    const auto consumed = static_cast<engine::FrameCount>(std::llround(
+                        static_cast<double>(clip.length) / clip.stretchRatio));
+
+                    const engine::FrameCount from =
+                        std::min(clip.sourceOffset, placed.audio->frameCount);
+                    const engine::FrameCount to =
+                        std::min(from + consumed, placed.audio->frameCount);
+
+                    engine::AudioFileData span;
+                    span.sampleRate   = placed.audio->sampleRate;
+                    span.channelCount = placed.audio->channelCount;
+                    span.frameCount   = to - from;
+                    span.channels.reserve(span.channelCount);
+                    for (const auto& channel : placed.audio->channels)
+                        span.channels.emplace_back(
+                            channel.begin() + static_cast<std::ptrdiff_t>(from),
+                            channel.begin() + static_cast<std::ptrdiff_t>(to));
+
+                    engine::dsp::StretchOptions stretchOptions;
+                    stretchOptions.ratio          = clip.stretchRatio;
+                    stretchOptions.pitchSemitones = clip.pitchSemitones;
+
+                    auto rendered = std::make_shared<engine::AudioFileData>(
+                        engine::dsp::timeStretch(span, stretchOptions));
+
+                    placed.audio        = std::move(rendered);
+                    placed.sourceOffset = 0;
+                    placed.length       = std::min(clip.length, placed.audio->frameCount);
+                }
 
                 // Clip normalize folds into the placement gain here, at
                 // compile time — the node stays one multiply per sample. The

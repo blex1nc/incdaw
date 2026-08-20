@@ -382,6 +382,51 @@ enum class MixerDrag { none, fader, pan };
     send.target = self;
     send.representedObject = @(nodeId.value());
 
+    NSMenuItem* preSend = [menu addItemWithTitle:@"Send To Master (Pre-Fader, 25%)"
+                                          action:@selector(addPreFaderSendFromMenu:)
+                                   keyEquivalent:@""];
+    preSend.target = self;
+    preSend.representedObject = @(nodeId.value());
+
+    // Stereo separation presets; the strip applies them mid/side, before pan.
+    NSMenuItem* widthItem = [menu addItemWithTitle:@"Stereo Separation"
+                                            action:nil
+                                     keyEquivalent:@""];
+    NSMenu* widthMenu = [[NSMenu alloc] init];
+
+    const struct { const char* title; double value; } widths[] = {
+        { "Mono (-100%)", -1.0 }, { "Narrow (-50%)", -0.5 }, { "Normal (0%)", 0.0 },
+        { "Wide (+50%)", 0.5 },   { "Widest (+100%)", 1.0 },
+    };
+    for (const auto& width : widths) {
+        NSMenuItem* item = [widthMenu addItemWithTitle:@(width.title)
+                                                action:@selector(setSeparationFromMenu:)
+                                         keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @{@"node": @(nodeId.value()), @"separation": @(width.value)};
+    }
+    widthItem.submenu = widthMenu;
+
+    // Sidechain: this strip becomes the key of a compressor on the chosen
+    // strip. The compile step warns if the destination has none to key.
+    NSMenuItem* sidechainItem = [menu addItemWithTitle:@"Sidechain Into"
+                                                action:nil
+                                         keyEquivalent:@""];
+    NSMenu* sidechainMenu = [[NSMenu alloc] init];
+
+    for (const project::MixerNode& node : _project->mixerNodes()) {
+        if (node.id.value() == nodeId.value() || node.id == _project->masterMixerNode())
+            continue;
+
+        NSMenuItem* target = [sidechainMenu addItemWithTitle:@(node.name.c_str())
+                                                      action:@selector(addSidechainFromMenu:)
+                                               keyEquivalent:@""];
+        target.target            = self;
+        target.representedObject = @{@"source": @(nodeId.value()),
+                                     @"destination": @(node.id.value())};
+    }
+    sidechainItem.submenu = sidechainMenu;
+
     // ── The insert chain ─────────────────────────────────────────────────
     [menu addItem:[NSMenuItem separatorItem]];
 
@@ -395,7 +440,7 @@ enum class MixerDrag { none, fader, pan };
                                                     action:@selector(addInsertFromMenu:)
                                              keyEquivalent:@""];
         item.target            = self;
-        item.representedObject = @{@"node": @(nodeId.value()), @"uid": plugin[@"uid"]};
+        item.representedObject = @{@"node": @(nodeId.value()), @"id": plugin[@"id"]};
     }
 
     if (self.availableInserts.count == 0)
@@ -530,8 +575,11 @@ enum class MixerDrag { none, fader, pan };
     NSDictionary* info = item.representedObject;
 
     plugins::PluginIdentifier plugin;
-    plugin.format = plugins::Format::clap;
-    plugin.uid    = [info[@"uid"] UTF8String];
+
+    // "clap:com.acme.reverb", "au:aufx:dely:appl" — the round-trippable form
+    // the project file stores. The menu no longer assumes a format.
+    if (!plugins::PluginIdentifier::fromString([info[@"id"] UTF8String], plugin))
+        return;
 
     if (_registry->execute(std::make_unique<app::AddInsertCommand>(
             project::EntityId{[info[@"node"] unsignedLongLongValue]}, std::move(plugin))))
@@ -748,6 +796,36 @@ enum class MixerDrag { none, fader, pan };
 
     [self commitStructural:std::make_unique<app::ConnectMixerCommand>(
         nodeId, _project->masterMixerNode(), true, 0.25)];
+}
+
+- (void)addPreFaderSendFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId nodeId{[item.representedObject unsignedLongLongValue]};
+
+    if (nodeId == _project->masterMixerNode())
+        return;
+
+    [self commitStructural:std::make_unique<app::ConnectMixerCommand>(
+        nodeId, _project->masterMixerNode(), true, 0.25, true)];
+}
+
+- (void)setSeparationFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+
+    [self commitStructural:std::make_unique<app::SetMixerStereoSeparationCommand>(
+        project::EntityId{[info[@"node"] unsignedLongLongValue]},
+        [info[@"separation"] doubleValue])];
+}
+
+- (void)addSidechainFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* info = item.representedObject;
+    const project::EntityId source{[info[@"source"] unsignedLongLongValue]};
+    const project::EntityId destination{[info[@"destination"] unsignedLongLongValue]};
+
+    [self commitStructural:std::make_unique<app::ConnectMixerCommand>(
+        source, destination, false, 1.0, false, true)];
 }
 
 - (void)removeFromMenu:(NSMenuItem*)item

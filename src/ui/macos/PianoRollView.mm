@@ -1,8 +1,11 @@
 #include "ui/macos/PianoRollView.h"
 
 #include "app/CommandRegistry.h"
+#include "app/MusicTheory.h"
 #include "app/PianoRollModel.h"
+#include "app/commands/ChordCommands.h"
 #include "app/commands/NoteCommands.h"
+#include "app/commands/NoteToolCommands.h"
 #include "ui/macos/PianoRollRenderer.h"
 
 #import <QuartzCore/CAMetalLayer.h>
@@ -47,6 +50,12 @@ ui::Rect makeRect(double x, double y, double width, double height,
 
 enum class DragMode { none, move, resize, boxSelect };
 
+/// The stamp palette: which chord an Option-click lays down. Cycled with the
+/// number keys; the suffixes address app::music::chordDictionary().
+constexpr std::array<const char*, 8> stampSuffixes = {
+    "", "m", "7", "maj7", "m7", "sus4", "dim", "add9",
+};
+
 } // namespace
 
 @implementation INCDAWPianoRollView {
@@ -71,6 +80,12 @@ enum class DragMode { none, move, resize, boxSelect };
     long long  _dragAppliedTicks;
     int        _dragAppliedKeys;
     BOOL       _gestureActive;
+
+    // Chord tools (docs/FL2026_GAP.md P1/P2).
+    std::size_t       _stampChordIndex;
+    BOOL              _stampTopDown;
+    int               _keyRootPc;      ///< nudge key signature root, 0 = C
+    app::music::Scale _scale;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -92,6 +107,10 @@ enum class DragMode { none, move, resize, boxSelect };
     _gestureActive    = NO;
     _playheadTick     = -1;
     _statusText       = @"Ready";
+    _stampChordIndex  = 0;
+    _stampTopDown     = NO;
+    _keyRootPc        = 0;
+    _scale            = app::music::Scale::major;
 
     app::PianoRollModel::Viewport viewport;
     viewport.firstTick    = 0;
@@ -387,6 +406,17 @@ enum class DragMode { none, move, resize, boxSelect };
         return;
     }
 
+    // Option-click stamps the current chord, clicked key as root — the Chord
+    // Stamp gesture. The stamped notes become the selection so a drag can
+    // place them, exactly like a freshly drawn note.
+    if ((event.modifierFlags & NSEventModifierFlagOption) != 0) {
+        [self stampChordAtTick:_model->snapTick(_model->xToTick(grid.x))
+                           key:_model->yToKey(grid.y)];
+        _dragMode = DragMode::move;
+        [self setNeedsDisplay:YES];
+        return;
+    }
+
     // Empty space: draw a note there. One click, one note — the same gesture
     // every step sequencer and piano roll uses.
     project::MidiEvent note;
@@ -489,6 +519,11 @@ enum class DragMode { none, move, resize, boxSelect };
 - (void)mouseUp:(NSEvent*)event
 {
     (void)event;
+
+    // Finishing a selection names what was selected — the Chord Panel's job.
+    if (_dragMode == DragMode::boxSelect && !_model->selection().empty())
+        [self reportChordOfSelection];
+
     _dragMode      = DragMode::none;
     _gestureActive = NO;
     [self setNeedsDisplay:YES];
@@ -613,6 +648,88 @@ enum class DragMode { none, move, resize, boxSelect };
         return;
     }
 
+    // ── Chord and note tools (docs/FL2026_GAP.md P1/P2) ─────────────────────
+
+    if (!command && character >= '1'
+        && character < static_cast<unichar>('1' + stampSuffixes.size())) {
+        _stampChordIndex = static_cast<std::size_t>(character - '1');
+        [self reportStampChoice];
+        return;
+    }
+
+    if (!command && (character == 'v' || character == 'V')) {
+        _stampTopDown = !_stampTopDown;
+        [self reportStampChoice];
+        return;
+    }
+
+    if (!command && (character == 'c' || character == 'C')) {
+        [self reportChordOfSelection];
+        return;
+    }
+
+    const Tick grid = _model->snap() > 0 ? _model->snap() : ticksPerQuarterNote / 4;
+
+    if (!command && (character == 's' || character == 'S')) {
+        if (!_model->selection().empty()
+            && _registry->execute(std::make_unique<app::StrumNotesCommand>(
+                   project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+                   _model->selection(), grid, shift)))
+            [self reportAction:shift ? @"Strum Down" : @"Strum"];
+
+        [self setNeedsDisplay:YES];
+        return;
+    }
+
+    if (!command && (character == 'p' || character == 'P')) {
+        const auto direction = shift ? app::ArpeggiateNotesCommand::Direction::upDown
+                                     : app::ArpeggiateNotesCommand::Direction::up;
+
+        if (!_model->selection().empty()
+            && _registry->execute(std::make_unique<app::ArpeggiateNotesCommand>(
+                   project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+                   _model->selection(), grid, direction))) {
+            // The rewrite renumbered the event list; the old indices are gone.
+            _model->clearSelection();
+            [self reportAction:@"Arpeggiate"];
+        }
+
+        [self setNeedsDisplay:YES];
+        return;
+    }
+
+    if (!command && (character == 'l' || character == 'L')) {
+        if (!_model->selection().empty()
+            && _registry->execute(std::make_unique<app::LegatoNotesCommand>(
+                   project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+                   _model->selection())))
+            [self reportAction:@"Legato"];
+
+        [self setNeedsDisplay:YES];
+        return;
+    }
+
+    if (!command && (character == '[' || character == ']')) {
+        const int steps = character == ']' ? 1 : -1;
+
+        if (!_model->selection().empty()
+            && _registry->executeMerging(std::make_unique<app::NudgeChordCommand>(
+                   project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+                   _model->selection(), _keyRootPc, _scale, steps))) {
+            [self reportChordOfSelection];
+        }
+
+        [self setNeedsDisplay:YES];
+        return;
+    }
+
+    // F2, not R: bare R is the transport's record key, claimed by the menu
+    // before any view sees it.
+    if (character == NSF2FunctionKey) {
+        [self renameSelectedNotes];
+        return;
+    }
+
     [super keyDown:event];
 }
 
@@ -641,6 +758,120 @@ enum class DragMode { none, move, resize, boxSelect };
 
     _channelIdValue = value;
     _model->clearSelection();
+    [self setNeedsDisplay:YES];
+}
+
+// ── Chord tools ──────────────────────────────────────────────────────────────
+
+/// Keys of the selected note events, for detection and stamping context.
+- (std::vector<int>)selectedNoteKeys
+{
+    const std::vector<project::MidiEvent>& notes = [self currentNotes];
+
+    std::vector<int> keys;
+    for (const std::size_t index : _model->selection())
+        if (index < notes.size() && notes[index].type == project::MidiEventType::note)
+            keys.push_back(notes[index].key);
+    return keys;
+}
+
+/// The Chord Panel surface: name what is selected, in the status line.
+- (void)reportChordOfSelection
+{
+    const std::vector<int> keys = [self selectedNoteKeys];
+    if (keys.empty())
+        return;
+
+    const app::music::ChordDetection detection = app::music::detectChord(keys);
+    if (!detection.display.empty())
+        [self reportAction:[NSString stringWithFormat:@"Chord: %s", detection.display.c_str()]];
+}
+
+- (void)reportStampChoice
+{
+    const char* suffix = stampSuffixes[_stampChordIndex];
+    [self reportAction:[NSString stringWithFormat:@"Stamp: C%s shape, %s", suffix,
+                                                  _stampTopDown ? "top-down" : "bottom-up"]];
+}
+
+- (void)stampChordAtTick:(Tick)tick key:(int)key
+{
+    const app::music::ChordType* type =
+        app::music::findChordType(stampSuffixes[_stampChordIndex]);
+    if (type == nullptr)
+        return;
+
+    if (tick < 0)
+        tick = 0;
+
+    const Tick duration = _model->snap() > 0 ? _model->snap() * 4 : ticksPerQuarterNote;
+
+    std::vector<project::MidiEvent> notes;
+    for (const int chordKey :
+         app::music::stampChord(key, *type,
+                                _stampTopDown ? app::music::StampVoicing::topDown
+                                              : app::music::StampVoicing::bottomUp)) {
+        project::MidiEvent note;
+        note.type     = project::MidiEventType::note;
+        note.tick     = tick;
+        note.key      = chordKey;
+        note.duration = duration;
+        note.value    = 100;
+        notes.push_back(note);
+    }
+
+    auto  command = std::make_unique<app::InsertNotesCommand>(
+        project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+        std::move(notes), "Stamp Chord");
+    auto* raw = command.get();
+
+    if (_registry->execute(std::move(command))) {
+        std::vector<std::size_t> selection;
+        for (std::size_t offset = 0; offset < raw->insertedCount(); ++offset)
+            selection.push_back(raw->firstInsertedIndex() + offset);
+        _model->setSelection(std::move(selection));
+
+        const app::music::ChordDetection detection =
+            app::music::detectChord([self selectedNoteKeys]);
+        [self reportAction:[NSString stringWithFormat:@"Stamp %s", detection.display.c_str()]];
+    }
+}
+
+/// One label for the whole selection, through a modal prompt. Prefilled with
+/// the first selected note's current label so renaming is also editing.
+- (void)renameSelectedNotes
+{
+    if (_model->selection().empty())
+        return;
+
+    const std::vector<project::MidiEvent>& notes = [self currentNotes];
+
+    NSString* initial = @"";
+    for (const std::size_t index : _model->selection()) {
+        if (index < notes.size() && !notes[index].label.empty()) {
+            initial = @(notes[index].label.c_str());
+            break;
+        }
+    }
+
+    NSAlert* alert    = [[NSAlert alloc] init];
+    alert.messageText = @"Rename Notes";
+    [alert addButtonWithTitle:@"Rename"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 220, 24)];
+    field.stringValue  = initial;
+    alert.accessoryView = field;
+    alert.window.initialFirstResponder = field;
+
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return;
+
+    if (_registry->execute(std::make_unique<app::SetNoteLabelCommand>(
+            project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+            _model->selection(), std::string(field.stringValue.UTF8String))))
+        [self reportAction:@"Rename Notes"];
+
     [self setNeedsDisplay:YES];
 }
 

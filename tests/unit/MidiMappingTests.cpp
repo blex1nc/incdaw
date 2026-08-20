@@ -158,7 +158,7 @@ TEST_CASE("the v1.4 fixture still loads")
     const auto result = project::ProjectFile::load(project, fixture);
 
     REQUIRE(result.succeeded);
-    CHECK(result.migrated);   // 1.4 -> 1.5 (additive) since instrument parameters
+    CHECK(result.migrated);   // 1.4 predates instrument parameters (1.5) and markers (1.6)
     CHECK(result.migratedFrom == "1.4");
 
     REQUIRE(project.midiMappings().size() == 1);

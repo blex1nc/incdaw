@@ -17,6 +17,10 @@ add_executable(incdaw_tests
     unit/MidiTests.cpp
     unit/CommandTests.cpp
     unit/ProjectSessionTests.cpp
+    unit/BrowserTests.cpp
+    unit/BrowserDropTests.cpp
+    unit/ChordToolTests.cpp
+    unit/NoteToolTests.cpp
     unit/PianoRollTests.cpp
     unit/InstrumentTests.cpp
     unit/InstrumentParameterTests.cpp
@@ -33,7 +37,13 @@ add_executable(incdaw_tests
     unit/PatternTests.cpp
     unit/ChannelRackTests.cpp
     unit/PlaylistTests.cpp
+    unit/MarkerAndSplitTests.cpp
     unit/MixerTests.cpp
+    unit/SidechainTests.cpp
+    unit/LoudnessAndRoutingTests.cpp
+    unit/ModulationEffectTests.cpp
+    unit/TimeStretchTests.cpp
+    unit/SlicerTests.cpp
     unit/AutomationTests.cpp
     unit/WavFileTests.cpp
     unit/WavStreamWriterTests.cpp
@@ -46,7 +56,9 @@ add_executable(incdaw_tests
     unit/InputMonitorTests.cpp
     unit/LoopRecordingTests.cpp
     unit/AudioLoggerTests.cpp
+    unit/AuditionTests.cpp
     unit/PluginHostTests.cpp
+    unit/AudioUnitTests.cpp
     unit/PluginRegistryTests.cpp
     unit/PluginInsertTests.cpp
     unit/PluginParameterTests.cpp

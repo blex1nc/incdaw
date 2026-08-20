@@ -17,6 +17,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "app/AutomationWriteSession.h"
+#include "app/Browser.h"
 #include "app/CommandRegistry.h"
 #include "app/ProjectSession.h"
 #include "app/Version.h"
@@ -26,6 +27,7 @@
 #include "app/commands/SamplerCommands.h"
 #include "engine/instrument/BuiltinInstruments.h"
 #include "engine/AudioEngine.h"
+#include "platform/AudioUnitHost.h"
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
 #include "plugins/PluginRegistry.h"
@@ -38,8 +40,12 @@
 #include "project/ProjectGraphCompiler.h"
 #include "project/RecordingSession.h"
 #include "app/commands/AudioEditCommands.h"
+#include "app/commands/ImportCommands.h"
+#include "app/commands/SlicerCommands.h"
+#include "engine/audio/OnsetDetection.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "ui/macos/AudioEditorView.h"
+#include "ui/macos/BrowserView.h"
 #include "ui/macos/ChannelRackView.h"
 #include "engine/dsp/effects/UtilityEffects.h"
 #include "ui/macos/InsertParameterPanel.h"
@@ -129,6 +135,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 @property (strong) INCDAWChannelRackView*   channelRack;
 @property (strong) INCDAWPatternListView*   patternList;
 @property (strong) NSTextField*             statusField;
+@property (strong) INCDAWBrowserView*       browserPane;
 @end
 
 @implementation INCDAWAppDelegate {
@@ -221,6 +228,12 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     NSMutableDictionary<NSNumber*, NSWindow*>* _editorWindows;
     NSMutableDictionary<NSNumber*, id>*        _editorObservers;
 
+    /// The Browser pane's model: roots, favourites and recents. Application
+    /// state rather than project state — a sample library belongs to the
+    /// installation, and follows the user from project to project.
+    app::Browser          _browser;
+    std::filesystem::path _browserSettings;
+
     /// Generic parameter panels, by slot key — what "Open Editor" opens for a
     /// builtin effect, or a hosted plugin without an editor of its own. The
     /// panels hold no engine pointers (sinks die with their graph); writes
@@ -265,6 +278,22 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty())
         (void)_pluginRegistry.load(support / "plugins.tsv");
 
+    // The browser keeps its roots and favourites next to that catalogue. A
+    // first launch has no file and is given the user's own folders, because a
+    // browser that opens empty teaches nothing about what it is for.
+    if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty()) {
+        _browserSettings = support / "browser.json";
+
+        std::string browserError;
+        if (!_browser.load(_browserSettings, browserError))
+            NSLog(@"INCDAW: browser settings ignored: %s", browserError.c_str());
+    }
+
+    if (_browser.roots().empty()) {
+        _browser.addDefaultRoots(std::filesystem::path{NSHomeDirectory().UTF8String});
+        [self saveBrowserSettings];
+    }
+
     _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
     _parameters      = project::ParameterRegistry::withBuiltins();
 
@@ -278,11 +307,30 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     // plugin, by display name. The view knows menus, not catalogues.
     NSMutableArray<NSDictionary*>* available = [NSMutableArray array];
     for (const plugins::PluginRegistry::Located& located : _pluginRegistry.plugins()) {
+        const plugins::PluginIdentifier identifier{plugins::Format::clap, located.plugin->id};
+
         [available addObject:@{
-            @"uid":  @(located.plugin->id.c_str()),
+            @"id":   @(identifier.toString().c_str()),
             @"name": @(located.plugin->name.empty() ? located.plugin->id.c_str()
                                                     : located.plugin->name.c_str()),
         }];
+    }
+
+    // Audio Units need no scan: the system's component registry IS their
+    // catalogue, and enumerating it runs no plugin code (docs/PLUGIN_HOST.md
+    // §3). Instruments are left out — an insert slot is an effect.
+    for (const platform::AudioUnitDescription& unit : platform::scanAudioUnits()) {
+        if (unit.isInstrument)
+            continue;
+
+        const plugins::PluginIdentifier identifier{plugins::Format::audioUnit, unit.uid};
+
+        NSString* label = unit.manufacturer.empty()
+                              ? @(unit.name.c_str())
+                              : [NSString stringWithFormat:@"%s — %s", unit.name.c_str(),
+                                                           unit.manufacturer.c_str()];
+
+        [available addObject:@{@"id": @(identifier.toString().c_str()), @"name": label}];
     }
     _availableInserts = available;
     _editorWindows    = [NSMutableDictionary dictionary];
@@ -313,12 +361,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     constexpr CGFloat statusHeight  = 26.0;
     constexpr CGFloat toolbarHeight = 30.0;
     constexpr CGFloat listWidth     = 150.0;
+    constexpr CGFloat browserWidth  = 210.0;
     constexpr CGFloat rackHeight    = 220.0;
 
     const NSRect body = NSMakeRect(0, statusHeight, frame.size.width,
                                    frame.size.height - statusHeight - toolbarHeight);
 
-    const NSRect editorFrame = NSMakeRect(0, 0, body.size.width - listWidth,
+    const NSRect editorFrame = NSMakeRect(0, 0, body.size.width - listWidth - browserWidth,
                                           body.size.height - rackHeight);
 
     self.pianoRoll = [[INCDAWPianoRollView alloc]
@@ -435,16 +484,45 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [editors addSubview:editorContainer];
     [editors addSubview:rackScroll];
 
+    // The Browser: leftmost, as in every DAW that has one. It opens nothing
+    // itself — a double-click hands the path back here, and this decides what
+    // opening it means.
+    self.browserPane = [[INCDAWBrowserView alloc]
+        initWithFrame:NSMakeRect(0, 0, browserWidth, body.size.height)
+              browser:&_browser];
+
+    self.browserPane.autoresizingMask = NSViewHeightSizable;
+
+    __weak INCDAWAppDelegate* weakSelfForBrowser = self;
+
+    self.browserPane.onActivate = ^(NSString* path) {
+        [weakSelfForBrowser browserActivated:path];
+    };
+
+    self.browserPane.onSettingsChanged = ^{
+        [weakSelfForBrowser saveBrowserSettings];
+    };
+
+    self.browserPane.onPreview = ^(NSString* path) {
+        [weakSelfForBrowser browserPreview:path];
+    };
+
+    self.browserPane.onStopPreview = ^{
+        [weakSelfForBrowser stopBrowserPreview];
+    };
+
     NSSplitView* workspace = [[NSSplitView alloc] initWithFrame:body];
     workspace.vertical         = YES;
     workspace.dividerStyle     = NSSplitViewDividerStyleThin;
     workspace.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [workspace addSubview:self.browserPane];
     [workspace addSubview:listScroll];
     [workspace addSubview:editors];
 
     [content addSubview:workspace];
 
-    [workspace setPosition:listWidth ofDividerAtIndex:0];
+    [workspace setPosition:browserWidth ofDividerAtIndex:0];
+    [workspace setPosition:browserWidth + listWidth ofDividerAtIndex:1];
     [editors setPosition:body.size.height - rackHeight ofDividerAtIndex:0];
 
     [workspace adjustSubviews];
@@ -846,6 +924,107 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 - (void)editFadeOut:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::fadeOut factor:1.0f]; }
 - (void)editGainUp:(id)sender    { (void)sender; [self applyAudioEdit:app::AudioEditOp::gain factor:1.412538f]; }   // +3 dB
 - (void)editGainDown:(id)sender  { (void)sender; [self applyAudioEdit:app::AudioEditOp::gain factor:0.707946f]; }   // -3 dB
+
+/// One numeric prompt shared by the stretch verbs.
+- (double)promptForValue:(NSString*)title
+                 message:(NSString*)message
+                 initial:(NSString*)initial
+{
+    NSAlert* alert        = [[NSAlert alloc] init];
+    alert.messageText     = title;
+    alert.informativeText = message;
+    [alert addButtonWithTitle:@"Apply"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField* field  = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 200, 24)];
+    field.stringValue   = initial;
+    alert.accessoryView = field;
+    alert.window.initialFirstResponder = field;
+
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    return field.doubleValue;
+}
+
+/// Time stretch / pitch shift on the editor selection (or the whole file),
+/// through engine::dsp::timeStretch — offline WSOLA with transient locking.
+- (void)applyStretchWithRatio:(double)ratio semitones:(double)semitones
+{
+    if (self.audioEditor.assetIdValue == 0)
+        return;
+
+    const project::EntityId asset{self.audioEditor.assetIdValue};
+
+    engine::edits::Region region;
+    if (self.audioEditor.hasSelection) {
+        region.from = self.audioEditor.selectionFrom;
+        region.to   = self.audioEditor.selectionTo;
+    } else {
+        region.from = 0;
+        region.to   = std::numeric_limits<engine::FrameCount>::max();
+    }
+
+    (void)_registry->execute(
+        std::make_unique<app::StretchAssetCommand>(asset, region, ratio, semitones));
+
+    [self audioAssetChanged];
+}
+
+- (void)editTimeStretch:(id)sender
+{
+    (void)sender;
+    const double percent = [self promptForValue:@"Time Stretch"
+                                        message:@"New length as a percentage of the current one."
+                                        initial:@"200"];
+    if (!std::isnan(percent) && percent > 1.0 && percent < 1600.0)
+        [self applyStretchWithRatio:percent / 100.0 semitones:0.0];
+}
+
+- (void)editPitchShift:(id)sender
+{
+    (void)sender;
+    const double semitones = [self promptForValue:@"Pitch Shift"
+                                          message:@"Shift in semitones, -24 to +24."
+                                          initial:@"0"];
+    if (!std::isnan(semitones) && semitones != 0.0 && std::fabs(semitones) <= 24.0)
+        [self applyStretchWithRatio:1.0 semitones:semitones];
+}
+
+/// Slices the editor's asset onto a new sampler channel: every detected hit
+/// on its own key, and the current pattern replaying the loop's timing.
+- (void)sliceToNewChannel:(id)sender
+{
+    (void)sender;
+
+    if (self.audioEditor.assetIdValue == 0)
+        return;
+
+    const project::EntityId assetId{self.audioEditor.assetIdValue};
+
+    const project::AudioAsset* asset = nullptr;
+    for (const project::AudioAsset& candidate : _project->audioAssets())
+        if (candidate.id == assetId)
+            asset = &candidate;
+    if (asset == nullptr)
+        return;
+
+    engine::AudioFileData data;
+    const std::string path =
+        !asset->absolutePath.empty() ? asset->absolutePath : asset->relativePath;
+    if (!engine::WavFile::read(path, data))
+        return;
+
+    const std::vector<engine::FrameCount> onsets = engine::audio::detectOnsets(data);
+    if (onsets.empty())
+        return;
+
+    if (_registry->execute(std::make_unique<app::SliceAssetCommand>(
+            assetId, project::EntityId{self.pianoRoll.patternIdValue}, onsets))) {
+        [self.channelRack setNeedsDisplay:YES];
+        [self audioAssetChanged];
+    }
+}
 
 // ── Automation write mode ────────────────────────────────────────────────────
 
@@ -1264,11 +1443,30 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     NSMutableArray<NSDictionary*>* available = [NSMutableArray array];
     for (const plugins::PluginRegistry::Located& located : _pluginRegistry.plugins()) {
+        const plugins::PluginIdentifier identifier{plugins::Format::clap, located.plugin->id};
+
         [available addObject:@{
-            @"uid":  @(located.plugin->id.c_str()),
+            @"id":   @(identifier.toString().c_str()),
             @"name": @(located.plugin->name.empty() ? located.plugin->id.c_str()
                                                     : located.plugin->name.c_str()),
         }];
+    }
+
+    // Audio Units need no scan: the system's component registry IS their
+    // catalogue, and enumerating it runs no plugin code (docs/PLUGIN_HOST.md
+    // §3). Instruments are left out — an insert slot is an effect.
+    for (const platform::AudioUnitDescription& unit : platform::scanAudioUnits()) {
+        if (unit.isInstrument)
+            continue;
+
+        const plugins::PluginIdentifier identifier{plugins::Format::audioUnit, unit.uid};
+
+        NSString* label = unit.manufacturer.empty()
+                              ? @(unit.name.c_str())
+                              : [NSString stringWithFormat:@"%s — %s", unit.name.c_str(),
+                                                           unit.manufacturer.c_str()];
+
+        [available addObject:@{@"id": @(identifier.toString().c_str()), @"name": label}];
     }
     _availableInserts           = available;
     self.mixer.availableInserts = available;
@@ -1292,7 +1490,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         return;
     }
 
-    plugins::ClapInstance* instance =
+    plugins::HostedPlugin* instance =
         _pluginInstances != nullptr ? _pluginInstances->instanceFor(slotKey) : nullptr;
 
     if (instance == nullptr || !instance->hasEditor()) {
@@ -1358,7 +1556,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     // The instance may already be gone when the slot was removed first; the
     // manager answers nullptr then, and there is nothing left to close.
     if (_pluginInstances != nullptr)
-        if (plugins::ClapInstance* instance = _pluginInstances->instanceFor(slotKey))
+        if (plugins::HostedPlugin* instance = _pluginInstances->instanceFor(slotKey))
             instance->closeEditor();
 }
 
@@ -1445,7 +1643,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if (discovered == nullptr)
         return rows;
 
-    plugins::ClapInstance* instance =
+    plugins::HostedPlugin* instance =
         _pluginInstances != nullptr ? _pluginInstances->instanceFor(slot.id.value()) : nullptr;
 
     for (const plugins::PluginParameterInfo& parameter : *discovered) {
@@ -1628,7 +1826,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                                    decoded))
                         for (const auto& [parameterId, value] : decoded)
                             values[@(parameterId)] = @(value);
-            } else if (plugins::ClapInstance* instance =
+            } else if (plugins::HostedPlugin* instance =
                            _pluginInstances != nullptr
                                ? _pluginInstances->instanceFor(entityKey)
                                : nullptr) {
@@ -2371,6 +2569,128 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         NSLog(@"INCDAW: autosave failed: %s", result.error.c_str());
 }
 
+/// Roots, favourites and recents, written where the next launch will find
+/// them. A failure is logged and dropped: browser state is a convenience,
+/// and nothing the user is doing should stop because it could not be saved.
+- (void)saveBrowserSettings
+{
+    if (_browserSettings.empty())
+        return;
+
+    std::string error;
+
+    if (!_browser.save(_browserSettings, error))
+        NSLog(@"INCDAW: could not save browser settings: %s", error.c_str());
+}
+
+/// Auditioning a sample from the Browser.
+///
+/// The decode goes through the shell's SampleCache, so previewing a file that
+/// a channel already uses costs nothing and previewing one repeatedly costs
+/// nothing twice. The engine holds only a raw pointer into what the cache
+/// owns; housekeeping releases replaced buffers once the block counter has
+/// moved past them (engine/audio/AuditionPlayer.h).
+- (void)browserPreview:(NSString*)path
+{
+    if (path == nil || !_audioReady)
+        return;
+
+    const std::filesystem::path chosen{path.UTF8String};
+
+    if (!app::Browser::canDecodeAudio(chosen)) {
+        _lastGraphError = [NSString stringWithFormat:@"Cannot preview %s — WAV only so far",
+                                                     chosen.filename().string().c_str()];
+        return;
+    }
+
+    std::string error;
+    const std::shared_ptr<const engine::AudioFileData> audio = _sampleCache->load(chosen, error);
+
+    if (audio == nullptr) {
+        _lastGraphError = @(error.c_str());
+        return;
+    }
+
+    _audio->audition().play(audio, _audio->sampleRate(), 1.0F, _audio->blockCount());
+
+    _browser.noteRecent(chosen);
+    [self saveBrowserSettings];
+}
+
+- (void)stopBrowserPreview
+{
+    if (_audio != nullptr)
+        _audio->audition().stop();
+}
+
+/// What double-clicking in the Browser means.
+///
+/// Projects open and MIDI files import. Audio is remembered as recent and
+/// otherwise waits for the parts that give it somewhere to go — preview, and
+/// dragging into the rack or the playlist. The recents list is about what the
+/// user reached for, not about what INCDAW managed to do with it.
+- (void)browserActivated:(NSString*)path
+{
+    if (path == nil)
+        return;
+
+    const std::filesystem::path chosen{path.UTF8String};
+    const app::BrowserItemKind  kind = app::Browser::classify(chosen);
+
+    _browser.noteRecent(chosen);
+    [self saveBrowserSettings];
+    [self.browserPane reload];
+
+    if (kind == app::BrowserItemKind::project) {
+        if ([self confirmDiscardChanges])
+            (void)[self loadProjectPackageAtPath:chosen];
+
+        return;
+    }
+
+    if (kind == app::BrowserItemKind::midi) {
+        [self importMidiFromPath:chosen];
+        return;
+    }
+
+    if (kind != app::BrowserItemKind::audio)
+        return;
+
+    if (!app::Browser::canDecodeAudio(chosen)) {
+        _lastGraphError = [NSString stringWithFormat:@"Cannot load %s — WAV only so far",
+                                                     chosen.filename().string().c_str()];
+        return;
+    }
+
+    // Double-clicking a sample is the keyboard-free version of dragging it
+    // into the rack, and lands the same command.
+    auto  command  = std::make_unique<app::ImportSampleAsChannelCommand>(chosen.string());
+    auto* imported = command.get();
+
+    if (!_registry->execute(std::move(command)))
+        return;
+
+    [self selectChannel:imported->channelId().value()];
+    [self.channelRack setNeedsDisplay:YES];
+    [self rebuildGraph];
+}
+
+/// Hiding the Browser is a workspace change, not a mode: the split view
+/// re-lays out around it and the panes beside it keep their proportions.
+- (void)toggleBrowser:(id)sender
+{
+    const BOOL hidden       = !self.browserPane.isHidden;
+    self.browserPane.hidden = hidden;
+
+    NSView* parent = self.browserPane.superview;
+
+    if ([parent isKindOfClass:[NSSplitView class]])
+        [(NSSplitView*)parent adjustSubviews];
+
+    if ([sender isKindOfClass:[NSMenuItem class]])
+        ((NSMenuItem*)sender).state = hidden ? NSControlStateValueOff : NSControlStateValueOn;
+}
+
 - (void)saveProject:(id)sender
 {
     (void)sender;
@@ -2762,8 +3082,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
         return;
 
-    const auto imported = project::importAsPattern(
-        *_project, std::filesystem::path{panel.URL.path.UTF8String});
+    [self importMidiFromPath:std::filesystem::path{panel.URL.path.UTF8String}];
+}
+
+/// Importing a Standard MIDI File, from the panel or from the Browser.
+- (void)importMidiFromPath:(const std::filesystem::path&)file
+{
+    const auto imported = project::importAsPattern(*_project, file);
 
     if (!imported) {
         NSAlert* alert        = [[NSAlert alloc] init];
@@ -3182,6 +3507,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     _audio->collectRetiredGraphs();
 
+    // The preview's decoded audio, released on the same terms as a retired
+    // graph: the audio thread held a raw pointer into it.
+    _audio->audition().collect(_audio->blockCount(), !_audio->isRunning());
+
     // A plugin that changed its latency mid-life (clap_host_latency.changed)
     // needs a recompile before delay compensation is honest again.
     if (_pluginInstances != nullptr && _pluginInstances->refreshChangedLatencies())
@@ -3345,6 +3674,12 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                keyEquivalent:@"6"];
     audioEditorItem.target = self;
 
+    NSMenuItem* browserItem = [viewMenu addItemWithTitle:@"Browser"
+                                                  action:@selector(toggleBrowser:)
+                                           keyEquivalent:@"b"];
+    browserItem.target = self;
+    browserItem.state  = NSControlStateValueOn;
+
     [viewMenu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* patternModeItem = [viewMenu addItemWithTitle:@"Pattern Mode"
@@ -3412,6 +3747,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         {@"Fade Out",          @selector(editFadeOut:)},
         {@"Gain +3 dB",        @selector(editGainUp:)},
         {@"Gain -3 dB",        @selector(editGainDown:)},
+        {@"Time Stretch…",     @selector(editTimeStretch:)},
+        {@"Pitch Shift…",      @selector(editPitchShift:)},
+        {@"Slice to New Channel", @selector(sliceToNewChannel:)},
     };
 
     for (const auto& verb : verbs) {

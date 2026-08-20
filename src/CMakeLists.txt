@@ -17,7 +17,8 @@ add_library(incdaw_platform STATIC
     platform/ChildProcess.cpp
     platform/macos/CoreAudioDevice.cpp
     platform/macos/CoreMidiDevice.cpp
-    platform/macos/HostTime.cpp)
+    platform/macos/HostTime.cpp
+    platform/macos/AudioUnitHost.mm)
 target_include_directories(incdaw_platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_platform PRIVATE incdaw_warnings)
 
@@ -26,7 +27,15 @@ if(APPLE)
         "-framework CoreAudio"
         "-framework CoreMIDI"
         "-framework AudioToolbox"
+        "-framework CoreAudioKit"
+        "-framework AppKit"
         "-framework CoreFoundation")
+
+    # ARC for the one Objective-C++ file in this layer: the Audio Unit host
+    # holds an AppKit view for the generic editor. The C++ around it is
+    # unaffected — ARC is per translation unit.
+    set_source_files_properties(platform/macos/AudioUnitHost.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 
 # ── engine/ : realtime core. Knows nothing above it, no OS symbols ────────────
@@ -43,10 +52,12 @@ add_library(incdaw_engine STATIC
     engine/dsp/DelayLineNode.cpp
     engine/dsp/Fft.cpp
     engine/dsp/Resampler.cpp
+    engine/dsp/TimeStretch.cpp
     engine/dsp/MixerStripNode.cpp
     engine/dsp/effects/BuiltinEffect.cpp
     engine/dsp/effects/BuiltinEffects.cpp
     engine/dsp/effects/DynamicsEffects.cpp
+    engine/dsp/effects/ModulationEffects.cpp
     engine/dsp/effects/SpaceEffects.cpp
     engine/dsp/effects/ToneEffects.cpp
     engine/dsp/effects/UtilityEffects.cpp
@@ -69,8 +80,10 @@ add_library(incdaw_engine STATIC
     engine/audio/AudioStream.cpp
     engine/audio/AudioEdits.cpp
     engine/audio/WaveformOverview.cpp
+    engine/audio/OnsetDetection.cpp
     engine/audio/AudioRecorder.cpp
     engine/audio/AudioLogger.cpp
+    engine/audio/AuditionPlayer.cpp
     engine/audio/AudioClipNode.cpp
     engine/AudioEngine.cpp)
 target_include_directories(incdaw_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -88,7 +101,8 @@ add_library(incdaw_plugins STATIC
     plugins/PluginScan.cpp
     plugins/PluginRegistry.cpp
     plugins/PluginInstanceManager.cpp
-    plugins/clap/ClapLibrary.cpp)
+    plugins/clap/ClapLibrary.cpp
+    plugins/au/AudioUnitInstance.cpp)
 target_include_directories(incdaw_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # The CLAP C ABI (third_party/clap, MIT, D-027). PUBLIC because the host's
@@ -125,24 +139,32 @@ target_link_libraries(incdaw_project
 add_library(incdaw_app STATIC
     app/Version.cpp
     app/AutomationWriteSession.cpp
+    app/Browser.cpp
+    app/AudioAssetImport.cpp
     app/CommandRegistry.cpp
     app/ProjectSession.cpp
+    app/MusicTheory.cpp
     app/PianoRollModel.cpp
     app/ChannelRackModel.cpp
     app/PlaylistModel.cpp
     app/commands/NoteCommands.cpp
+    app/commands/ChordCommands.cpp
+    app/commands/NoteToolCommands.cpp
     app/commands/ChannelCommands.cpp
     app/commands/MidiMappingCommands.cpp
     app/commands/SamplerCommands.cpp
+    app/commands/ImportCommands.cpp
     app/commands/PatternCommands.cpp
     app/commands/StepCommands.cpp
     app/commands/TrackCommands.cpp
     app/commands/ClipCommands.cpp
+    app/commands/MarkerCommands.cpp
     app/commands/MixerCommands.cpp
     app/commands/PluginCommands.cpp
     app/commands/AutomationCommands.cpp
     app/commands/RecordingCommands.cpp
-    app/commands/AudioEditCommands.cpp)
+    app/commands/AudioEditCommands.cpp
+    app/commands/SlicerCommands.cpp)
 target_include_directories(incdaw_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_app
     PUBLIC  incdaw_project
@@ -160,7 +182,8 @@ if(APPLE)
         ui/macos/MixerView.mm
         ui/macos/AudioEditorView.mm
         ui/macos/InsertParameterPanel.mm
-        ui/macos/SpectrumView.mm)
+        ui/macos/SpectrumView.mm
+        ui/macos/BrowserView.mm)
     # incdaw_plugins is linked directly: the shell owns the plugin registry and
     # the instance manager, and injects the insert factory into the graph
     # compiler (docs/DECISIONS.md D-028). project/ deliberately does not link

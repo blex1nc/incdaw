@@ -1634,6 +1634,80 @@ recording and the Audio Logger all work. What remains in it is polish):
       envelopes/filters/LFOs, out_events -> recordable automation,
       editor markers/regions, sample-accurate intra-block automation.
 
+  SINCE THEN (branch claude/fl-studio-2026-features, continued on
+  claude/continue-after-analysis): the UI build-out ran in ten
+  increments — project lifecycle safety, the generic insert parameter
+  panel, the export options dialog, mapping/zone/instrument editors,
+  insert reordering with live panels and latency.changed, export
+  progress and cancel, touch and latch automation modes, editor
+  cut/copy/paste, the lookahead limiter, the spectrum analyzer. The FL
+  Studio 2026 gap analysis (docs/FL2026_GAP.md — read it first, it holds
+  the status table) then drove eight feature blocks, P1-P8: the chord
+  toolkit, note tools, clip split with markers and regions (format
+  v1.5), functional sidechain routing, LUFS with stereo separation and
+  true pre-fader sends, chorus/flanger/phaser with the transient
+  splitter, the WSOLA time-stretch subsystem, and the slicer.
+
+  P9 (THE BROWSER) AND P10 (AUDIO UNITS) ARE COMPLETE (2026-08-17).
+  docs/FL2026_GAP.md holds the closed table; the notes below are what the
+  next session should know about how they were built.
+
+  P9 — THE BROWSER — in four parts:
+
+    - Part 1, app::Browser: classification (a project package and a
+      .clap bundle are items, never folders to walk into), folders-first
+      listings with dot-files hidden, recursive search capped at 500
+      results and 8 levels, favourites, recents, JSON persistence
+      staged-and-renamed. canDecodeAudio is deliberately separate from
+      the kind — a .flac IS audio and the row says so, but WAV is all
+      engine/audio reads today, so the drop must refuse with a reason.
+      8 test cases in tests/unit/BrowserTests.cpp.
+
+    - Part 2, INCDAWBrowserView: a stock NSOutlineView over that model
+      (a file tree is what AppKit's outline view is for; the custom
+      drawing in this shell is for musical surfaces). Leftmost in the
+      workspace, View > Browser (Cmd+B), per-keystroke search, context
+      menu for favourite / reveal / add root / remove root / refresh.
+      The pane opens nothing itself: a double-click hands the path to
+      the shell, which is why openProjectAtPath: and importMidiFromPath:
+      were factored out of the panel handlers. Roots, favourites and
+      recents live in Application Support/INCDAW/browser.json beside
+      plugins.tsv — installation state, never project state.
+
+    - Part 3, engine::AuditionPlayer: the preview is mixed by the ENGINE
+      after the project graph, not compiled into it — it sounds with the
+      transport stopped and costs no rebuild. The audio thread reads a
+      raw pointer; the shared_ptr is released by collect() only after
+      the block counter passes the swap (the retired-graph grace). play()
+      silences first and re-arms last, so a file swapped mid-flight can
+      never be read at the previous playhead. NaN containment moved out
+      of the graph branch to cover it.
+
+    - Part 4, the drops: LoadSampleCommand onto a channel,
+      ImportSampleAsChannelCommand onto empty rack space,
+      ImportAudioClipCommand onto a playlist lane (tick -> frame
+      conversion lives in the command, D-013). Asset import is one
+      shared helper now, app::AudioAssetImport — probe before mutating,
+      share a file already in the project, keep the created asset's id
+      and index so redo cannot orphan what was written above it.
+
+  P10 — AUDIO UNITS — and the interface it forced:
+
+    - plugins::HostedPlugin is now what PluginNode, the instance
+      manager, PDC, plugin state files and the editor windows are
+      written against. ClapInstance and AudioUnitInstance implement it.
+      A third format implements it and nothing else.
+    - platform::AudioUnitHost holds everything CoreAudio (the layering
+      checker is right: plugins/ must not know its OS). Enumeration runs
+      no plugin code, so AUs need NO scan and appear in Add Insert
+      immediately; instantiation is in-process, like CLAP hosting.
+    - Deliberately not in it, and the natural next steps: AU instruments
+      (the insert path is stereo effects), custom Cocoa views
+      (kAudioUnitProperty_CocoaUI — the generic view is what ships
+      today), out-of-process AU instantiation, and an AU-specific test
+      of automation and of state through a project save (both travel the
+      shared seams, which are tested for CLAP).
+
 Things to be careful about:
 
   - third_party/ is gitignored: a fresh clone or worktree has neither

@@ -26,12 +26,17 @@ void MixerStripNode::prepare(SampleRate sampleRate, FrameCount maxBlockSize)
     right_.prepare(sampleRate);
     meter_.prepare(sampleRate);
 
+    const double rate = sampleRate > 0.0 ? sampleRate : 48000.0;
+    sideCoefficient_  = static_cast<Sample>(
+        1.0 - std::exp(-1.0 / (Smoother::defaultSmoothingSeconds * rate)));
+
     refreshTargets();
 
     // Starting mid-ramp would fade the first block in from whatever the
     // previous graph left behind.
     left_.snap();
     right_.snap();
+    sideCurrent_ = static_cast<Sample>(separation_.load(std::memory_order_relaxed) + 1.0);
 }
 
 void MixerStripNode::refreshTargets() noexcept
@@ -77,6 +82,11 @@ void MixerStripNode::setPolarityInverted(bool inverted) noexcept
     refreshTargets();
 }
 
+void MixerStripNode::setStereoSeparation(double separation) noexcept
+{
+    separation_.store(std::clamp(separation, -1.0, 1.0), std::memory_order_relaxed);
+}
+
 void MixerStripNode::process(const ProcessContext& context) noexcept
 {
     // Summing point. `output` arrives silenced, so a strip with no sources
@@ -85,6 +95,33 @@ void MixerStripNode::process(const ProcessContext& context) noexcept
         context.output.addFrom(context.input(index));
 
     const std::size_t channels = context.output.channelCount();
+
+    // Stereo separation, before pan: mid stays put, the side scales through
+    // its own ramp. Settled unity skips the pass entirely.
+    const auto sideTarget =
+        static_cast<Sample>(separation_.load(std::memory_order_relaxed) + 1.0);
+
+    if (channels >= 2 && (sideCurrent_ != Sample{1} || sideTarget != Sample{1})) {
+        Sample* left  = context.output.channel(0);
+        Sample* right = context.output.channel(1);
+
+        Sample value = sideCurrent_;
+        for (FrameCount frame = 0; frame < context.frameCount; ++frame) {
+            value += (sideTarget - value) * sideCoefficient_;
+
+            const Sample mid  = (left[frame] + right[frame]) * Sample{0.5f};
+            const Sample side = (left[frame] - right[frame]) * Sample{0.5f} * value;
+
+            left[frame]  = mid + side;
+            right[frame] = mid - side;
+        }
+
+        sideCurrent_ = value;
+        const Sample remaining =
+            sideCurrent_ > sideTarget ? sideCurrent_ - sideTarget : sideTarget - sideCurrent_;
+        if (remaining < 1e-6f)
+            sideCurrent_ = sideTarget;
+    }
 
     if (channels > 0)
         left_.applyToChannel(context.output.channel(0), context.frameCount, true);

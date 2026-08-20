@@ -35,7 +35,12 @@ inline constexpr int projectFormatMajor = 1;
 /// parameter values, applied through the instrument's sink at every compile
 /// (docs/DECISIONS.md D-034). Additive: earlier files have none and their
 /// instruments play at catalogue defaults, which is what they always did.
-inline constexpr int projectFormatMinor = 5;
+///
+/// 1.6 (FL2026 P3/P5): the project carries timeline markers and regions —
+/// named musical positions with an optional length — and a mixer node carries
+/// stereo separation. Additive: earlier files have neither and read back with
+/// no markers and untouched width.
+inline constexpr int projectFormatMinor = 6;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

@@ -198,6 +198,36 @@ bool Project::removeMidiMapping(EntityId id) noexcept
     return true;
 }
 
+TimelineMarker& Project::addMarker(Tick tick, std::string name)
+{
+    TimelineMarker marker;
+    marker.id   = ids_.next();
+    marker.tick = tick;
+    marker.name = std::move(name);
+
+    markers_.push_back(std::move(marker));
+    return markers_.back();
+}
+
+TimelineMarker& Project::insertMarker(std::size_t index, TimelineMarker marker)
+{
+    ids_.observe(marker.id);
+
+    const std::size_t position = std::min(index, markers_.size());
+    return *markers_.insert(markers_.begin() + static_cast<std::ptrdiff_t>(position),
+                            std::move(marker));
+}
+
+bool Project::removeMarker(EntityId id) noexcept
+{
+    const std::size_t index = indexOfMarker(id);
+    if (index == notFound)
+        return false;
+
+    markers_.erase(markers_.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
 bool Project::removeMixerNode(EntityId id) noexcept
 {
     // The master is what everything reaches; a project without one cannot be
@@ -272,6 +302,15 @@ std::size_t Project::indexOfMidiMapping(EntityId id) const noexcept
 {
     for (std::size_t index = 0; index < midiMappings_.size(); ++index)
         if (midiMappings_[index].id == id)
+            return index;
+
+    return notFound;
+}
+
+std::size_t Project::indexOfMarker(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < markers_.size(); ++index)
+        if (markers_[index].id == id)
             return index;
 
     return notFound;
@@ -494,6 +533,20 @@ RoutingConnection* Project::findRouting(EntityId id) noexcept
     return const_cast<RoutingConnection*>(std::as_const(*this).findRouting(id));
 }
 
+const TimelineMarker* Project::findMarker(EntityId id) const noexcept
+{
+    for (const TimelineMarker& marker : markers_)
+        if (marker.id == id)
+            return &marker;
+
+    return nullptr;
+}
+
+TimelineMarker* Project::findMarker(EntityId id) noexcept
+{
+    return const_cast<TimelineMarker*>(std::as_const(*this).findMarker(id));
+}
+
 std::vector<EntityId> Project::missingAssets() const
 {
     std::vector<EntityId> missing;
@@ -529,6 +582,7 @@ bool operator==(const Project& a, const Project& b)
         && a.automation_ == b.automation_
         && a.audioAssets_ == b.audioAssets_
         && a.midiMappings_ == b.midiMappings_
+        && a.markers_ == b.markers_
         && a.routing_ == b.routing_
         && a.master_ == b.master_;
 }

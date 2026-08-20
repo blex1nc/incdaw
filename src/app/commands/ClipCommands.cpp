@@ -344,6 +344,139 @@ void DuplicateClipsCommand::undo(Project& project)
         (void)project.removeClip(id);
 }
 
+// ── StretchClipsCommand ───────────────────────────────────────────────────────
+
+bool StretchClipsCommand::execute(Project& project)
+{
+    if (lengthDelta_ == 0)
+        return false;
+
+    const engine::TempoMap& tempoMap = project.tempoMap();
+    const bool firstRun              = previous_.empty();
+
+    bool changed = false;
+    for (const EntityId id : clips_) {
+        Clip* clip = project.findClip(id);
+        if (clip == nullptr || clip->type != project::ClipType::audio
+            || clip->stretchRatio <= 0.0 || clip->length == 0)
+            continue;
+
+        const Tick endTick = project::clipStartTicks(*clip, tempoMap)
+                           + project::clipLengthTicks(*clip, tempoMap) + lengthDelta_;
+        const project::FramePosition endFrame = tempoMap.frameForTick(endTick);
+        if (endFrame <= clip->start)
+            continue;   // stretched into nothing — refuse rather than vanish
+
+        const auto newLength = static_cast<project::FrameCount>(endFrame - clip->start);
+        if (newLength == clip->length)
+            continue;
+
+        if (firstRun)
+            previous_.push_back({ id, clip->length, clip->stretchRatio });
+
+        const double factor = static_cast<double>(newLength)
+                            / static_cast<double>(clip->length);
+
+        clip->length       = newLength;
+        clip->stretchRatio = clip->stretchRatio * factor;
+        changed            = true;
+    }
+
+    return changed;
+}
+
+void StretchClipsCommand::undo(Project& project)
+{
+    for (const Snapshot& snapshot : previous_) {
+        if (Clip* clip = project.findClip(snapshot.id)) {
+            clip->length       = snapshot.previousLength;
+            clip->stretchRatio = snapshot.previousRatio;
+        }
+    }
+}
+
+bool StretchClipsCommand::canMergeWith(const Command& next) const noexcept
+{
+    const auto* other = dynamic_cast<const StretchClipsCommand*>(&next);
+    return other != nullptr && other->clips_ == clips_;
+}
+
+void StretchClipsCommand::mergeWith(const Command& next)
+{
+    // previous_ keeps the pre-gesture state; only the distance accumulates.
+    if (const auto* other = dynamic_cast<const StretchClipsCommand*>(&next))
+        lengthDelta_ += other->lengthDelta_;
+}
+
+// ── SplitClipCommand ──────────────────────────────────────────────────────────
+
+bool SplitClipCommand::execute(Project& project)
+{
+    Clip* clip = project.findClip(clip_);
+    if (clip == nullptr)
+        return false;
+
+    const engine::TempoMap& tempoMap = project.tempoMap();
+
+    // The cut must fall strictly inside the clip, or one half would be empty.
+    const Tick startTicks = project::clipStartTicks(*clip, tempoMap);
+    const Tick endTicks   = startTicks + project::clipLengthTicks(*clip, tempoMap);
+    if (splitTick_ <= startTicks || splitTick_ >= endTicks)
+        return false;
+
+    previous_ = *clip;
+
+    Clip rightHalf = *clip;
+    if (!minted_) {
+        rightHalf.id = project.ids().next();
+        minted_      = true;
+    } else {
+        rightHalf.id = right_.id;
+    }
+
+    if (clip->type == project::ClipType::audio) {
+        const project::FramePosition splitFrame = tempoMap.frameForTick(splitTick_);
+        const project::FramePosition endFrame =
+            clip->start + static_cast<project::FramePosition>(clip->length);
+        if (splitFrame <= clip->start || splitFrame >= endFrame)
+            return false;
+
+        const project::FrameCount leftLength =
+            static_cast<project::FrameCount>(splitFrame - clip->start);
+
+        rightHalf.start        = splitFrame;
+        rightHalf.length       = clip->length - leftLength;
+        rightHalf.sourceOffset = clip->sourceOffset + leftLength;
+
+        clip->length = leftLength;
+    } else {
+        const Tick leftLength = splitTick_ - clip->startTick;
+
+        rightHalf.startTick         = splitTick_;
+        rightHalf.lengthTicks       = clip->lengthTicks - leftLength;
+        rightHalf.sourceOffsetTicks = clip->sourceOffsetTicks + leftLength;
+
+        clip->lengthTicks = leftLength;
+    }
+
+    // The fades stay where they audibly were: in at the far left, out at the
+    // far right, nothing at the seam.
+    clip->fadeOutFrames    = 0;
+    rightHalf.fadeInFrames = 0;
+
+    right_ = rightHalf;
+    project.insertClip(project.indexOfClip(clip_) + 1, std::move(rightHalf));
+    return true;
+}
+
+void SplitClipCommand::undo(Project& project)
+{
+    (void)project.removeClip(right_.id);
+
+    if (Clip* clip = project.findClip(clip_))
+        *clip = previous_;
+}
+
 // ── SetClipMutedCommand ───────────────────────────────────────────────────────
 
 bool SetClipMutedCommand::execute(Project& project)
