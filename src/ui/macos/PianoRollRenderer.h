@@ -8,12 +8,16 @@
 
 namespace incdaw::ui {
 
-/// One axis-aligned rectangle, in points, with a colour.
+/// One axis-aligned rectangle, in points, with a colour and a corner radius.
 ///
 /// The Piano Roll is entirely rectangles — key rows, grid lines, notes,
 /// playhead — so the renderer draws exactly one primitive type. Everything is
 /// submitted as instances of a single unit quad in one draw call, which is why
 /// ten thousand notes cost the same as ten.
+///
+/// `radius` rounds the corners in the fragment shader rather than by tessellating
+/// a path, so a rounded note costs exactly what a square one costs. Zero draws a
+/// hard rectangle, which is what grid lines and key rows want.
 struct Rect {
     float x = 0.0f;
     float y = 0.0f;
@@ -23,6 +27,7 @@ struct Rect {
     float green = 1.0f;
     float blue = 1.0f;
     float alpha = 1.0f;
+    float radius = 0.0f;
 };
 
 /// GPU-accelerated rectangle renderer for the Piano Roll.

@@ -28,8 +28,10 @@ know nothing about anything above it.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  ui/          AppKit shell · Metal widget layer          │  may block, may
-│               Playlist · Piano Roll · Mixer · Browser    │  crash, may be slow
+│  ui/          AppKit shell · Metal widget layer           │  may block, may
+│               Theme (one drawn design language, D-035)   │  crash, may be slow
+│               Control bar · Playlist · Piano Roll ·      │
+│               Channel Rack · Mixer · Audio Editor        │
 ├──────────────────────────────────────────────────────────┤
 │  app/         command registry · undo stack · session    │
 ├──────────────────────────────────────────────────────────┤
@@ -91,7 +93,9 @@ INCDAW X/
 │   ├── engine/{dsp,midi,mixer,automation}/
 │   ├── project/
 │   ├── app/
-│   └── ui/
+│   └── ui/macos/           Theme.{h,mm} is the shell's only palette
+│                            and drawing vocabulary (D-035); no view
+│                            declares a colour of its own
 ├── tests/                  (Phase 1)
 │   ├── unit/
 │   ├── integration/

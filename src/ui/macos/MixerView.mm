@@ -6,6 +6,7 @@
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "project/Model.h"
+#include "ui/macos/Theme.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,43 +16,21 @@
 
 using namespace incdaw;
 
+namespace theme = incdaw::ui::theme;
+
 namespace {
 
-constexpr CGFloat stripWidth   = 96.0;
-constexpr CGFloat stripGap     = 2.0;
-constexpr CGFloat headerHeight = 22.0;
-constexpr CGFloat buttonHeight = 18.0;
-constexpr CGFloat panHeight    = 14.0;
-constexpr CGFloat padding      = 6.0;
+using theme::Ink;
+
+constexpr CGFloat stripWidth   = 104.0;
+constexpr CGFloat stripGap     = 4.0;
+constexpr CGFloat headerHeight = 24.0;
+constexpr CGFloat buttonHeight = 20.0;
+constexpr CGFloat panHeight    = 34.0;
+constexpr CGFloat padding      = 7.0;
 constexpr CGFloat meterWidth   = 14.0;
 
-NSColor* grey(CGFloat white) { return [NSColor colorWithCalibratedWhite:white alpha:1.0]; }
-
-NSColor* colourFrom(std::uint32_t argb, CGFloat brightness = 1.0)
-{
-    return [NSColor colorWithCalibratedRed:static_cast<CGFloat>((argb >> 16) & 0xFFu) / 255.0 * brightness
-                                     green:static_cast<CGFloat>((argb >> 8) & 0xFFu) / 255.0 * brightness
-                                      blue:static_cast<CGFloat>(argb & 0xFFu) / 255.0 * brightness
-                                     alpha:1.0];
-}
-
-void fillRect(NSRect rect, NSColor* colour)
-{
-    [colour setFill];
-    NSRectFill(rect);
-}
-
-void drawText(NSString* text, NSRect rect, NSColor* colour, CGFloat size, BOOL centred = YES)
-{
-    NSMutableParagraphStyle* style = [[NSMutableParagraphStyle alloc] init];
-    style.lineBreakMode = NSLineBreakByTruncatingTail;
-    style.alignment     = centred ? NSTextAlignmentCenter : NSTextAlignmentLeft;
-
-    [text drawInRect:rect
-      withAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:size],
-                       NSForegroundColorAttributeName: colour,
-                       NSParagraphStyleAttributeName: style}];
-}
+using theme::fillRect;
 
 /// Fader travel is not linear in gain: a linear fader spends most of its length
 /// in the top few decibels and is unusable below -20 dB. This is the same
@@ -109,7 +88,7 @@ enum class MixerDrag { none, fader, pan };
 {
     const NSRect strip = [self stripRectAt:index];
     const CGFloat top    = headerHeight + panHeight + padding * 2.0;
-    const CGFloat bottom = buttonHeight + padding * 2.0;
+    const CGFloat bottom = buttonHeight + padding * 3.0 + 12.0;
 
     return NSMakeRect(strip.origin.x + padding, top,
                       stripWidth - meterWidth - padding * 3.0,
@@ -136,7 +115,7 @@ enum class MixerDrag { none, fader, pan };
     const CGFloat width = (stripWidth - padding * 4.0) / 3.0;
 
     return NSMakeRect(strip.origin.x + padding,
-                      strip.size.height - buttonHeight - padding, width, buttonHeight);
+                      strip.size.height - buttonHeight - padding * 2.0, width, buttonHeight);
 }
 
 - (NSRect)soloRectAt:(std::size_t)index
@@ -164,7 +143,7 @@ enum class MixerDrag { none, fader, pan };
 {
     (void)dirtyRect;
 
-    fillRect(self.bounds, grey(0.10));
+    fillRect(self.bounds, theme::ink(Ink::panel));
 
     if (_project == nullptr)
         return;
@@ -174,91 +153,83 @@ enum class MixerDrag { none, fader, pan };
     for (std::size_t index = 0; index < nodes.size(); ++index)
         [self drawStrip:index node:nodes[index]];
 
-    const NSRect add = [self addStripRect];
-    fillRect(add, grey(0.125));
-    drawText(@"＋", NSMakeRect(add.origin.x, add.size.height / 2.0 - 10.0, stripWidth, 20.0),
-             grey(0.5), 16.0);
+    const NSRect add = NSInsetRect([self addStripRect], 3.0, 6.0);
+    theme::strokeRounded(add, theme::metrics::radiusPanel,
+                         theme::withAlpha(theme::ink(Ink::textDim), 0.35));
+
+    theme::drawTextCentred(@"＋", add, theme::ink(Ink::textSecondary),
+                           theme::labelFont(16.0), theme::Align::centre);
 }
 
 - (void)drawStrip:(std::size_t)index node:(const project::MixerNode&)node
 {
-    const bool isMaster = node.id == _project->masterMixerNode();
-    const NSRect strip = [self stripRectAt:index];
+    const bool isMaster   = node.id == _project->masterMixerNode();
+    const bool isSelected = node.id.value() == _selectedChannelIdValue;
 
-    fillRect(strip, isMaster ? grey(0.175) : grey(0.145));
+    const NSRect strip = NSInsetRect([self stripRectAt:index], 3.0, 6.0);
 
-    fillRect(NSMakeRect(strip.origin.x, 0, stripWidth, headerHeight),
-             colourFrom(node.colour, node.muted ? 0.5 : 1.0));
+    theme::drawPanel(strip, theme::metrics::radiusPanel, isSelected || isMaster, true);
 
-    drawText(@(node.name.c_str()),
-             NSMakeRect(strip.origin.x + 2.0, 4.0, stripWidth - 4.0, 16.0),
-             grey(0.92), 11.0);
+    if (isSelected)
+        theme::strokeRounded(strip, theme::metrics::radiusPanel, theme::ink(Ink::accent));
 
-    // Pan, drawn as an offset from centre rather than as a knob: the position
-    // is the information, and a knob would only be a picture of one.
+    // ── Name plate ───────────────────────────────────────────────────────────
+    NSColor* colour = theme::fromArgb(node.colour, node.muted ? 0.6 : 1.0);
+
+    const NSRect header = NSMakeRect(NSMinX(strip) + 4.0, NSMinY(strip) + 4.0,
+                                     strip.size.width - 8.0, headerHeight - 6.0);
+
+    theme::fillGradient(header, theme::metrics::radiusPad, theme::lighten(colour, 0.22),
+                        theme::darken(colour, 0.18), true);
+    theme::strokeRounded(header, theme::metrics::radiusPad, theme::darken(colour, 0.5));
+
+    theme::drawTextCentred(@(node.name.c_str()), NSInsetRect(header, 4.0, 0.0),
+                           theme::labelOn(colour),
+                           theme::labelFont(11.0, NSFontWeightSemibold), theme::Align::centre);
+
+    // ── Pan ──────────────────────────────────────────────────────────────────
     const NSRect pan = [self panRectAt:index];
-    fillRect(pan, grey(0.20));
-    const CGFloat centre = pan.origin.x + pan.size.width / 2.0;
-    const CGFloat handle = centre + static_cast<CGFloat>(node.pan) * (pan.size.width / 2.0 - 3.0);
-    fillRect(NSMakeRect(centre - 0.5, pan.origin.y, 1.0, pan.size.height), grey(0.32));
-    fillRect(NSMakeRect(handle - 2.0, pan.origin.y + 2.0, 4.0, pan.size.height - 4.0), grey(0.72));
+    const CGFloat knobSize = std::min(pan.size.height, CGFloat{28.0});
 
-    // Fader
+    theme::drawKnob(NSMakeRect(NSMidX(pan) - knobSize / 2.0, NSMinY(pan), knobSize, knobSize),
+                    (node.pan + 1.0) / 2.0, theme::ink(Ink::accent), true);
+
+    // ── Fader and meter ──────────────────────────────────────────────────────
     const NSRect fader = [self faderRectAt:index];
-    fillRect(fader, grey(0.16));
 
-    const CGFloat travel = fader.size.height - 12.0;
-    const CGFloat position = fader.origin.y + travel
-                           * static_cast<CGFloat>(1.0 - positionForGain(node.volume));
+    theme::drawFader(fader, positionForGain(node.volume),
+                     node.muted ? theme::ink(Ink::textDim) : theme::ink(Ink::accent),
+                     isSelected, true);
 
-    fillRect(NSMakeRect(fader.origin.x + fader.size.width / 2.0 - 1.0, fader.origin.y,
-                        2.0, fader.size.height), grey(0.24));
-    fillRect(NSMakeRect(fader.origin.x, position, fader.size.width, 12.0), grey(0.62));
-
-    // Meter, read from the live graph.
     const NSRect meterRect = [self meterRectAt:index];
-    fillRect(meterRect, grey(0.13));
+
+    double peak = 0.0;
+    double rms  = 0.0;
 
     if (self.stripLookup != nil) {
         if (engine::dsp::MixerStripNode* live = self.stripLookup(node.id.value())) {
-            const CGFloat peak = static_cast<CGFloat>(std::min(1.0f, live->meter().peak()));
-            const CGFloat rms  = static_cast<CGFloat>(std::min(1.0f, live->meter().rms()));
-
-            const CGFloat rmsHeight  = meterRect.size.height * rms;
-            const CGFloat peakHeight = meterRect.size.height * peak;
-
-            fillRect(NSMakeRect(meterRect.origin.x,
-                                meterRect.origin.y + meterRect.size.height - rmsHeight,
-                                meterRect.size.width, rmsHeight),
-                     [NSColor colorWithCalibratedRed:0.35 green:0.72 blue:0.45 alpha:1.0]);
-
-            // The peak sits above the RMS body as a line, and turns red at the
-            // point where the signal is about to clip rather than after it has.
-            fillRect(NSMakeRect(meterRect.origin.x,
-                                meterRect.origin.y + meterRect.size.height - peakHeight,
-                                meterRect.size.width, 2.0),
-                     peak > 0.98 ? [NSColor colorWithCalibratedRed:0.9 green:0.3 blue:0.25 alpha:1.0]
-                                  : grey(0.85));
+            peak = std::min(1.0, static_cast<double>(live->meter().peak()));
+            rms  = std::min(1.0, static_cast<double>(live->meter().rms()));
         }
     }
 
-    const NSRect mute = [self muteRectAt:index];
-    fillRect(mute, node.muted ? [NSColor colorWithCalibratedRed:0.75 green:0.30 blue:0.25 alpha:1.0]
-                              : grey(0.22));
-    drawText(@"M", NSMakeRect(mute.origin.x, mute.origin.y + 2.0, mute.size.width, mute.size.height),
-             grey(0.9), 10.0);
+    theme::drawMeter(meterRect, rms, peak, true, true);
 
-    const NSRect solo = [self soloRectAt:index];
-    fillRect(solo, node.soloed ? [NSColor colorWithCalibratedRed:0.85 green:0.70 blue:0.25 alpha:1.0]
-                               : grey(0.22));
-    drawText(@"S", NSMakeRect(solo.origin.x, solo.origin.y + 2.0, solo.size.width, solo.size.height),
-             node.soloed ? grey(0.1) : grey(0.9), 10.0);
+    // The number the fader is worth, in the unit a mixer is discussed in.
+    const double db = node.volume > 0.0001 ? 20.0 * std::log10(node.volume) : -96.0;
 
-    const NSRect polarity = [self polarityRectAt:index];
-    fillRect(polarity, node.polarityFlip ? grey(0.6) : grey(0.22));
-    drawText(@"Ø", NSMakeRect(polarity.origin.x, polarity.origin.y + 2.0,
-                              polarity.size.width, polarity.size.height),
-             node.polarityFlip ? grey(0.1) : grey(0.9), 10.0);
+    theme::drawTextCentred(db <= -95.0 ? @"-∞"
+                                       : [NSString stringWithFormat:@"%+.1f", db],
+                           NSMakeRect(NSMinX(strip) + 4.0, NSMaxY(fader) + 2.0,
+                                      strip.size.width - 8.0, 13.0),
+                           theme::ink(Ink::textSecondary), theme::numericFont(9.5),
+                           theme::Align::centre);
+
+    // ── Switches ─────────────────────────────────────────────────────────────
+    theme::drawToggle([self muteRectAt:index], @"M", node.muted, theme::ink(Ink::mute), true);
+    theme::drawToggle([self soloRectAt:index], @"S", node.soloed, theme::ink(Ink::solo), true);
+    theme::drawToggle([self polarityRectAt:index], @"Ø", node.polarityFlip,
+                      theme::ink(Ink::automation), true);
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────

@@ -1,9 +1,10 @@
 # INCDAW — HANDOFF
 
-Version: 3.5
-Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — UI BUILD-OUT increments 1-10 done;
-        remaining work is gated (see ROADMAP "Remaining, by gate")
-Last updated: 2026-08-16
+Version: 3.6
+Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — the three parallel work lines are
+        merged: UI build-out increments 1-10, the FL2026 feature wave, and
+        the drawn design language
+Last updated: 2026-08-20
 Project: INCDAW
 Reference DAW: FL Studio 2026
 Primary coding agent: Claude Code
@@ -1116,6 +1117,52 @@ All systems must share the same underlying transport, timing, project state and 
 ---
 
 # 22. CURRENT HANDOFF MESSAGE
+
+## 2026-08-17 — UI build-out, part 1: the design language
+
+The shell is now drawn through one visual vocabulary instead of per-pane
+greys — FL Studio's density inside GarageBand's calm, drawn from primitives,
+nothing copied from either (docs/DECISIONS.md D-034).
+
+Landed:
+
+- `src/ui/macos/Theme.{h,mm}` — palette (`Ink` roles), metrics, type, and the
+  drawing vocabulary: panel, well, step pad, region, transport button, knob,
+  slider, fader, meter, toggle, LCD, tab, playhead. Every pane draws through
+  it; no view declares a colour of its own.
+- `src/ui/macos/ControlBarView.{h,mm}` — control bar (rewind/stop/play/record/
+  loop, PAT·SONG switch, centre display with bar.beat.tick + tempo + mode +
+  material + record lamp, editor tabs, CPU and OUT meters) and the hint bar.
+  Replaces the two NSSegmentedControls and the status NSTextField.
+- Rounded corners in the Piano Roll's Metal renderer (SDF in the fragment
+  shader, still one instance per rect, one draw call); the layer now declares
+  sRGB so the GPU pane matches the AppKit panes.
+- Pattern clips preview their notes in the Playlist.
+- Rotating default colours for new channels/patterns/tracks/mixer nodes
+  (`project::Project`), asserted by a test in PatternTests.cpp.
+- Dark appearance on the window and on hosted plugin editor windows.
+
+Not done, deliberately (each is a feature, not a repaint — plan before doing):
+
+- Tempo is read-only in the display. Editing it needs an undoable command
+  (`SetTempoCommand`) plus a tap-tempo path; the display is ready for it.
+- No metronome button: `engine::dsp::MetronomeNode` exists but is not wired
+  into the compiled graph, and a button that does nothing is worse than none.
+- No time-signature model yet — the display shows 4/4 because the transport
+  assumes it.
+- Channel Rack has no step ruler above the grid, the Mixer shows no insert
+  slots inline (context menu only), and there is still no Browser pane.
+- The scheme is dark-only. The `Ink` indirection allows a second table.
+
+Verification at the time of the commit: 484 tests pass, layering check passes,
+the app builds and launches, and every pane was inspected on screen. Scripted
+clicks on the control bar were NOT used to verify hit-testing — automated
+clicks were landing outside the app window — so the transport buttons' click
+routing is verified by construction (draw and hit-test share one layout
+function), not by an automated run.
+
+Note for this worktree: `third_party/` is git-ignored and absent here; it is
+symlinked to the main checkout so the CLAP headers resolve.
 
 Phases 0-4 are implemented, tested and committed. The engine makes sound, keeps
 sample-accurate time, and saves and loads a versioned project.

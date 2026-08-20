@@ -20,11 +20,15 @@ using namespace metal;
 struct Instance {
     float4 bounds;   // x, y, width, height in points
     float4 colour;
+    float4 shape;    // x = corner radius in points; y, z, w reserved
 };
 
 struct VertexOut {
     float4 position [[position]];
     float4 colour;
+    float2 local;    // offset from the rectangle's centre, in points
+    float2 extent;   // half width, half height, in points
+    float  radius;
 };
 
 vertex VertexOut vertexMain(uint vertexID                 [[vertex_id]],
@@ -43,12 +47,23 @@ vertex VertexOut vertexMain(uint vertexID                 [[vertex_id]],
                           1.0 - (point.y / viewport.y) * 2.0,
                           0.0, 1.0);
     out.colour = instance.colour;
+    out.extent = instance.bounds.zw * 0.5;
+    out.local  = (corner - 0.5) * instance.bounds.zw;
+    out.radius = min(instance.shape.x, min(out.extent.x, out.extent.y));
     return out;
 }
 
 fragment float4 fragmentMain(VertexOut in [[stage_in]])
 {
-    return in.colour;
+    if (in.radius <= 0.01)
+        return in.colour;
+
+    // Signed distance to a rounded box, faded across one point of coverage.
+    const float2 delta = abs(in.local) - (in.extent - in.radius);
+    const float distance = length(max(delta, 0.0)) - in.radius;
+    const float coverage = clamp(0.5 - distance, 0.0, 1.0);
+
+    return float4(in.colour.rgb, in.colour.a * coverage);
 }
 )METAL";
 
@@ -67,6 +82,12 @@ bool PianoRollRenderer::initialise(CAMetalLayer* layer, std::string& error)
     layer.device = device_;
     layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     layer.framebufferOnly = YES;
+
+    // Without this the layer's floats are taken as display-native values and
+    // the Piano Roll drifts away from the sRGB colours every other pane uses.
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    layer.colorspace = space;
+    CGColorSpaceRelease(space);
 
     queue_ = [device_ newCommandQueue];
     if (queue_ == nil) {
@@ -120,7 +141,7 @@ bool PianoRollRenderer::ensureInstanceCapacity(std::size_t count)
     while (capacity < count)
         capacity *= 2;
 
-    instances_ = [device_ newBufferWithLength:capacity * sizeof(float) * 8
+    instances_ = [device_ newBufferWithLength:capacity * sizeof(float) * 12
                                       options:MTLResourceStorageModeShared];
     if (instances_ == nil)
         return false;
@@ -143,7 +164,8 @@ void PianoRollRenderer::draw(CAMetalLayer* layer, const std::vector<Rect>& recta
     pass.colorAttachments[0].texture = drawable.texture;
     pass.colorAttachments[0].loadAction = MTLLoadActionClear;
     pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-    pass.colorAttachments[0].clearColor = MTLClearColorMake(0.09, 0.09, 0.10, 1.0);
+    // The well the grid sits in — theme::Ink::panelSunken, in sRGB.
+    pass.colorAttachments[0].clearColor = MTLClearColorMake(0.043, 0.051, 0.067, 1.0);
 
     id<MTLCommandBuffer> commands = [queue_ commandBuffer];
     id<MTLRenderCommandEncoder> encoder = [commands renderCommandEncoderWithDescriptor:pass];
@@ -153,7 +175,7 @@ void PianoRollRenderer::draw(CAMetalLayer* layer, const std::vector<Rect>& recta
 
         for (std::size_t index = 0; index < rectangles.size(); ++index) {
             const Rect& rectangle = rectangles[index];
-            float* slot = destination + index * 8;
+            float* slot = destination + index * 12;
 
             slot[0] = rectangle.x;
             slot[1] = rectangle.y;
@@ -163,6 +185,10 @@ void PianoRollRenderer::draw(CAMetalLayer* layer, const std::vector<Rect>& recta
             slot[5] = rectangle.green;
             slot[6] = rectangle.blue;
             slot[7] = rectangle.alpha;
+            slot[8] = rectangle.radius;
+            slot[9] = 0.0f;
+            slot[10] = 0.0f;
+            slot[11] = 0.0f;
         }
 
         const float viewport[2] = {widthPoints, heightPoints};

@@ -1160,4 +1160,71 @@ strips — the hardware is the source of truth and the next CC re-establishes
 them.
 
 **Date:** 2026-08-16
+
+## D-035 — One drawn design language for the shell: FL Studio's density, GarageBand's calm
+
+**Context:** every pane invented its own greys inline (`grey(0.145)`,
+`colorWithCalibratedRed:0.75 green:0.30 …`). Six panes therefore looked like six
+programs sharing a title bar, a palette change meant a six-file edit, and the
+transport lived only in a menu with the project's most-read numbers — position,
+tempo, mode, load — buried in a status string. The user asked for the window to
+be designed as a mixture of FL Studio and GarageBand.
+
+**Options:**
+1. Keep per-view colours and tune them by hand.
+2. A shared palette header of `NSColor` constants only.
+3. A shared palette *and* a drawing vocabulary (panel, well, pad, region, knob,
+   fader, meter, toggle, display, tab, playhead) that every pane draws through.
+4. Adopt a widget toolkit for the chrome.
+
+**Chosen:** option 3 — `src/ui/macos/Theme.{h,mm}`, plus
+`src/ui/macos/ControlBarView.{h,mm}` for the control bar and the hint bar.
+
+**Reason:** a palette alone does not stop two panes from drawing the same
+control differently; the *shapes* are the language. With the vocabulary in one
+file, a step pad and a Piano Roll note are demonstrably the same material, and
+the control bar could replace two stock `NSSegmentedControl`s with a transport
+cluster, a centre display and editor tabs without any pane learning about it.
+Option 4 was rejected for the reason D-006 already gives: the editors are
+custom-rendered anyway, and a toolkit would mean maintaining two rendering
+models.
+
+What each reference contributes, functionally rather than visually:
+
+* **FL Studio** — density. A dark, low-glare ground; step pads grouped by beat
+  with bar lines behind them; material identified by colour before it is read by
+  name; a mode switch (pattern/song) and a load readout on screen at all times.
+  Behaviour was checked against Image-Line's own manual (Channel Rack, Mixer),
+  not from memory.
+* **GarageBand** — calm. Rounded geometry, soft vertical gradients with a single
+  hairline highlight, round transport buttons flanking a centre display, track
+  headers as discrete panels, and arrangement clips drawn as named, rounded,
+  gradient-filled regions. Its window layout was checked against Apple's own
+  user guide.
+
+**IP boundary (CLAUDE.md §43):** nothing is copied from either product. There
+are no imported assets, icons, fonts, screenshots, colour values or measurements
+from either; every shape in `Theme.mm` — including the transport glyphs and the
+knob — is drawn from primitives, and the palette is INCDAW's own. What is
+reproduced is the *arrangement of function*, which is what a functional
+reference means here.
+
+**Consequences beyond colour:**
+- `ui::Rect` grew a corner radius and the Piano Roll's Metal shader rounds
+  corners with a signed-distance field, so a rounded note still costs one
+  instance in one draw call (D-006's performance model is untouched).
+- The Metal layer is now told its colour space is sRGB; without that the GPU
+  pane drifted away from the AppKit panes beside it.
+- New channels, patterns, tracks and mixer nodes are given rotating default
+  colours in `project::Project` — the window identifies material by colour, and
+  everything defaulting to the same grey made that identification impossible.
+  This is project data the user can overwrite, and it is asserted by a test.
+
+**Tradeoffs:** the shell now has a file that must be edited for any new control,
+and per-pane experiments are no longer free. Accepted: consistency is the point.
+The chrome is dark-only for now — a light scheme would need the palette to
+become two tables, which the `Ink` indirection already allows but nothing yet
+asks for.
+
+**Date:** 2026-08-17
 **Status:** ACCEPTED

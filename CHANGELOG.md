@@ -8,6 +8,52 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### UI — one design language for the shell — 2026-08-17
+
+The window is now drawn through a single visual vocabulary instead of
+per-pane greys: FL Studio's density (dark ground, beat-grouped step pads,
+colour as the primary identifier, always-visible mode and load) inside
+GarageBand's calm (rounded geometry, soft gradients, round transport
+buttons around a centre display, named rounded regions). Nothing is
+copied from either product — every shape is drawn from primitives and
+the palette is INCDAW's own (docs/DECISIONS.md D-035).
+
+**Added**
+
+- `ui/macos/Theme.{h,mm}`: the palette (`Ink` roles), metrics, type and
+  the drawing vocabulary — panel, well, step pad, region, transport
+  button, knob, slider, fader, meter, toggle, LCD, tab, playhead.
+- `ui/macos/ControlBarView.{h,mm}`: the control bar (rewind / stop /
+  play / record / loop, pattern-song switch, centre display showing
+  bar.beat.tick, tempo, mode and material, editor tabs, CPU and output
+  meters) and the hint bar along the bottom edge.
+- Corner radii in the Piano Roll's Metal renderer: `ui::Rect::radius`,
+  rounded by a signed-distance field in the fragment shader — still one
+  instance per rectangle, still one draw call.
+- Pattern clips in the Playlist draw a preview of the notes they will
+  play, so two pattern clips no longer look identical.
+- Rotating default colours for new channels, patterns, tracks and mixer
+  nodes (`project::Project`), with a regression test.
+- A dB readout under every mixer fader.
+
+**Changed**
+
+- Every pane (Channel Rack, Pattern list, Piano Roll, Playlist, Mixer,
+  Audio Editor) now draws through the theme and owns no colours.
+- The window, its sheets and hosted plugin editors declare the dark
+  appearance, so AppKit's own controls match the surfaces around them.
+- The Metal layer declares sRGB; the Piano Roll no longer drifts in
+  colour away from the AppKit panes beside it.
+- Channel Rack geometry: taller rows, square mute/solo switches, wider
+  pads; the transport's two `NSSegmentedControl`s and the status
+  `NSTextField` are gone, replaced by the control bar and hint bar.
+
+**Not changed**
+
+- No engine, project-format, command or audio behaviour. Tempo remains
+  read-only in the display: editing it needs an undoable command, which
+  is a feature, not a repaint.
+
 The twenty engineering phases produced a complete core; what follows is
 the UI build-out — FL-Studio-class workspaces over that core, in
 increments. Each increment ships working, tested behaviour.

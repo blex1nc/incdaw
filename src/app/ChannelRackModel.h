@@ -18,19 +18,19 @@ using project::Tick;
 class ChannelRackModel {
 public:
     struct Layout {
-        double rowHeight   = 28.0;
-        double rowGap      = 2.0;
+        double rowHeight   = 34.0;
+        double rowGap      = 3.0;
 
         /// Name, mute, solo and volume live left of the step grid.
-        double headerWidth = 220.0;
+        double headerWidth = 250.0;
 
-        double stepWidth   = 22.0;
-        double stepGap     = 2.0;
+        double stepWidth   = 26.0;
+        double stepGap     = 3.0;
 
-        double swatchWidth = 6.0;
-        double buttonWidth = 18.0;
-        double volumeWidth = 60.0;
-        double padding     = 6.0;
+        double swatchWidth = 10.0;
+        double buttonWidth = 20.0;
+        double volumeWidth = 74.0;
+        double padding     = 8.0;
     };
 
     struct Rect {

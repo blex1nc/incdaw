@@ -174,6 +174,8 @@ target_link_libraries(incdaw_app
 if(APPLE)
     add_executable(INCDAW MACOSX_BUNDLE
         ui/macos/main.mm
+        ui/macos/Theme.mm
+        ui/macos/ControlBarView.mm
         ui/macos/PianoRollView.mm
         ui/macos/PianoRollRenderer.mm
         ui/macos/ChannelRackView.mm
