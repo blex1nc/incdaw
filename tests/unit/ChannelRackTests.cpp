@@ -486,3 +486,46 @@ TEST_CASE("a channel's step key survives a save and load")
 
     fs::remove_all(path, code);
 }
+
+TEST_CASE("the rack's step ruler pushes the rows down and is not a row itself")
+{
+    // The band over the grid is where the beats are numbered. It is layout,
+    // not content: rows move down by exactly its height, and a click in it must
+    // not toggle the step it sits above.
+    app::ChannelRackModel rack;
+
+    project::Pattern pattern;
+    pattern.length = ticksPerQuarterNote * 4;   // 16 steps
+
+    const double withoutRuler = rack.rowY(0);
+    CHECK(withoutRuler == 0.0);
+
+    app::ChannelRackModel::Layout layout = rack.layout();
+    layout.rulerHeight = 20.0;
+    rack.setLayout(layout);
+
+    CHECK(rack.rowY(0) == doctest::Approx(20.0));
+    CHECK(rack.rowY(2) == doctest::Approx(20.0 + 2.0 * rack.rowPitch()));
+    CHECK(rack.contentHeight(2) == doctest::Approx(20.0 + 2.0 * rack.rowPitch()
+                                                   - layout.rowGap));
+
+    // The ruler band answers nothing.
+    for (double y : {0.0, 5.0, 19.0}) {
+        const app::ChannelRackModel::Hit hit =
+            rack.hitTest(4, &pattern, layout.headerWidth + 5.0, y);
+        CHECK(hit.zone == app::ChannelRackModel::Zone::none);
+    }
+
+    // The first row now begins where the ruler ends, and its steps still work.
+    const auto cell = rack.stepRect(0, 2);
+    const app::ChannelRackModel::Hit step =
+        rack.hitTest(4, &pattern, cell.x + cell.width / 2.0, cell.y + cell.height / 2.0);
+
+    CHECK(step.row == 0);
+    CHECK(step.zone == app::ChannelRackModel::Zone::step);
+    CHECK(step.step == 2);
+
+    // The ruler's own cells line up with the pads under them.
+    CHECK(rack.rulerStepRect(2).x == doctest::Approx(cell.x));
+    CHECK(rack.rulerRect(400.0).height == doctest::Approx(20.0));
+}

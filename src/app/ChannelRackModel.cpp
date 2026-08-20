@@ -37,7 +37,20 @@ int ChannelRackModel::visibleStepCount(double width) const noexcept
 
 double ChannelRackModel::rowY(std::size_t row) const noexcept
 {
-    return static_cast<double>(row) * rowPitch();
+    return layout_.rulerHeight + static_cast<double>(row) * rowPitch();
+}
+
+ChannelRackModel::Rect ChannelRackModel::rulerRect(double width) const noexcept
+{
+    return {0.0, 0.0, std::max(0.0, width), layout_.rulerHeight};
+}
+
+ChannelRackModel::Rect ChannelRackModel::rulerStepRect(int step) const noexcept
+{
+    const double pitch = layout_.stepWidth + layout_.stepGap;
+    const double x = layout_.headerWidth + static_cast<double>(step - firstStep_) * pitch;
+
+    return {x, 0.0, layout_.stepWidth, layout_.rulerHeight};
 }
 
 ChannelRackModel::Rect ChannelRackModel::rowRect(std::size_t row) const noexcept
@@ -98,9 +111,9 @@ ChannelRackModel::Rect ChannelRackModel::stepRect(std::size_t row, int step) con
 double ChannelRackModel::contentHeight(std::size_t channelCount) const noexcept
 {
     if (channelCount == 0)
-        return 0.0;
+        return layout_.rulerHeight;
 
-    return static_cast<double>(channelCount) * rowPitch() - layout_.rowGap;
+    return layout_.rulerHeight + static_cast<double>(channelCount) * rowPitch() - layout_.rowGap;
 }
 
 ChannelRackModel::Hit ChannelRackModel::hitTest(std::size_t channelCount, const Pattern* pattern,
@@ -108,14 +121,17 @@ ChannelRackModel::Hit ChannelRackModel::hitTest(std::size_t channelCount, const 
 {
     Hit hit;
 
-    if (y < 0.0 || channelCount == 0)
+    // The ruler band is a label, not a row: a click in it must not toggle the
+    // step underneath it.
+    if (y < layout_.rulerHeight || channelCount == 0)
         return hit;
 
     const double pitch = rowPitch();
     if (pitch <= 0.0)
         return hit;
 
-    const double rowIndex = std::floor(y / pitch);
+    const double local    = y - layout_.rulerHeight;
+    const double rowIndex = std::floor(local / pitch);
     if (rowIndex < 0.0 || rowIndex >= static_cast<double>(channelCount))
         return hit;
 
@@ -123,7 +139,7 @@ ChannelRackModel::Hit ChannelRackModel::hitTest(std::size_t channelCount, const 
 
     // The gap between rows belongs to neither of them. Treating it as a hit
     // makes a click near an edge act on the wrong channel.
-    if (y - rowIndex * pitch >= layout_.rowHeight)
+    if (local - rowIndex * pitch >= layout_.rowHeight)
         return hit;
 
     hit.row = row;

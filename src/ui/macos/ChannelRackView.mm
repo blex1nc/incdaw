@@ -69,6 +69,14 @@ enum class RackDrag { none, volume, paintSteps };
     [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
     _registry     = registry;
     _model        = std::make_unique<app::ChannelRackModel>();
+
+    // The numbered band over the grid. The model defaults it to nothing so its
+    // geometry tests describe rows at the top; the rack is the view that wants
+    // one.
+    app::ChannelRackModel::Layout layout = _model->layout();
+    layout.rulerHeight = 20.0;
+    _model->setLayout(layout);
+
     _drag         = RackDrag::none;
     _playheadTick = -1;
     _lastPaintedStep = -1;
@@ -156,6 +164,67 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
                                    self.bounds.size.height),
                         theme::ink(Ink::gridLineStrong));
     }
+
+    [self drawRuler:lastStep playheadStep:playheadStep];
+
+    [self drawChannels:channels pattern:pattern lastStep:lastStep playheadStep:playheadStep];
+}
+
+/// The band over the grid: where a beat starts, which bar it belongs to, and
+/// where the playhead is. Without it a step sequencer is a field of identical
+/// squares and counting to sixteen is the user's problem.
+- (void)drawRuler:(int)lastStep playheadStep:(long long)playheadStep
+{
+    const auto& layout = _model->layout();
+    if (layout.rulerHeight <= 0.0)
+        return;
+
+    const NSRect band = box(_model->rulerRect(self.bounds.size.width));
+
+    theme::fillRect(band, theme::ink(Ink::panelRaised));
+    theme::drawSeparator(NSMakeRect(0.0, NSMaxY(band) - 1.0, band.size.width, 1.0));
+
+    theme::drawTextCentred(@"STEPS",
+                           NSMakeRect(layout.padding, NSMinY(band),
+                                      layout.headerWidth - layout.padding * 2.0,
+                                      band.size.height),
+                           theme::ink(Ink::textDim), theme::labelFont(9.0, NSFontWeightBold));
+
+    for (int step = _model->firstStep(); step <= lastStep; ++step) {
+        const NSRect cell = box(_model->rulerStepRect(step));
+
+        if (NSMinX(cell) > self.bounds.size.width)
+            break;
+
+        const bool beat    = step % 4 == 0;
+        const bool barLine = step % 16 == 0;
+
+        if (step == playheadStep)
+            theme::fillRounded(NSInsetRect(cell, 0.0, 4.0), theme::metrics::radiusPad,
+                               theme::withAlpha(theme::ink(Ink::playhead), 0.55));
+
+        // A number on every beat, a tick on every other step: numbering all
+        // sixteen would be a wall of digits at this pitch.
+        if (beat)
+            theme::drawTextCentred([NSString stringWithFormat:@"%d", step / 4 + 1], cell,
+                                   barLine ? theme::ink(Ink::textPrimary)
+                                           : theme::ink(Ink::textSecondary),
+                                   theme::labelFont(barLine ? 9.5 : 9.0,
+                                                    barLine ? NSFontWeightBold
+                                                            : NSFontWeightMedium),
+                                   theme::Align::centre);
+        else
+            theme::fillRect(NSMakeRect(NSMidX(cell) - 0.5, NSMaxY(cell) - 7.0, 1.0, 3.0),
+                            theme::ink(Ink::textDim));
+    }
+}
+
+- (void)drawChannels:(const std::vector<project::Channel>&)channels
+             pattern:(const project::Pattern*)pattern
+            lastStep:(int)lastStep
+        playheadStep:(long long)playheadStep
+{
+    const auto& layout = _model->layout();
 
     for (std::size_t row = 0; row < channels.size(); ++row) {
         const project::Channel& channel = channels[row];

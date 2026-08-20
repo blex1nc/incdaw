@@ -30,6 +30,18 @@ constexpr CGFloat panHeight    = 34.0;
 constexpr CGFloat padding      = 7.0;
 constexpr CGFloat meterWidth   = 14.0;
 
+/// The insert rack between the pan and the fader. Four slots is what fits
+/// without taking the fader's travel below a usable length; a chain longer
+/// than that keeps working and says so, and the context menu still reaches
+/// every slot in it.
+constexpr std::size_t insertSlotsShown = 4;
+constexpr CGFloat insertSlotHeight     = 16.0;
+constexpr CGFloat insertSlotGap        = 2.0;
+constexpr CGFloat insertLampWidth      = 11.0;
+
+constexpr CGFloat insertRackHeight =
+    insertSlotsShown * (insertSlotHeight + insertSlotGap) + 4.0;
+
 using theme::fillRect;
 
 /// Fader travel is not linear in gain: a linear fader spends most of its length
@@ -84,10 +96,28 @@ enum class MixerDrag { none, fader, pan };
                       stripWidth, self.bounds.size.height);
 }
 
+- (NSRect)insertRackRectAt:(std::size_t)index
+{
+    const NSRect strip = [self stripRectAt:index];
+
+    return NSMakeRect(strip.origin.x + padding, headerHeight + panHeight + padding * 2.0,
+                      stripWidth - padding * 2.0, insertRackHeight);
+}
+
+- (NSRect)insertSlotRectAt:(std::size_t)index slot:(std::size_t)slot
+{
+    const NSRect rack = [self insertRackRectAt:index];
+
+    return NSMakeRect(NSMinX(rack), NSMinY(rack) + 2.0
+                                        + static_cast<CGFloat>(slot)
+                                              * (insertSlotHeight + insertSlotGap),
+                      rack.size.width, insertSlotHeight);
+}
+
 - (NSRect)faderRectAt:(std::size_t)index
 {
     const NSRect strip = [self stripRectAt:index];
-    const CGFloat top    = headerHeight + panHeight + padding * 2.0;
+    const CGFloat top    = headerHeight + panHeight + padding * 2.0 + insertRackHeight;
     const CGFloat bottom = buttonHeight + padding * 3.0 + 12.0;
 
     return NSMakeRect(strip.origin.x + padding, top,
@@ -194,6 +224,9 @@ enum class MixerDrag { none, fader, pan };
     theme::drawKnob(NSMakeRect(NSMidX(pan) - knobSize / 2.0, NSMinY(pan), knobSize, knobSize),
                     (node.pan + 1.0) / 2.0, theme::ink(Ink::accent), true);
 
+    // ── The insert chain, in the strip ───────────────────────────────────────
+    [self drawInsertRack:index node:node];
+
     // ── Fader and meter ──────────────────────────────────────────────────────
     const NSRect fader = [self faderRectAt:index];
 
@@ -230,6 +263,150 @@ enum class MixerDrag { none, fader, pan };
     theme::drawToggle([self soloRectAt:index], @"S", node.soloed, theme::ink(Ink::solo), true);
     theme::drawToggle([self polarityRectAt:index], @"Ø", node.polarityFlip,
                       theme::ink(Ink::automation), true);
+}
+
+/// A click in the insert rack. The lamp switches the slot in and out; the rest
+/// of a filled row opens what that slot has to edit; an empty row offers the
+/// same catalogues the context menu does, where the user is already looking.
+- (void)handleInsertClickAt:(NSPoint)point
+                      index:(std::size_t)index
+                       node:(const project::MixerNode&)node
+{
+    const std::size_t chain = node.inserts.size();
+
+    for (std::size_t row = 0; row < insertSlotsShown; ++row) {
+        const NSRect slotRect = NSInsetRect([self insertSlotRectAt:index slot:row], 3.0, 0.0);
+        if (!NSPointInRect(point, slotRect))
+            continue;
+
+        const bool overflowRow = chain > insertSlotsShown && row == insertSlotsShown - 1;
+
+        if (overflowRow || row > chain)
+            return;   // the "+N more" line and the quiet rows are not controls
+
+        if (row == chain) {
+            [self showInsertMenuForNode:node.id at:slotRect];
+            return;
+        }
+
+        const project::PluginSlot& slot = node.inserts[row];
+
+        if (point.x < NSMinX(slotRect) + insertLampWidth) {
+            [self commitStructural:std::make_unique<app::SetInsertBypassedCommand>(
+                                       node.id, slot.id, !slot.bypassed)];
+            return;
+        }
+
+        if (self.onOpenInsertEditor != nil)
+            self.onOpenInsertEditor(slot.id.value());
+
+        return;
+    }
+}
+
+/// What an empty slot offers: the builtin catalogue and whatever has been
+/// scanned, built from the same data the context menu uses.
+- (void)showInsertMenuForNode:(project::EntityId)nodeId at:(NSRect)rect
+{
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    for (const engine::dsp::BuiltinEffectInfo& info : engine::dsp::builtinEffects()) {
+        NSMenuItem* item = [menu addItemWithTitle:@(info.displayName)
+                                           action:@selector(addBuiltinInsertFromMenu:)
+                                    keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @{@"node": @(nodeId.value()), @"uid": @(info.uid)};
+    }
+
+    if (self.availableInserts.count > 0) {
+        [menu addItem:[NSMenuItem separatorItem]];
+
+        for (NSDictionary* plugin in self.availableInserts) {
+            NSMenuItem* item = [menu addItemWithTitle:plugin[@"name"]
+                                               action:@selector(addInsertFromMenu:)
+                                        keyEquivalent:@""];
+            item.target            = self;
+            item.representedObject = @{@"node": @(nodeId.value()), @"id": plugin[@"id"]};
+        }
+    }
+
+    [menu popUpMenuPositioningItem:nil
+                        atLocation:NSMakePoint(NSMinX(rect), NSMaxY(rect))
+                            inView:self];
+}
+
+/// The display name of a slot, wherever the name lives: the builtin catalogue,
+/// the scanned catalogue, or — for a plugin that is neither — its uid.
+- (NSString*)titleForSlot:(const project::PluginSlot&)slot
+{
+    if (const auto* builtin = engine::dsp::findBuiltinEffect(slot.plugin.uid))
+        return @(builtin->displayName);
+
+    for (NSDictionary* plugin in self.availableInserts)
+        if ([plugin[@"uid"] isEqualToString:@(slot.plugin.uid.c_str())])
+            return plugin[@"name"];
+
+    return @(slot.plugin.uid.c_str());
+}
+
+/// The chain, where the signal meets it: above the fader, in order, one row per
+/// slot. The context menu could always reach these; a chain you cannot SEE is
+/// a chain you forget you built.
+- (void)drawInsertRack:(std::size_t)index node:(const project::MixerNode&)node
+{
+    const NSRect rack = [self insertRackRectAt:index];
+    theme::drawWell(rack, theme::metrics::radiusPad, true);
+
+    const std::size_t chain = node.inserts.size();
+
+    for (std::size_t row = 0; row < insertSlotsShown; ++row) {
+        const NSRect slotRect = NSInsetRect([self insertSlotRectAt:index slot:row], 3.0, 0.0);
+
+        // The last visible row says how many slots did not fit rather than
+        // hiding them: "+2 more" is a fact the user can act on.
+        const bool overflowRow = chain > insertSlotsShown && row == insertSlotsShown - 1;
+
+        if (overflowRow) {
+            theme::drawTextCentred(
+                [NSString stringWithFormat:@"+%zu more", chain - (insertSlotsShown - 1)],
+                slotRect, theme::ink(Ink::textDim), theme::labelFont(9.0), theme::Align::centre);
+            continue;
+        }
+
+        if (row >= chain) {
+            // The first empty row invites; the rest stay quiet.
+            if (row == chain)
+                theme::drawTextCentred(@"＋ Insert", slotRect,
+                                       theme::withAlpha(theme::ink(Ink::textDim), 0.8),
+                                       theme::labelFont(9.0), theme::Align::centre);
+            continue;
+        }
+
+        const project::PluginSlot& slot = node.inserts[row];
+
+        NSColor* body = slot.bypassed
+            ? theme::withAlpha(theme::ink(Ink::panelRaised), 0.55)
+            : theme::ink(Ink::panelRaised);
+
+        theme::fillRounded(slotRect, theme::metrics::radiusPad, body);
+        theme::strokeRounded(slotRect, theme::metrics::radiusPad,
+                             theme::withAlpha(theme::ink(Ink::shadow), 0.6));
+
+        // The lamp is the bypass switch: lit means the slot is processing.
+        const NSRect lamp = NSMakeRect(NSMinX(slotRect) + 3.0, NSMidY(slotRect) - 3.0, 6.0, 6.0);
+        theme::fillRounded(lamp, 3.0,
+                           slot.bypassed ? theme::withAlpha(theme::ink(Ink::textDim), 0.6)
+                                         : theme::ink(Ink::accent));
+
+        const NSRect label = NSMakeRect(NSMinX(slotRect) + insertLampWidth, NSMinY(slotRect),
+                                        slotRect.size.width - insertLampWidth - 3.0,
+                                        slotRect.size.height);
+
+        theme::drawTextCentred([self titleForSlot:slot], label,
+                               slot.bypassed ? theme::ink(Ink::textDim)
+                                             : theme::ink(Ink::textPrimary),
+                               theme::labelFont(9.5));
+    }
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────
@@ -274,6 +451,11 @@ enum class MixerDrag { none, fader, pan };
 
     if (NSPointInRect(point, [self polarityRectAt:index])) {
         [self commitStructural:std::make_unique<app::SetMixerPolarityCommand>(nodeId, !node.polarityFlip)];
+        return;
+    }
+
+    if (NSPointInRect(point, [self insertRackRectAt:index])) {
+        [self handleInsertClickAt:point index:index node:node];
         return;
     }
 

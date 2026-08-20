@@ -28,6 +28,15 @@ public version yet.
   the signatures a session uses. `SetTimeSignatureCommand` is undoable,
   and the position readout counts bars in the signature it is given.
 
+- **The Channel Rack has a step ruler**: beats numbered over the grid,
+  a tick between them, the playhead's step lit, and the rows pushed
+  down by exactly its height. A click in the band is not a step.
+- **The Mixer shows its insert chain in the strip**: four slots between
+  the pan and the fader, in signal order, each with a lamp that
+  switches the slot in and out and a name that opens what it has to
+  edit. An empty slot offers the catalogues; a longer chain says how
+  many did not fit. The context menu still reaches every slot.
+
 **Changed**
 
 - A compiled project graph now owns **its own copy of the tempo map**.

@@ -24,6 +24,11 @@ public:
         /// Name, mute, solo and volume live left of the step grid.
         double headerWidth = 250.0;
 
+        /// The band above the first row, where the grid is numbered. Zero
+        /// leaves the rows where they have always been, which is what the
+        /// geometry tests describe; the view sets a real height.
+        double rulerHeight = 0.0;
+
         double stepWidth   = 26.0;
         double stepGap     = 3.0;
 
@@ -79,6 +84,11 @@ public:
     // ── Geometry, top-down: row 0 is at y = 0 ───────────────────────────────
 
     [[nodiscard]] double rowY(std::size_t row) const noexcept;
+
+    /// The ruler band itself, and the cell above `step` in it. `width` is the
+    /// view's, because the band runs to the trailing edge.
+    [[nodiscard]] Rect rulerRect(double width) const noexcept;
+    [[nodiscard]] Rect rulerStepRect(int step) const noexcept;
     [[nodiscard]] double rowPitch() const noexcept { return layout_.rowHeight + layout_.rowGap; }
 
     [[nodiscard]] Rect rowRect(std::size_t row) const noexcept;
