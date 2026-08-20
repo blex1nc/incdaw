@@ -30,6 +30,19 @@ struct ProcessContext {
     /// Timeline position of the first frame of this block.
     FramePosition playPosition = 0;
 
+    /// Whether the timeline is advancing under this block.
+    ///
+    /// A stopped transport still renders — a synth's release, a delay's tail
+    /// and input monitoring all have to keep coming out — but it hands every
+    /// block the SAME playPosition. So a node that READS the timeline
+    /// (sequenced notes, audio clips) must produce nothing while this is
+    /// false, or it re-emits the same window forever: what the ear hears as
+    /// a hum at the block rate (docs/AUDIO_ENGINE.md §5).
+    ///
+    /// True by default: rendering with the timeline advancing is the normal
+    /// case, and offline rendering never stops.
+    bool playing = true;
+
     /// MIDI arriving from hardware or the on-screen keyboard for this block,
     /// with offsets relative to it. Null when there is no live input.
     const MidiBuffer* liveMidi = nullptr;

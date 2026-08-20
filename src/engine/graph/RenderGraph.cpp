@@ -12,7 +12,8 @@ namespace incdaw::engine {
 // ── CompiledGraph ─────────────────────────────────────────────────────────────
 
 void CompiledGraph::process(const AudioBufferView& output, FrameCount frameCount,
-                            FramePosition playPosition, const MidiBuffer* liveMidi) noexcept
+                            FramePosition playPosition, const MidiBuffer* liveMidi,
+                            bool playing) noexcept
 {
     if (!hasMaster_ || frameCount <= 0)
         return;
@@ -38,6 +39,7 @@ void CompiledGraph::process(const AudioBufferView& output, FrameCount frameCount
         context.frameCount   = frameCount;
         context.sampleRate   = sampleRate_;
         context.playPosition = playPosition;
+        context.playing      = playing;
         context.liveMidi     = liveMidi;
 
         step.node->process(context);

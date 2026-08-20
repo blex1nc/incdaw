@@ -134,6 +134,30 @@ Additional rules, enforced by review and by the guard:
 automation evaluation, and offline rendering all read the same sample position
 from the same object. There is no second clock anywhere in the system.
 
+**A stopped transport still renders, and must still be silent.** Stop does not
+stop the callback: a synth's release, a delay's tail and input monitoring all
+have to keep coming out. So `Transport::processBlock` keeps returning one
+segment while stopped — but that segment carries the same `playPosition` on
+every block, because the timeline is parked.
+
+Every node therefore receives `ProcessContext::playing`, and the rule is:
+
+- Nodes that **read the timeline** — `InstrumentNode`'s sequence,
+  `AudioClipNode` — produce nothing while it is false. Without this they
+  re-emit the window under the playhead on every block: a note retriggered at
+  the block rate, or a few hundred frames of a clip looped forever. Both are
+  heard as a hum that starts with the application and never stops.
+- Nodes that **carry sound of their own** — instrument voices, effect tails,
+  the input monitor — go on rendering exactly as before.
+- `AutomationNode` goes on evaluating: holding a parked playhead's parameter
+  values is what makes the mixer show where the playhead actually is.
+
+The instrument ends its sequenced notes **once**, on the first stopped block,
+and then leaves the instrument alone: a keyboard played into a parked project
+is the normal way an instrument is auditioned, and killing its voices every
+block turns a held note into a buzz. Regression tests:
+`tests/unit/StoppedTransportTests.cpp`.
+
 ---
 
 ## 6. Block processing and sample-accurate events

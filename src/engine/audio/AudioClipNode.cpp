@@ -17,6 +17,12 @@ void AudioClipNode::prepare(SampleRate, FrameCount maxBlockSize)
 
 void AudioClipNode::process(const ProcessContext& context) noexcept
 {
+    // A parked playhead sitting inside a clip would otherwise play the same
+    // few hundred frames on every block, forever. Clips have no tail to let
+    // ring, so nothing is lost by producing silence until time moves again.
+    if (!context.playing)
+        return;
+
     const FramePosition blockStart = context.playPosition;
     const FramePosition blockEnd   = blockStart + context.frameCount;
 

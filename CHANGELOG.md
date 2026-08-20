@@ -8,6 +8,41 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### Fixed — the hum at idle — 2026-08-20
+
+INCDAW made a sound while it was doing nothing. Opening the application
+was enough: the default project's first note sits on tick 0, the
+playhead parks on tick 0, and every block re-triggered it.
+
+A stopped transport still renders — a synth's release and a delay's
+tail have to keep coming out, and input monitoring has to keep working
+— so `Transport::processBlock` keeps handing the graph one segment
+while stopped. That segment carries the SAME position every block, and
+the nodes that read the timeline had no way to know: `InstrumentNode`
+re-collected the note under the playhead ~94 times a second (and hard
+-killed the voice in between, from the discontinuity check that a
+parked position looks like), and `AudioClipNode` replayed the few
+hundred frames the playhead sat on, forever. What the ear got was a
+hum at the block rate.
+
+`ProcessContext::playing` now carries the transport's state to every
+node, `CompiledGraph::process` takes it, and the engine passes
+`transport_.isPlaying()`:
+
+- The instrument's sequence and audio clips render nothing while the
+  timeline is parked.
+- The instrument ends its sequenced notes once, on the first stopped
+  block — not every block, which also means a note played on a
+  keyboard into a parked project now sustains instead of being cut
+  down at the next block boundary.
+- Automation keeps evaluating: a parked playhead's parameter values
+  are exactly what the mixer should show.
+- Offline rendering is untouched — it never stops, and the flag
+  defaults to true.
+
+Three regression tests in `tests/unit/StoppedTransportTests.cpp`, each
+verified to fail against the old behaviour. docs/AUDIO_ENGINE.md §5.
+
 ### UI — one design language for the shell — 2026-08-17
 
 The window is now drawn through a single visual vocabulary instead of

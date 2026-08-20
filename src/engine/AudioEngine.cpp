@@ -211,6 +211,11 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
         const std::size_t segmentCount =
             transport_.processBlock(frameCount, plan, Transport::maxSegmentsPerBlock);
 
+        // Read once, after the plan: a stopped transport hands every block the
+        // same position, and the nodes that read the timeline have to know
+        // that rather than replaying the window under the playhead.
+        const bool playing = transport_.isPlaying();
+
         // Publish this block's host-time <-> timeline correlation for whoever
         // needs to place captured audio. Seqlock: odd while writing.
         if (segmentCount > 0) {
@@ -233,7 +238,7 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
             segmentMidi_.rebase(-segment.offset, segment.length);
 
             graph->process(output.subBlock(segment.offset, segment.length),
-                           segment.length, segment.startFrame, &segmentMidi_);
+                           segment.length, segment.startFrame, &segmentMidi_, playing);
         }
 
     }

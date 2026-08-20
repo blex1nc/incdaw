@@ -18,17 +18,28 @@ void InstrumentNode::process(const ProcessContext& context) noexcept
 
     blockMidi_.clear();
 
-    // A discontinuity means every sounding voice was started at a position the
-    // transport has left. Without this, seeking or looping leaves notes hanging
-    // until something happens to release them — the classic "stuck note after
-    // loop" bug.
-    if (expectedNextFrame_ >= 0 && context.playPosition != expectedNextFrame_)
+    if (context.playing) {
+        // A discontinuity means every sounding voice was started at a position
+        // the transport has left. Without this, seeking or looping leaves notes
+        // hanging until something happens to release them — the classic "stuck
+        // note after loop" bug.
+        if (expectedNextFrame_ >= 0 && context.playPosition != expectedNextFrame_)
+            instrument_->allNotesOff();
+
+        expectedNextFrame_ = context.playPosition + context.frameCount;
+
+        if (sequenceEnabled_.load(std::memory_order_relaxed) && tempoMap_ != nullptr)
+            sequence_.collectForRange(blockMidi_, context.playPosition, context.frameCount,
+                                      *tempoMap_);
+    } else if (expectedNextFrame_ >= 0) {
+        // The first block after the transport stopped: the sequence's notes
+        // were started at a position nothing will leave now, so they are ended
+        // here, once. Every later stopped block leaves the instrument alone —
+        // it is what a live keyboard is playing into, and killing its voices
+        // every block is how a held note becomes a buzz.
         instrument_->allNotesOff();
-
-    expectedNextFrame_ = context.playPosition + context.frameCount;
-
-    if (sequenceEnabled_.load(std::memory_order_relaxed) && tempoMap_ != nullptr)
-        sequence_.collectForRange(blockMidi_, context.playPosition, context.frameCount, *tempoMap_);
+        expectedNextFrame_ = -1;
+    }
 
     // Live input is merged into the same buffer, so a played note and a
     // sequenced note on the same key reach the instrument identically.

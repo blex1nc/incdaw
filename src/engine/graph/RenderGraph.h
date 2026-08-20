@@ -37,8 +37,11 @@ public:
     /// to be the master. Measured against the cost of a block, it does not
     /// register; if it ever does, the master node can be given the device
     /// buffer directly.
+    /// `playing` is the transport's state for this block: false means the
+    /// timeline is parked, and the nodes that read it render nothing rather
+    /// than repeating the window the playhead sits on.
     void process(const AudioBufferView& output, FrameCount frameCount, FramePosition playPosition,
-                 const MidiBuffer* liveMidi = nullptr) noexcept;
+                 const MidiBuffer* liveMidi = nullptr, bool playing = true) noexcept;
 
     [[nodiscard]] std::size_t nodeCount()     const noexcept { return nodes_.size(); }
     [[nodiscard]] FrameCount  latencyFrames() const noexcept { return totalLatency_; }
