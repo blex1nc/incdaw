@@ -1,16 +1,21 @@
 #include "ui/macos/BrowserView.h"
 
 #include "app/Browser.h"
+#include "ui/macos/Theme.h"
 
 #include <filesystem>
 #include <string>
 
 using namespace incdaw;
+using incdaw::ui::theme::Ink;
+
+namespace theme = incdaw::ui::theme;
 
 namespace {
 
 constexpr CGFloat searchHeight = 26.0;
 constexpr CGFloat padding      = 6.0;
+constexpr CGFloat headerHeight = 26.0;   ///< the pane's own title band
 
 /// Group headers are items too, so they need identities the outline can hold.
 enum class GroupKind { none, favourites, recent };
@@ -55,6 +60,28 @@ std::filesystem::path pathOf(NSString* text)
 @interface INCDAWBrowserView () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate>
 @end
 
+/// The row behind a selected item. AppKit's own highlight is the system blue,
+/// which is the one colour in this window nobody chose: the accent belongs to
+/// the palette like every other surface (docs/DECISIONS.md D-035).
+@interface INCDAWBrowserRowView : NSTableRowView
+@end
+
+@implementation INCDAWBrowserRowView
+
+- (void)drawSelectionInRect:(NSRect)dirtyRect
+{
+    (void)dirtyRect;
+
+    const NSRect rect = NSInsetRect(self.bounds, 2.0, 1.0);
+
+    theme::fillRounded(rect, theme::metrics::radiusPad,
+                       theme::withAlpha(theme::ink(Ink::accent), 0.35));
+    theme::strokeRounded(rect, theme::metrics::radiusPad,
+                         theme::withAlpha(theme::ink(Ink::accent), 0.75));
+}
+
+@end
+
 @implementation INCDAWBrowserView {
     app::Browser*   _browser;
     NSOutlineView*  _outline;
@@ -81,10 +108,10 @@ std::filesystem::path pathOf(NSString* text)
     // in the same room as the custom-drawn ones.
     self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
 
-    _search = [[NSSearchField alloc] initWithFrame:NSMakeRect(padding,
-                                                              frame.size.height - searchHeight - padding,
-                                                              frame.size.width - 2 * padding,
-                                                              searchHeight)];
+    _search = [[NSSearchField alloc]
+        initWithFrame:NSMakeRect(padding,
+                                 frame.size.height - headerHeight - searchHeight - padding,
+                                 frame.size.width - 2 * padding, searchHeight)];
     _search.placeholderString  = @"Search";
     _search.target             = self;
     _search.action             = @selector(searchChanged:);
@@ -94,8 +121,9 @@ std::filesystem::path pathOf(NSString* text)
     _search.sendsSearchStringImmediately = YES;
     [self addSubview:_search];
 
-    const NSRect treeFrame = NSMakeRect(0, 0, frame.size.width,
-                                        frame.size.height - searchHeight - 2 * padding);
+    const NSRect treeFrame =
+        NSMakeRect(0, 0, frame.size.width,
+                   frame.size.height - headerHeight - searchHeight - 2 * padding);
 
     NSScrollView* scroll = [[NSScrollView alloc] initWithFrame:treeFrame];
     scroll.hasVerticalScroller = YES;
@@ -106,7 +134,7 @@ std::filesystem::path pathOf(NSString* text)
     _outline.headerView       = nil;
     _outline.rowSizeStyle     = NSTableViewRowSizeStyleSmall;
     _outline.indentationPerLevel = 12.0;
-    _outline.backgroundColor  = [NSColor colorWithCalibratedWhite:0.13 alpha:1.0];
+    _outline.backgroundColor  = theme::ink(Ink::panel);
     _outline.dataSource       = self;
     _outline.delegate         = self;
     _outline.target           = self;
@@ -253,6 +281,31 @@ std::filesystem::path pathOf(NSString* text)
     return node.group != GroupKind::none;
 }
 
+- (void)drawRect:(NSRect)dirtyRect
+{
+    (void)dirtyRect;
+
+    theme::fillRect(self.bounds, theme::ink(Ink::panel));
+
+    theme::drawText(@"BROWSER",
+                    NSMakeRect(padding, self.bounds.size.height - headerHeight + 8.0,
+                               self.bounds.size.width - padding * 2.0, 14.0),
+                    theme::ink(Ink::textDim), theme::labelFont(9.5, NSFontWeightBold));
+
+    // The hard edge against the pane beside it, drawn here rather than left to
+    // the split view, which has no palette.
+    theme::drawSeparator(NSMakeRect(self.bounds.size.width - 1.0, 0, 1.0,
+                                    self.bounds.size.height));
+}
+
+- (NSTableRowView*)outlineView:(NSOutlineView*)outlineView rowViewForItem:(id)item
+{
+    (void)outlineView;
+    (void)item;
+
+    return [[INCDAWBrowserRowView alloc] init];
+}
+
 - (NSView*)outlineView:(NSOutlineView*)outlineView
     viewForTableColumn:(NSTableColumn*)tableColumn
                   item:(id)item
@@ -281,13 +334,15 @@ std::filesystem::path pathOf(NSString* text)
     }
 
     cell.textField.stringValue = node.name != nil ? node.name : @"";
-    cell.textField.textColor   = node.missing ? [NSColor secondaryLabelColor] : [NSColor labelColor];
+    cell.textField.textColor   = node.missing ? theme::ink(Ink::textDim)
+                                              : theme::ink(Ink::textPrimary);
 
     if (node.group != GroupKind::none) {
-        cell.imageView.image = nil;
-        cell.textField.font  = [NSFont systemFontOfSize:10.0 weight:NSFontWeightSemibold];
+        cell.imageView.image     = nil;
+        cell.textField.font      = theme::labelFont(9.5, NSFontWeightBold);
+        cell.textField.textColor = theme::ink(Ink::textDim);
     } else {
-        cell.textField.font  = [NSFont systemFontOfSize:11.0];
+        cell.textField.font  = theme::labelFont(11.0, NSFontWeightRegular);
         cell.imageView.image = [NSImage imageWithSystemSymbolName:symbolFor(node.kind)
                                          accessibilityDescription:nil];
     }

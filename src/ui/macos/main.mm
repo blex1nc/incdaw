@@ -42,6 +42,7 @@
 #include "app/commands/AudioEditCommands.h"
 #include "app/commands/ImportCommands.h"
 #include "app/commands/SlicerCommands.h"
+#include "app/commands/TempoCommands.h"
 #include "engine/audio/OnsetDetection.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "ui/macos/AudioEditorView.h"
@@ -146,6 +147,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     NSTimer* _housekeeping;
     BOOL     _audioReady;
+
+    /// The metronome. Session state, like input monitoring: it is a monitoring
+    /// aid, not part of the project, and must never reach a render.
+    BOOL     _metronomeEnabled;
+
+    /// Tap-tempo history, newest last. Cleared by a long gap.
+    std::vector<double> _tapTimes;
 
     /// Handles into the graph that is rendering right now. The nodes are owned
     /// by the engine; this is refreshed on every rebuild and is what lets the
@@ -565,6 +573,14 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         [weakBarSelf setSongMode:songMode];
     };
 
+    self.controlBar.onTempoChange = ^(double beatsPerMinute, BOOL finished) {
+        [weakBarSelf applyTempo:beatsPerMinute finished:finished];
+    };
+
+    self.controlBar.onTimeSignature = ^(NSInteger numerator, NSInteger denominator) {
+        [weakBarSelf applyTimeSignature:numerator over:denominator];
+    };
+
     __weak INCDAWAppDelegate* weakSelf = self;
 
     void (^changed)(void) = ^{
@@ -771,6 +787,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
         case INCDAWTransportLoop:
             transport.setLoopEnabled(!transport.isLoopEnabled());
+            break;
+
+        case INCDAWTransportMetronome:
+            [self toggleMetronome:nil];
             break;
     }
 
@@ -1176,6 +1196,115 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self refreshStatus];
 }
 
+/// The click. Like input monitoring, the node exists exactly when the toggle
+/// is on, so switching it is a rebuild rather than a flag the audio thread has
+/// to read — and, like input monitoring, it is session state: an export
+/// compiles its own graph and never sees it.
+- (void)toggleMetronome:(id)sender
+{
+    (void)sender;
+
+    _metronomeEnabled = !_metronomeEnabled;
+
+    self.controlBar.metronomeOn = _metronomeEnabled;
+
+    [self rebuildGraph];
+    [self refreshStatus];
+}
+
+/// The only menu validation the shell needs so far: a checkmark that follows
+/// the metronome. Everything else is enabled whenever its target responds,
+/// which is AppKit's default and what this returns.
+- (BOOL)validateMenuItem:(NSMenuItem*)item
+{
+    if (item.action == @selector(toggleMetronome:))
+        item.state = _metronomeEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+
+    return YES;
+}
+
+/// Tap tempo: four taps set the tempo, and every tap after that refines it.
+/// The gaps are averaged rather than taken from the last pair, because a hand
+/// is not a clock and one late tap should not become the tempo.
+- (void)tapTempo:(id)sender
+{
+    (void)sender;
+
+    const double now = std::chrono::duration<double>(
+                           std::chrono::steady_clock::now().time_since_epoch())
+                           .count();
+
+    // A long gap is a new count-in, not a slow tempo.
+    if (_tapTimes.empty() || now - _tapTimes.back() > 2.5)
+        _tapTimes.clear();
+
+    _tapTimes.push_back(now);
+
+    if (_tapTimes.size() > 8)
+        _tapTimes.erase(_tapTimes.begin());
+
+    if (_tapTimes.size() < 2) {
+        _lastGraphError = @"Tap tempo: keep tapping…";
+        [self refreshStatus];
+        return;
+    }
+
+    const double span     = _tapTimes.back() - _tapTimes.front();
+    const double interval = span / static_cast<double>(_tapTimes.size() - 1);
+
+    if (interval <= 0.0)
+        return;
+
+    [self applyTempo:60.0 / interval finished:YES];
+}
+
+/// One place where a tempo edit lands, whoever asked for it: the readout's
+/// drag, its typed value, or a tap. The project is the source of truth; the
+/// transport gets the same map so that its own frame-to-tick answers agree,
+/// and the graph is rebuilt so the nodes render against the new tempo — they
+/// hold the GRAPH's copy, which is what makes this safe while audio runs
+/// (project/ProjectGraphCompiler.h).
+- (void)applyTempo:(double)beatsPerMinute finished:(BOOL)finished
+{
+    const double tempo = app::SetTempoCommand::clampTempo(beatsPerMinute);
+
+    // Merging, so a drag is one undo entry rather than one per mouse move —
+    // the same contract a fader drag has (app/CommandRegistry.h).
+    const bool changed =
+        _registry->executeMerging(std::make_unique<app::SetTempoCommand>(tempo));
+
+    if (changed || finished) {
+        if (_audioReady) {
+            _audio->transport().tempoMapForEdit()  = _project->tempoMap();
+            _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
+        }
+
+        // Every step of a drag rebuilds: the tempo has to be audible while the
+        // gesture is happening, which is the entire point of dragging it.
+        [self rebuildGraph];
+        [self refreshStatus];
+        [self.playlist setNeedsDisplay:YES];
+        [self.pianoRoll requestRedraw];
+    }
+}
+
+- (void)applyTimeSignature:(NSInteger)numerator over:(NSInteger)denominator
+{
+    if (!_registry->execute(std::make_unique<app::SetTimeSignatureCommand>(
+            static_cast<int>(numerator), static_cast<int>(denominator))))
+        return;
+
+    if (_audioReady) {
+        _audio->transport().tempoMapForEdit()  = _project->tempoMap();
+        _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
+    }
+
+    [self rebuildGraph];
+    [self refreshStatus];
+    [self.playlist setNeedsDisplay:YES];
+    [self.pianoRoll requestRedraw];
+}
+
 /// Lands whatever the session holds. Each touched parameter is its own undo
 /// entry, which is what a user riding two faders expects Cmd+Z to peel back.
 - (void)landAutomationPass
@@ -1340,6 +1469,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     options.pattern      = project::EntityId{self.pianoRoll.patternIdValue};
     options.diskStreamer = _diskStreamer.get();
     options.sampleCache  = _sampleCache.get();
+
+    options.metronomeEnabled = _metronomeEnabled == YES;
 
     if (_audio->isMonitoringEnabled() && _audio->inputChannels() > 0) {
         options.monitorRing         = _audio->monitorRing();
@@ -2090,7 +2221,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         NSTextField* header = [NSTextField labelWithString:@(column.title)];
         header.frame        = NSMakeRect(column.x, 4, column.width, 16);
         header.font         = [NSFont systemFontOfSize:10];
-        header.textColor    = [NSColor secondaryLabelColor];
+        header.textColor    = ui::theme::ink(ui::theme::Ink::textSecondary);
         [document addSubview:header];
     }
 
@@ -2160,7 +2291,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                             @"to make this channel a sampler first."];
         hint.frame     = NSMakeRect(180, 24 + listHeight + 12, width - 190, 18);
         hint.font      = [NSFont systemFontOfSize:11];
-        hint.textColor = [NSColor secondaryLabelColor];
+        hint.textColor = ui::theme::ink(ui::theme::Ink::textSecondary);
         [document addSubview:hint];
     }
 
@@ -2337,7 +2468,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
             [NSTextField labelWithString:@"No mappings. Right-click a mixer strip and "
                                          @"choose MIDI Learn to create one."];
         hint.frame     = NSMakeRect(10, 12, width - 20, 18);
-        hint.textColor = [NSColor secondaryLabelColor];
+        hint.textColor = ui::theme::ink(ui::theme::Ink::textSecondary);
         [document addSubview:hint];
     }
 
@@ -3664,7 +3795,15 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         ? @"Arrangement"
         : @(pattern != nullptr ? pattern->name.c_str() : "—");
 
-    bar.alert = _lastGraphError != nil ? _lastGraphError : _lastRecordError;
+    bar.alert       = _lastGraphError != nil ? _lastGraphError : _lastRecordError;
+    bar.metronomeOn = _metronomeEnabled;
+
+    // The signature the display counts bars in. Read from the project rather
+    // than assumed: it has been in the tempo map and in the file format since
+    // the beginning, and the display was the only thing still saying 4/4.
+    const engine::TimeSignature signature = _project->tempoMap().timeSignatureAtTick(0);
+    bar.beatsPerBar = signature.numerator;
+    bar.beatValue   = signature.denominator;
 
     if (!_audioReady) {
         bar.playing = NO;
@@ -3879,6 +4018,22 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     recordAutomationItem.submenu = automationModeMenu;
     [audioMenu addItem:recordAutomationItem];
+
+    NSMenuItem* metronomeItem = [audioMenu addItemWithTitle:@"Metronome"
+                                                     action:@selector(toggleMetronome:)
+                                              keyEquivalent:@"m"];
+    metronomeItem.target = self;
+    metronomeItem.keyEquivalentModifierMask = NSEventModifierFlagCommand
+                                            | NSEventModifierFlagShift;
+
+    NSMenuItem* tapItem = [audioMenu addItemWithTitle:@"Tap Tempo"
+                                               action:@selector(tapTempo:)
+                                        keyEquivalent:@"t"];
+    tapItem.target = self;
+    tapItem.keyEquivalentModifierMask = NSEventModifierFlagCommand
+                                      | NSEventModifierFlagShift;
+
+    [audioMenu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* monitorItem = [audioMenu addItemWithTitle:@"Monitor Input"
                                                    action:@selector(toggleInputMonitoring:)

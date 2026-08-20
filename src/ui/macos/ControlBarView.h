@@ -21,6 +21,7 @@ typedef NS_ENUM(NSInteger, INCDAWTransportAction) {
     INCDAWTransportPlay,
     INCDAWTransportRecord,
     INCDAWTransportLoop,
+    INCDAWTransportMetronome,
 };
 
 @interface INCDAWControlBarView : NSView
@@ -30,6 +31,7 @@ typedef NS_ENUM(NSInteger, INCDAWTransportAction) {
 @property (nonatomic) BOOL      playing;
 @property (nonatomic) BOOL      recording;
 @property (nonatomic) BOOL      looping;
+@property (nonatomic) BOOL      metronomeOn;
 @property (nonatomic) BOOL      songMode;
 @property (nonatomic) NSInteger editorIndex;      ///< 0 roll, 1 playlist, 2 mixer, 3 editor
 
@@ -38,6 +40,11 @@ typedef NS_ENUM(NSInteger, INCDAWTransportAction) {
 @property (nonatomic) long long playheadTick;
 
 @property (nonatomic) double tempo;
+
+/// The signature in effect at the playhead. Shown under the tempo, and the
+/// thing that decides how the position readout counts bars.
+@property (nonatomic) NSInteger beatsPerBar;      ///< numerator
+@property (nonatomic) NSInteger beatValue;        ///< denominator (4 = quarter)
 @property (nonatomic) double cpuLoad;             ///< 0..1, peak callback load
 @property (nonatomic) double masterPeak;          ///< 0..1
 @property (nonatomic) double masterRms;           ///< 0..1
@@ -53,6 +60,14 @@ typedef NS_ENUM(NSInteger, INCDAWTransportAction) {
 @property (nonatomic, copy) void (^onTransport)(INCDAWTransportAction action);
 @property (nonatomic, copy) void (^onSelectEditor)(NSInteger index);
 @property (nonatomic, copy) void (^onSelectMode)(BOOL songMode);
+
+/// A tempo edit in progress. `finished` is NO for every step of a drag and YES
+/// once, when the gesture ends or a typed value is committed — the shell folds
+/// the steps into one undo entry and rebuilds on the last one.
+@property (nonatomic, copy) void (^onTempoChange)(double beatsPerMinute, BOOL finished);
+
+/// A signature chosen from the readout's menu.
+@property (nonatomic, copy) void (^onTimeSignature)(NSInteger numerator, NSInteger denominator);
 
 @end
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "engine/graph/Node.h"
-#include "engine/transport/Transport.h"
+#include "engine/transport/TempoMap.h"
 
 #include <atomic>
 #include <vector>
@@ -21,7 +21,9 @@ namespace incdaw::engine::dsp {
 /// anyway, and would drift if it were not.
 class MetronomeNode final : public Node {
 public:
-    explicit MetronomeNode(const Transport& transport) noexcept : transport_(&transport) {}
+    /// `tempoMap` must outlive the node — in a compiled project graph that is
+    /// the graph's own map, which is exactly as long as the node lives.
+    explicit MetronomeNode(const TempoMap& tempoMap) noexcept : tempoMap_(&tempoMap) {}
 
     void prepare(SampleRate sampleRate, FrameCount maxBlockSize) override;
     void process(const ProcessContext& context) noexcept override;
@@ -42,7 +44,7 @@ public:
 private:
     void triggerClick(bool isDownbeat) noexcept;
 
-    const Transport*    transport_ = nullptr;
+    const TempoMap*     tempoMap_ = nullptr;
     std::atomic<bool>   enabled_{true};
     std::atomic<Sample> amplitude_{0.4f};
 

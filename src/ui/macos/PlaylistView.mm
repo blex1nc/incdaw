@@ -155,11 +155,11 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
                                        self.bounds.size.width - headerWidth,
                                        app::PlaylistModel::trackHeight(track));
 
-        [[NSColor colorWithCalibratedRed:0.45 green:0.72 blue:1.0 alpha:0.12] setFill];
+        [theme::withAlpha(theme::ink(Ink::accent), 0.12) setFill];
         NSRectFillUsingOperation(lane, NSCompositingOperationSourceOver);
 
         const auto x = static_cast<CGFloat>(headerWidth + _model->tickToX(_dropTick));
-        [[NSColor colorWithCalibratedRed:0.45 green:0.72 blue:1.0 alpha:0.9] setFill];
+        [theme::withAlpha(theme::ink(Ink::accent), 0.9) setFill];
         NSRectFill(NSMakeRect(x, lane.origin.y, 2.0, lane.size.height));
     }
 
@@ -376,7 +376,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
     // Light on the region's own colour, the way a waveform reads inside a
     // coloured block rather than as a hole cut through it.
-    [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.62] setFill];
+    [theme::withAlpha(theme::ink(Ink::textOnAccent), 0.62) setFill];
 
     for (double x = 0.0; x < body.size.width; x += 1.0) {
         const auto from = model.sourceOffset
@@ -472,7 +472,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
             [path lineToPoint:point];
     }
 
-    [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.75] setStroke];
+    [theme::withAlpha(theme::ink(Ink::textOnAccent), 0.75) setStroke];
     [path stroke];
 }
 
@@ -507,7 +507,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     const double scale  = body.size.width / static_cast<double>(model.lengthTicks);
     const double height = std::max(1.0, std::min(3.0, body.size.height / span));
 
-    [[NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.55] setFill];
+    [theme::withAlpha(theme::ink(Ink::textOnAccent), 0.55) setFill];
 
     for (const auto& content : pattern->channels)
         for (const project::MidiEvent& event : content.events) {

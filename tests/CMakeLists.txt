@@ -18,6 +18,7 @@ add_executable(incdaw_tests
     unit/CommandTests.cpp
     unit/ProjectSessionTests.cpp
     unit/StoppedTransportTests.cpp
+    unit/TempoCommandTests.cpp
     unit/BrowserTests.cpp
     unit/BrowserDropTests.cpp
     unit/ChordToolTests.cpp

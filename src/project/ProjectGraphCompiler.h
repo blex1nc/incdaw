@@ -97,6 +97,11 @@ struct GraphCompileOptions {
     /// Tests shrink it to force the hand-over quickly.
     engine::FrameCount samplerHeadFrames = 65536;
 
+    /// The metronome: a click on every beat, mixed into the master. Session
+    /// state rather than project data — like input monitoring, the toggle is a
+    /// topology change and takes effect on the rebuild it causes.
+    bool metronomeEnabled = false;
+
     /// Input monitoring: when set, an InputMonitorNode draining this ring
     /// feeds the master strip. The ring is the engine's and outlives every
     /// graph; `monitorChannelCount` is the input channel count at compile
@@ -132,6 +137,11 @@ struct GraphCompileOptions {
 /// A compiled graph plus the handles needed to drive it.
 struct CompiledProjectGraph {
     std::unique_ptr<engine::CompiledGraph> graph;
+
+    /// The tempo map this graph renders against — its own copy, pointed at by
+    /// every node that converts ticks to frames. Lives exactly as long as the
+    /// graph does, which is the whole point (see `compileProjectGraph`).
+    std::unique_ptr<engine::TempoMap> tempoMap;
 
     /// Channels that made it into the graph, and their instrument nodes. Muted
     /// channels are absent: they are left out of the graph entirely rather than
@@ -203,8 +213,16 @@ struct CompiledProjectGraph {
     [[nodiscard]] engine::Node* insertNodeFor(EntityId slot) const noexcept;
 };
 
-/// Compiles `project` against `tempoMap`, which must outlive the returned graph
-/// — the instrument nodes hold a reference to it.
+/// Compiles `project` against a COPY of `tempoMap`, owned by the returned
+/// graph (`CompiledProjectGraph::tempoMap`).
+///
+/// The copy is what makes a tempo edit safe. The nodes that convert between
+/// ticks and frames hold a pointer to the map for as long as they render, so
+/// a map they share with the transport could not be rewritten while the audio
+/// thread was inside it — and a vector reallocating under a binary search is
+/// not a glitch, it is a crash. A tempo change is a graph rebuild instead: the
+/// new graph carries the new map, and the old one keeps the map it was
+/// compiled against until it is retired.
 [[nodiscard]] CompiledProjectGraph compileProjectGraph(const Project&          project,
                                                        const engine::TempoMap& tempoMap,
                                                        const GraphCompileOptions& options);

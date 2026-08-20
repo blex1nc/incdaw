@@ -2,6 +2,7 @@
 
 #include "engine/audio/AudioClipNode.h"
 #include "engine/audio/InputMonitorNode.h"
+#include "engine/dsp/MetronomeNode.h"
 #include "engine/dsp/GainNode.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/dsp/TimeStretch.h"
@@ -100,10 +101,18 @@ engine::Node* CompiledProjectGraph::insertNodeFor(EntityId slot) const noexcept
     return nullptr;
 }
 
-CompiledProjectGraph compileProjectGraph(const Project& project, const engine::TempoMap& tempoMap,
+CompiledProjectGraph compileProjectGraph(const Project& project, const engine::TempoMap& sourceMap,
                                          const GraphCompileOptions& options)
 {
     CompiledProjectGraph compiled;
+
+    // The graph's own map. Nodes point into this one, so the caller's may be
+    // rewritten by a tempo edit the moment this graph is replaced — and the
+    // graph being replaced keeps rendering against the tempo it was built for
+    // until the engine retires it.
+    compiled.tempoMap = std::make_unique<engine::TempoMap>(sourceMap);
+
+    const engine::TempoMap& tempoMap = *compiled.tempoMap;
 
     const InstrumentFactory factory = options.instrumentFactory ? options.instrumentFactory
                                                                 : defaultInstrumentFactory();
@@ -769,6 +778,15 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             builder.connect(source, destination != stripInputIndices.end() ? destination->second
                                                                            : masterInput);
         }
+    }
+
+    // ── The metronome ───────────────────────────────────────────────────────
+    // Beat clicks land on the master, not on a mixer node: the click is a
+    // monitoring aid, not material, and must never reach a render or a stem.
+    if (options.metronomeEnabled) {
+        const auto metronome =
+            builder.addNode(std::make_unique<engine::dsp::MetronomeNode>(tempoMap));
+        builder.connect(metronome, masterInput);
     }
 
     // ── Input monitoring ────────────────────────────────────────────────────

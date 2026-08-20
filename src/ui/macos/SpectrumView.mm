@@ -1,7 +1,12 @@
 #import "ui/macos/SpectrumView.h"
 
+#include "ui/macos/Theme.h"
+
 #include <algorithm>
 #include <cmath>
+
+namespace theme = incdaw::ui::theme;
+using incdaw::ui::theme::Ink;
 
 namespace {
 
@@ -40,8 +45,9 @@ constexpr double ceilDb    = 0.0;
 {
     (void)dirty;
 
-    [[NSColor colorWithCalibratedWhite:0.08 alpha:1.0] setFill];
-    NSRectFill(self.bounds);
+    // An analyser is a well with a trace in it, like every other readout in
+    // the window.
+    theme::drawWell(self.bounds, theme::metrics::radiusPad);
 
     const NSRect bounds = self.bounds;
 
@@ -50,7 +56,7 @@ constexpr double ceilDb    = 0.0;
     const double logLow  = std::log10(minimumHz);
     const double logHigh = std::log10(nyquist);
 
-    [[NSColor colorWithCalibratedWhite:0.18 alpha:1.0] setStroke];
+    [theme::ink(Ink::gridLine) setStroke];
     for (const double hz : {100.0, 1000.0, 10000.0}) {
         if (hz >= nyquist)
             continue;
@@ -95,7 +101,7 @@ constexpr double ceilDb    = 0.0;
         }
     }
 
-    [[NSColor colorWithCalibratedRed:0.35 green:0.8 blue:0.95 alpha:1.0] setStroke];
+    [theme::ink(Ink::accent) setStroke];
     path.lineWidth = 1.5;
     [path stroke];
 }

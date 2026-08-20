@@ -224,7 +224,7 @@ namespace {
 /// of every click onset — the same path the audio callback takes.
 std::vector<FramePosition> renderClickFrames(Transport& transport, FrameCount blockSize, int blockCount)
 {
-    auto  metronome = std::make_unique<dsp::MetronomeNode>(transport);
+    auto  metronome = std::make_unique<dsp::MetronomeNode>(transport.tempoMap());
     auto* node      = metronome.get();
 
     GraphBuilder builder;
@@ -249,8 +249,11 @@ std::vector<FramePosition> renderClickFrames(Transport& transport, FrameCount bl
             if (part.length <= 0)
                 continue;
 
+            // The engine hands the graph the transport's state with every
+            // block; the metronome reads THAT rather than reaching back into
+            // the transport, so the harness has to do the same.
             graph->process(output.buffer(0).subBlock(part.offset, part.length),
-                           part.length, part.startFrame);
+                           part.length, part.startFrame, nullptr, transport.isPlaying());
 
             for (std::size_t click = 0; click < node->lastBlockClickCount(); ++click)
                 clicks.push_back(part.startFrame + node->lastBlockClickOffsets()[click]);

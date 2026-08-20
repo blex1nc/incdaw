@@ -8,6 +8,42 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### UI — the design language finished, and the readouts made live — 2026-08-20
+
+**Added**
+
+- **Metronome**: `MetronomeNode` — which has existed since Phase 3 and is
+  the instrument the transport's timing is measured with — is compiled
+  into the graph when the toggle is on, mixed into the master so it can
+  never reach a render or a stem. Control-bar button, Audio menu item
+  (Shift+Cmd+M), and a checkmark that follows the state.
+- **Tempo is editable**: drag the readout (a quarter BPM per point,
+  Option for hundredths), double-click to type, or Shift+Cmd+T to tap it
+  in. `SetTempoCommand` merges, so a drag is one undo entry; the project
+  is the source of truth, the transport takes the same map, and the
+  graph rebuilds.
+- **Time signature is real**: the display no longer says 4/4 regardless.
+  It reads the project's signature — which the tempo map and the file
+  format have both carried since the beginning — and clicking it offers
+  the signatures a session uses. `SetTimeSignatureCommand` is undoable,
+  and the position readout counts bars in the signature it is given.
+
+**Changed**
+
+- A compiled project graph now owns **its own copy of the tempo map**.
+  The nodes that convert ticks to frames hold a pointer to it for as
+  long as they render, so a map shared with the transport could not be
+  rewritten while the audio thread was inside it. A tempo edit is a
+  rebuild: the new graph carries the new map, the old one keeps the map
+  it was compiled against until it is retired.
+- `MetronomeNode` takes a tempo map rather than the transport, and reads
+  the transport's state from the block like every other node.
+- The Browser, the insert parameter panel and the spectrum analyzer —
+  written on a parallel line before the theme existed — draw through it
+  now: the Browser has the pane header, ground and accent selection the
+  other panes have, and no view in the shell declares a colour of its
+  own any more (D-035).
+
 ### Fixed — the hum at idle — 2026-08-20
 
 INCDAW made a sound while it was doing nothing. Opening the application

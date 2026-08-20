@@ -38,16 +38,18 @@ void MetronomeNode::process(const ProcessContext& context) noexcept
 {
     clickCount_ = 0;
 
-    if (transport_ == nullptr || !enabled_.load(std::memory_order_relaxed))
+    if (tempoMap_ == nullptr || !enabled_.load(std::memory_order_relaxed))
         return;
 
-    const TempoMap& tempoMap = transport_->tempoMap();
+    const TempoMap& tempoMap = *tempoMap_;
 
     const FramePosition blockStart = context.playPosition;
     const FramePosition blockEnd   = blockStart + context.frameCount;
 
     // ── Find the beats that fall inside this block ───────────────────────────
-    if (transport_->isPlaying()) {
+    // A parked playhead would otherwise click on the beat it sits on, once per
+    // block, forever (docs/AUDIO_ENGINE.md §5).
+    if (context.playing) {
         const Tick          startTick = tempoMap.tickForFrame(blockStart);
         const TimeSignature signature = tempoMap.timeSignatureAtTick(startTick);
         const Tick          beatTicks = signature.ticksPerBeat();
