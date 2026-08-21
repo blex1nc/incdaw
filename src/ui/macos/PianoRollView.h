@@ -41,4 +41,12 @@ namespace incdaw::app     { class CommandRegistry; }
 /// the host having to know how frames are scheduled.
 - (void)requestRedraw;
 
+/// Drops selection indices that an undo or redo removed.
+///
+/// The selection is a list of positions in the pattern's note vector, so a
+/// history step taken from anywhere — this view, another pane, the command
+/// palette — can leave it pointing past the end, and the next draw would read
+/// it. Whoever moves history calls this before that draw happens.
+- (void)pruneSelectionAfterHistoryChange;
+
 @end

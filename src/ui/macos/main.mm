@@ -16,10 +16,12 @@
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+#include "app/AppSettings.h"
 #include "app/AutomationWriteSession.h"
 #include "app/Browser.h"
 #include "app/CommandRegistry.h"
 #include "app/ProjectSession.h"
+#include "app/StandardActions.h"
 #include "app/Version.h"
 #include "app/commands/ChannelCommands.h"
 #include "app/commands/MidiMappingCommands.h"
@@ -28,6 +30,7 @@
 #include "engine/instrument/BuiltinInstruments.h"
 #include "engine/AudioEngine.h"
 #include "platform/AudioUnitHost.h"
+#include "platform/MidiDevice.h"
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
 #include "plugins/PluginRegistry.h"
@@ -57,6 +60,8 @@
 #include "ui/macos/PianoRollView.h"
 #include "ui/macos/MixerView.h"
 #include "ui/macos/PlaylistView.h"
+#include "ui/macos/CommandPalette.h"
+#include "ui/macos/SettingsWindow.h"
 
 #include <atomic>
 #include <chrono>
@@ -138,6 +143,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 @property (strong) INCDAWPatternListView*   patternList;
 @property (strong) INCDAWStatusBarView*     statusBar;
 @property (strong) INCDAWBrowserView*       browserPane;
+@property (strong) INCDAWSettingsWindow*    settingsWindow;
+@property (strong) INCDAWCommandPalette*    palette;
 @end
 
 @implementation INCDAWAppDelegate {
@@ -269,6 +276,25 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// The audio editor's clipboard: whatever Copy or Cut last extracted.
     /// App-local by design — a WAV region is not pasteboard text.
     engine::AudioFileData _audioClipboard;
+
+    /// Which interface plays, at which rate and block size, which MIDI sources
+    /// are connected, and where the window was left (app/AppSettings.h). Read
+    /// before the device opens, written on every apply and at quit. Separate
+    /// from the project file on purpose: a project that carried its author's
+    /// interface would be unopenable on a second Mac.
+    app::AppSettings      _settings;
+    std::filesystem::path _settingsPath;
+
+    /// The MIDI client. Owned by the shell because the settings window decides
+    /// which sources are connected, and the engine's input is what they feed.
+    /// Closed before the engine goes away: it delivers on its own thread and
+    /// holds a reference to engine::MidiInput.
+    std::unique_ptr<platform::MidiDevice> _midiDevice;
+    NSString*                             _lastMidiError;
+
+    /// What the settings window reports instead of the device line: a refused
+    /// rate, a device that would not open, an apply a running take blocked.
+    NSString* _lastSettingsMessage;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
@@ -279,6 +305,20 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     _registry     = std::make_unique<app::CommandRegistry>(*_project);
     _diskStreamer = std::make_unique<engine::DiskStreamer>();
     _sampleCache  = std::make_unique<engine::SampleCache>();
+
+    // Read before anything opens a device: the settings file is what decides
+    // which interface, which rate and which block size the engine asks for
+    // (app/AppSettings.h). A missing file is the normal first run, and a
+    // corrupt one degrades to defaults rather than to a failure to launch.
+    if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty()) {
+        _settingsPath = support / "settings.json";
+        _settings     = app::AppSettings::load(_settingsPath);
+    }
+
+    // The registry's action table was empty in the running application until
+    // this existed: every edit arrived as a command, but none of them had a
+    // name the palette, a shortcut or a script could look up (CLAUDE.md §26).
+    app::registerStandardActions(*_registry);
 
     // The plugin catalogue is read from a file; launching touches no plugin
     // binary at all, because startup time must not scale with the size of a
@@ -352,10 +392,12 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     const project::EntityId channelId = _project->channels().front().id;
     const project::EntityId patternId = _project->patterns().front().id;
 
-    const NSRect frame = NSMakeRect(0, 0, 1280, 800);
+    // The size a first launch gets. A returning one is restored below, and
+    // everything after that measures the window rather than this constant.
+    const NSRect defaultFrame = NSMakeRect(0, 0, 1280, 800);
 
     self.window = [[NSWindow alloc]
-        initWithContentRect:frame
+        initWithContentRect:defaultFrame
                   styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                           | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                     backing:NSBackingStoreBuffered
@@ -370,9 +412,14 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     self.window.titlebarAppearsTransparent = YES;
 
-    [self.window center];
+    [self restoreWindowFrame];
 
     NSView* content = self.window.contentView;
+
+    // Measured, not assumed: the window may have just been restored to the
+    // size it was left at, and a layout built from the default constant would
+    // overhang it by exactly the difference until the first manual resize.
+    const NSRect frame = content.bounds;
 
     constexpr CGFloat statusHeight  = ui::theme::metrics::statusBarHeight;
     constexpr CGFloat toolbarHeight = ui::theme::metrics::controlBarHeight;
@@ -655,7 +702,18 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self refreshStatus];
 
     [self.window makeKeyAndOrderFront:nil];
-    [self.window makeFirstResponder:self.pianoRoll];
+
+    // The pane and the mode the session was left in, applied through the same
+    // entry points the user's own click would take — nothing can restore into a
+    // state the UI has no way to reach. Selecting a pane is also what gives it
+    // first responder, so this runs after the window is on screen rather than
+    // before: focus must end up on the pane that is actually showing.
+    const NSInteger restoredEditor = _settings.workspace.activeEditor;
+    [self showEditorAtSegment:(restoredEditor > 0 && restoredEditor < 4) ? restoredEditor : 0];
+
+    if (_settings.workspace.songMode)
+        [self setSongMode:YES];
+
     [NSApp activateIgnoringOtherApps:YES];
 
     [self offerAutosaveRecovery];
@@ -1220,6 +1278,30 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if (item.action == @selector(toggleMetronome:))
         item.state = _metronomeEnabled ? NSControlStateValueOn : NSControlStateValueOff;
 
+    // While a text field is being edited, Cmd+Z belongs to the field editor.
+    // Undoing a project command out from under someone renaming a channel is
+    // the one thing a global Undo must not do — and a DISABLED item does not
+    // swallow its key equivalent, so it falls through to the responder chain.
+    const BOOL editingText = [self.window.firstResponder isKindOfClass:[NSText class]];
+
+    if (item.action == @selector(undoFromMenu:)) {
+        // The title names what will be undone. A verb on its own asks the user
+        // to remember what they last did; this tells them.
+        item.title = _registry->canUndo()
+            ? [NSString stringWithFormat:@"Undo %s", _registry->undoName().c_str()]
+            : @"Undo";
+
+        return !editingText && _registry->canUndo();
+    }
+
+    if (item.action == @selector(redoFromMenu:)) {
+        item.title = _registry->canRedo()
+            ? [NSString stringWithFormat:@"Redo %s", _registry->redoName().c_str()]
+            : @"Redo";
+
+        return !editingText && _registry->canRedo();
+    }
+
     return YES;
 }
 
@@ -1409,15 +1491,17 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 {
     _audio = std::make_unique<engine::AudioEngine>();
 
-    platform::AudioDeviceConfig config;
-    config.sampleRate     = 48000.0;
+    // Whatever the user chose last time (app/AppSettings.h). The defaults are
+    // still the system default device at 48 kHz and 512 frames — the block
+    // size a SHARED Bluetooth output can sustain, not the lowest the hardware
+    // admits to — but latency is a preference now rather than a constant.
+    platform::AudioDeviceConfig config = _settings.audio;
 
-    // 512 rather than the lowest the hardware allows: this is set on the SHARED
-    // device, and Bluetooth outputs cannot sustain small blocks without
-    // crackling. Latency tuning belongs in audio settings (Phase 18), per
-    // device, not in a hardcoded aggressive default.
-    config.bufferSize     = 512;
-    config.outputChannels = 2;
+    // Recording is opt-in: unless the input was asked for explicitly, the
+    // device opens output-only and arming a take opens it on demand. Opening
+    // the microphone unasked is a permission prompt nobody requested.
+    if (!_settings.openInputAtLaunch)
+        config.inputDeviceIdentifier.clear();
 
     std::string error;
     if (!_audio->start(config, error)) {
@@ -1435,7 +1519,219 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
           _audio->deviceName().c_str(), _audio->sampleRate(),
           static_cast<long long>(_audio->bufferSize()));
 
+    [self openMidiInputs];
     [self rebuildGraph];
+}
+
+
+// ── Settings, the device and MIDI ────────────────────────────────────────────
+
+- (void)showSettings:(id)sender
+{
+    (void)sender;
+
+    if (self.settingsWindow == nil) {
+        self.settingsWindow = [[INCDAWSettingsWindow alloc] initWithSettings:&_settings];
+
+        __weak INCDAWAppDelegate* weakSelf = self;
+        self.settingsWindow.onApply        = ^{ [weakSelf applySettings]; };
+        self.settingsWindow.statusProvider = ^NSString*(void) {
+            return [weakSelf deviceStatusLine];
+        };
+    }
+
+    [self.settingsWindow show];
+}
+
+/// What the device actually granted, which is not always what was asked for.
+///
+/// A device may refuse a rate, round a block size, or hand the callback larger
+/// blocks than the property query reported. Reporting the request back would
+/// look tidy and be a lie; every figure here comes from the open device
+/// (docs/AUDIO_ENGINE.md §2).
+- (NSString*)deviceStatusLine
+{
+    if (_lastSettingsMessage != nil)
+        return _lastSettingsMessage;
+
+    if (!_audioReady || _audio == nullptr)
+        return @"Audio device unavailable — these settings are saved and applied at next launch.";
+
+    const double       rate   = _audio->sampleRate();
+    const std::int64_t buffer = _audio->bufferSize();
+    const double       millis = rate > 0.0 ? (static_cast<double>(buffer) / rate) * 1000.0 : 0.0;
+
+    NSString* midi = _lastMidiError != nil
+                         ? [NSString stringWithFormat:@"  ·  ⚠ %@", _lastMidiError]
+                         : @"";
+
+    return [NSString stringWithFormat:
+        @"%s  ·  %.0f Hz  ·  %lld frames (%.1f ms)  ·  in %lu / out %lu%@",
+        _audio->deviceName().c_str(), rate, static_cast<long long>(buffer), millis,
+        static_cast<unsigned long>(_audio->inputChannels()),
+        static_cast<unsigned long>(_audio->outputChannels()), midi];
+}
+
+/// Reopens the device and the MIDI client with the settings just applied.
+///
+/// The file is written first and independently of whether the device opens:
+/// someone who selects an interface that is currently asleep must still find
+/// it selected at the next launch.
+- (void)applySettings
+{
+    [self persistSettings];
+
+    if (_recording.isRecording()) {
+        // Restarting the device under a running take would truncate its file.
+        _lastSettingsMessage = @"Stop recording before changing the audio device.";
+        return;
+    }
+
+    _lastSettingsMessage = nil;
+
+    if (_audio == nullptr) {
+        [self startAudio];
+        [self refreshStatus];
+        return;
+    }
+
+    // Captured in ticks, not frames: a sample-rate change redefines what a
+    // frame position means, and the playhead must stay on the same beat.
+    const engine::Tick position   = _audio->transport().positionInTicks();
+    const BOOL         wasPlaying = _audioReady && _audio->transport().isPlaying();
+
+    if (wasPlaying)
+        _audio->transport().stop();
+
+    _audio->stop();
+
+    platform::AudioDeviceConfig config = _settings.audio;
+
+    // Input stays open if it is open now — changing the block size must not
+    // silently drop input monitoring — unless the settings never asked for it.
+    if (!_settings.openInputAtLaunch && _audio->inputChannels() == 0)
+        config.inputDeviceIdentifier.clear();
+
+    std::string error;
+    if (!_audio->start(config, error)) {
+        NSLog(@"INCDAW: audio device refused the new settings: %s", error.c_str());
+        _lastSettingsMessage = [NSString stringWithFormat:@"⚠ %s", error.c_str()];
+
+        // Fall back to the system default rather than leaving the application
+        // silent: a wrong preference must not cost the user their session.
+        const platform::AudioDeviceConfig fallback = app::defaultAudioConfig();
+
+        std::string fallbackError;
+        if (!_audio->start(fallback, fallbackError)) {
+            NSLog(@"INCDAW: audio restart failed: %s", fallbackError.c_str());
+            _audioReady = NO;
+            [self refreshStatus];
+            return;
+        }
+    }
+
+    _audioReady = YES;
+    _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
+    _audio->transport().seekToTick(position);
+
+    [self openMidiInputs];
+    [self rebuildGraph];
+
+    if (wasPlaying) {
+        [self retargetLoop];
+        _audio->transport().play();
+    }
+
+    [self refreshStatus];
+}
+
+/// Connects the configured MIDI sources to the engine's input.
+///
+/// Until this existed, engine::MidiInput was fed by nothing but the tests: a
+/// keyboard plugged into the Mac reached CoreMIDI and stopped there, which
+/// made live playing and MIDI learn dead ends in the running application.
+///
+/// An empty identifier list connects every source — what someone who plugs in
+/// a keyboard and presses a key expects, and what the platform layer already
+/// means by an empty list (platform/MidiDevice.h).
+- (void)openMidiInputs
+{
+    if (_audio == nullptr)
+        return;
+
+    if (_midiDevice != nullptr)
+        _midiDevice->close();
+    else
+        _midiDevice = platform::MidiDevice::create();
+
+    if (_midiDevice == nullptr) {
+        _lastMidiError = @"MIDI unavailable";
+        return;
+    }
+
+    std::string error;
+    if (!_midiDevice->open(_settings.midiInputIdentifiers, _audio->midiInput(), error)) {
+        // Not fatal, and deliberately so: a DAW that refuses to open because a
+        // controller is missing is worse than one that plays without it.
+        NSLog(@"INCDAW: MIDI input unavailable: %s", error.c_str());
+        _lastMidiError = [NSString stringWithFormat:@"midi: %s", error.c_str()];
+        return;
+    }
+
+    _lastMidiError = nil;
+}
+
+// ── The workspace, remembered ────────────────────────────────────────────────
+
+- (void)persistSettings
+{
+    if (!_settingsPath.empty())
+        (void)_settings.save(_settingsPath);
+}
+
+/// Puts the window back where it was left.
+///
+/// A DAW window is arranged around the work — a second display, a particular
+/// height — and re-centring it every launch undoes that arrangement daily.
+- (void)restoreWindowFrame
+{
+    const app::AppSettings::Workspace& saved = _settings.workspace;
+
+    if (saved.windowWidth < 200.0 || saved.windowHeight < 200.0) {
+        [self.window center];
+        return;
+    }
+
+    const NSRect restored = NSMakeRect(saved.windowX, saved.windowY,
+                                       saved.windowWidth, saved.windowHeight);
+
+    // Only if it still lands on a screen: a window restored onto a display
+    // that is no longer attached is a window the user cannot reach.
+    BOOL visible = NO;
+    for (NSScreen* screen in [NSScreen screens])
+        visible = visible || NSIntersectsRect(restored, screen.visibleFrame);
+
+    if (visible)
+        [self.window setFrame:restored display:NO];
+    else
+        [self.window center];
+}
+
+/// Records where the window is and what it is showing, so the next launch
+/// resumes rather than resets.
+- (void)captureWorkspace
+{
+    if (self.window == nil)
+        return;
+
+    const NSRect frame = self.window.frame;
+
+    _settings.workspace.windowX      = frame.origin.x;
+    _settings.workspace.windowY      = frame.origin.y;
+    _settings.workspace.windowWidth  = frame.size.width;
+    _settings.workspace.windowHeight = frame.size.height;
+    _settings.workspace.activeEditor = static_cast<int>(self.controlBar.editorIndex);
+    _settings.workspace.songMode     = _songMode == YES;
 }
 
 /// Rebuilds the render graph from the current project and swaps it in.
@@ -3526,11 +3822,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     _audio->stop();
 
-    platform::AudioDeviceConfig config;
-    config.sampleRate            = 48000.0;
-    config.bufferSize            = 512;
-    config.outputChannels        = 2;
-    config.inputDeviceIdentifier = platform::AudioDeviceConfig::defaultInput;
+    // The configured device, with the input turned on: arming a take is what
+    // opens the microphone when the settings chose not to open it at launch.
+    platform::AudioDeviceConfig config = _settings.audio;
+    if (config.inputDeviceIdentifier.empty())
+        config.inputDeviceIdentifier = platform::AudioDeviceConfig::defaultInput;
 
     std::string error;
     if (!_audio->start(config, error)) {
@@ -3708,6 +4004,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         // undoing away from the last save leaves the document dirty too.
         [self markDirty];
 
+        // Whatever moved history — a pane's own Cmd+Z, the menu, the palette —
+        // the Piano Roll's selection indices may no longer exist.
+        [self.pianoRoll pruneSelectionAfterHistoryChange];
+
         [self.playlist invalidateWaveformCache];
 
         if (!self.audioEditor.hidden && self.audioEditor.assetIdValue != 0) {
@@ -3765,12 +4065,18 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         }
     }
 
+    // A MIDI client that would not open is not fatal — the DAW plays without a
+    // keyboard — but it must not be silent either, or a controller that has
+    // stopped working is indistinguishable from one that never worked.
+    if (_lastMidiError != nil)
+        audio = [NSString stringWithFormat:@"%@ · ⚠ %@", audio, _lastMidiError];
+
     const project::Channel* channel =
         _project->findChannel(project::EntityId{self.pianoRoll.channelIdValue});
 
     self.statusBar.text = [NSString stringWithFormat:
         @"INCDAW %s  ·  %s / %s  ·  %lu notes  ·  %lu clips  ·  %@  ·  %@  ·  "
-        @"space: play   r: rec   ⌘Z: undo",
+        @"space: play   r: rec   ⌘K: commands",
         app::Version::string(),
         pattern != nullptr ? pattern->name.c_str() : "—",
         channel != nullptr ? channel->name.c_str() : "—",
@@ -3836,6 +4142,159 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [bar setNeedsDisplay:YES];
 }
 
+// ── Actions, command search and history ──────────────────────────────────────
+
+/// Everything the palette can run, gathered fresh each time it opens.
+///
+/// The menu bar is walked rather than duplicated: an action that has a menu
+/// entry is listed with the same title and the same shortcut, and can never
+/// drift from it. Registered project actions come next, and undo/redo last —
+/// those two are synthesised because their titles depend on what is on the
+/// stack right now.
+- (NSArray<INCDAWCommandEntry*>*)paletteEntries
+{
+    NSMutableArray<INCDAWCommandEntry*>* entries = [NSMutableArray array];
+
+    for (NSMenuItem* top in NSApp.mainMenu.itemArray)
+        [self collectMenuItemsOf:top.submenu into:entries category:top.submenu.title];
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+
+    for (const app::CommandRegistry::Entry& action : _registry->actions()) {
+        NSString* identifier = @(action.id.c_str());
+
+        [entries addObject:[INCDAWCommandEntry
+            entryWithTitle:@(action.displayName.c_str())
+                  category:@(action.category.c_str())
+                  shortcut:@(action.defaultShortcut.c_str())
+                       run:^{ [weakSelf invokeAction:identifier]; }]];
+    }
+
+    if (_registry->canUndo()) {
+        [entries addObject:[INCDAWCommandEntry
+            entryWithTitle:[NSString stringWithFormat:@"Undo %s", _registry->undoName().c_str()]
+                  category:@"Edit"
+                  shortcut:@"⌘Z"
+                       run:^{ [weakSelf undoFromMenu:nil]; }]];
+    }
+
+    if (_registry->canRedo()) {
+        [entries addObject:[INCDAWCommandEntry
+            entryWithTitle:[NSString stringWithFormat:@"Redo %s", _registry->redoName().c_str()]
+                  category:@"Edit"
+                  shortcut:@"⇧⌘Z"
+                       run:^{ [weakSelf redoFromMenu:nil]; }]];
+    }
+
+    return entries;
+}
+
+- (void)collectMenuItemsOf:(NSMenu*)menu
+                      into:(NSMutableArray<INCDAWCommandEntry*>*)entries
+                  category:(NSString*)category
+{
+    for (NSMenuItem* item in menu.itemArray) {
+        if (item.isSeparatorItem)
+            continue;
+
+        if (item.submenu != nil) {
+            [self collectMenuItemsOf:item.submenu into:entries category:item.title];
+            continue;
+        }
+
+        // An item with no action does nothing when clicked either; listing it
+        // would offer the user a command that cannot run.
+        if (item.action == nullptr)
+            continue;
+
+        [entries addObject:[INCDAWCommandEntry
+            entryWithTitle:item.title
+                  category:category
+                  shortcut:[self shortcutTextFor:item]
+                       run:^{ [NSApp sendAction:item.action to:item.target from:item]; }]];
+    }
+}
+
+- (NSString*)shortcutTextFor:(NSMenuItem*)item
+{
+    if (item.keyEquivalent.length == 0)
+        return @"";
+
+    NSMutableString* text = [NSMutableString string];
+
+    const NSEventModifierFlags flags = item.keyEquivalentModifierMask;
+    if ((flags & NSEventModifierFlagControl) != 0) [text appendString:@"⌃"];
+    if ((flags & NSEventModifierFlagOption)  != 0) [text appendString:@"⌥"];
+    if ((flags & NSEventModifierFlagShift)   != 0) [text appendString:@"⇧"];
+    if ((flags & NSEventModifierFlagCommand) != 0) [text appendString:@"⌘"];
+
+    // An uppercase key equivalent already implies Shift, which AppKit does not
+    // put in the modifier mask.
+    NSString* key = item.keyEquivalent;
+    if ([key isEqualToString:key.uppercaseString] && ![key isEqualToString:key.lowercaseString]
+        && (flags & NSEventModifierFlagShift) == 0)
+        [text appendString:@"⇧"];
+
+    [text appendString:key.uppercaseString];
+    return text;
+}
+
+- (void)invokeAction:(NSString*)identifier
+{
+    if (_registry->invoke(identifier.UTF8String))
+        [self historyChanged];
+}
+
+- (void)showCommandPalette:(id)sender
+{
+    (void)sender;
+
+    if (self.palette == nil)
+        self.palette = [[INCDAWCommandPalette alloc] init];
+
+    [self.palette showWithEntries:[self paletteEntries] relativeToWindow:self.window];
+}
+
+- (void)undoFromMenu:(id)sender
+{
+    (void)sender;
+
+    if (_registry->undo())
+        [self historyChanged];
+}
+
+- (void)redoFromMenu:(id)sender
+{
+    (void)sender;
+
+    if (_registry->redo())
+        [self historyChanged];
+}
+
+/// One place history lands, whichever route moved it — the menu, the palette,
+/// or a registered action.
+///
+/// The Piano Roll indexes its selection by position in the pattern's note
+/// vector, so a step that removed notes leaves those indices pointing past the
+/// end and the next draw would read them. It used to be pruned only by the
+/// Piano Roll's own key handler, which meant an undo taken from anywhere else
+/// left it stale.
+- (void)historyChanged
+{
+    [self.pianoRoll pruneSelectionAfterHistoryChange];
+
+    [self markDirty];
+    [self rebuildGraph];
+
+    [self.channelRack setNeedsDisplay:YES];
+    [self.patternList setNeedsDisplay:YES];
+    [self.playlist setNeedsDisplay:YES];
+    [self.mixer setNeedsDisplay:YES];
+    [self.pianoRoll requestRedraw];
+
+    [self refreshStatus];
+}
+
 - (void)buildMenu
 {
     NSMenu* menuBar = [[NSMenu alloc] init];
@@ -3844,6 +4303,22 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [menuBar addItem:appItem];
 
     NSMenu* appMenu = [[NSMenu alloc] init];
+
+    // Cmd+, — where every macOS application keeps this, and the first place
+    // anyone looks when the sound comes out of the wrong interface.
+    NSMenuItem* settingsItem = [appMenu addItemWithTitle:@"Settings…"
+                                                  action:@selector(showSettings:)
+                                           keyEquivalent:@","];
+    settingsItem.target = self;
+
+    // Command search (CLAUDE.md §26). A DAW accumulates hundreds of actions,
+    // and a menu bar stops being a way to find them long before that.
+    NSMenuItem* paletteItem = [appMenu addItemWithTitle:@"Command Search…"
+                                                 action:@selector(showCommandPalette:)
+                                          keyEquivalent:@"k"];
+    paletteItem.target = self;
+
+    [appMenu addItem:[NSMenuItem separatorItem]];
     [appMenu addItemWithTitle:@"Quit INCDAW" action:@selector(terminate:) keyEquivalent:@"q"];
     appItem.submenu = appMenu;
 
@@ -3948,12 +4423,24 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     NSMenuItem* editItem = [[NSMenuItem alloc] init];
     [menuBar addItem:editItem];
 
-    // The menu deliberately carries no actions of its own: every command lives
-    // in app::CommandRegistry and the view routes to it, so a menu entry and a
-    // keystroke can never diverge (docs/ARCHITECTURE.md §6).
+    // Undo and redo route to app::CommandRegistry rather than to whichever pane
+    // has focus. They used to be inert placeholders that only worked because
+    // every view implemented Cmd+Z itself — five copies of one behaviour, and
+    // a menu that could not say what it would undo (docs/ARCHITECTURE.md §6).
+    // Select All stays on the responder chain: what "all" means is the pane's
+    // question, not the registry's.
     NSMenu* editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
-    [editMenu addItemWithTitle:@"Undo" action:nil keyEquivalent:@"z"];
-    [editMenu addItemWithTitle:@"Redo" action:nil keyEquivalent:@"Z"];
+
+    NSMenuItem* undoItem = [editMenu addItemWithTitle:@"Undo"
+                                               action:@selector(undoFromMenu:)
+                                        keyEquivalent:@"z"];
+    undoItem.target = self;
+
+    NSMenuItem* redoItem = [editMenu addItemWithTitle:@"Redo"
+                                               action:@selector(redoFromMenu:)
+                                        keyEquivalent:@"Z"];
+    redoItem.target = self;
+
     [editMenu addItem:[NSMenuItem separatorItem]];
     [editMenu addItemWithTitle:@"Select All" action:nil keyEquivalent:@"a"];
     editItem.submenu = editMenu;
@@ -4104,6 +4591,16 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
         _audio->stop();
     }
+
+    // The MIDI client delivers on its own thread and holds a reference to the
+    // engine's input: it must be closed before the engine goes away.
+    if (_midiDevice != nullptr) {
+        _midiDevice->close();
+        _midiDevice.reset();
+    }
+
+    [self captureWorkspace];
+    [self persistSettings];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender

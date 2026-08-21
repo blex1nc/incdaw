@@ -34,6 +34,22 @@ release notes record adding separate macOS input/output selectors; the same need
 applies here. The device layer must not assume one duplex device, and must
 handle the aggregate/mismatched-clock case explicitly rather than by accident.
 
+**Where the configuration comes from.** The shell opens the device with
+`app::AppSettings::audio`, read from `settings.json` before anything touches
+hardware (D-036). Defaults are the system default output at 48 kHz and 512
+frames — 512 rather than the lowest the hardware admits to, because the block
+size is set on the SHARED device and a Bluetooth output crackles below it.
+Input is opt-in: unless the settings asked for it, the device opens output-only
+and arming a take opens it on demand, because opening the microphone unasked is
+a permission prompt nobody requested.
+
+Whatever the settings window reports is read back from the OPEN device, never
+from the request: a device may refuse a rate, round a block size, or hand the
+callback larger blocks than the property query reported, and the granted figure
+is the only honest latency number. If the chosen device refuses to open, the
+shell falls back to the system default rather than leaving the application
+silent — a wrong preference must not cost a session.
+
 Properties that must be read and honoured, not guessed:
 
 | Property | Why |

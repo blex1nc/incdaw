@@ -8,6 +8,62 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### UI — the machine is configurable, the keyboard plays, and every command is one keystroke away — 2026-08-22
+
+**Added**
+
+- **Audio and MIDI Settings** (Cmd+,): output and input device, sample
+  rate, block size, which MIDI sources to connect, and whether the input
+  opens at launch. Applying reopens the device and the MIDI client in
+  place — the playhead is preserved in TICKS, so a sample-rate change
+  cannot move it — and the status line reports what the device actually
+  GRANTED rather than what was asked for. A device that refuses to open
+  falls back to the system default instead of leaving the app silent.
+  Until this window existed, INCDAW played through whatever the system
+  default happened to be and latency was not tunable at all.
+- **MIDI hardware is connected.** `platform::MidiDevice` is opened at
+  launch and on every apply, and its messages reach
+  `engine::MidiInput`. This was the last missing link in a chain that has
+  otherwise been complete and tested since Phase 5: a keyboard plugged
+  into the Mac reached CoreMIDI and stopped there, which made live
+  playing and MIDI learn dead ends in the running application. An empty
+  source list means every source.
+- **Command Search** (Cmd+K): type a few letters, run anything. The
+  palette walks the menu bar — so an entry can never drift from the menu
+  it mirrors, shortcut included — and lists the registry's actions and
+  the live undo/redo beside them.
+- **A registered action table**: `app::registerStandardActions` gives Add
+  Channel, Add Pattern and Add Track ids that the palette, a shortcut, a
+  controller mapping or a future script can all reach (CLAUDE.md §26).
+  It lives in `app/`, not in the shell, so it is testable — the registry's
+  table was empty in the running application before this.
+- **The workspace is remembered**: window position and size, the active
+  pane and pattern/song mode are restored at launch. A frame that no
+  longer lands on an attached screen is centred rather than restored off
+  the edge.
+
+**Changed**
+
+- **Undo and redo work from the Edit menu, and say what they will do**:
+  "Undo Move Notes", "Redo Quantize Notes", from
+  `CommandRegistry::undoName()`. They route through one shell path that
+  resyncs every pane (docs/DECISIONS.md D-037), which also fixes the
+  Piano Roll keeping selection indices into notes an undo taken in
+  another pane had already removed. Cmd+Z is handed back to the field
+  editor while a text field has focus.
+- The status line advertises Cmd+K instead of Cmd+Z — undo now names
+  itself in the menu — and reports a MIDI client that would not open.
+- The window lays itself out from its real size rather than from the
+  1280x800 default, so a restored window has no overhanging panes.
+
+**Files**
+
+- `src/app/AppSettings.{h,cpp}`, `src/app/StandardActions.{h,cpp}`
+- `src/ui/macos/SettingsWindow.{h,mm}`, `src/ui/macos/CommandPalette.{h,mm}`
+- `tests/unit/AppSettingsTests.cpp`, `tests/unit/StandardActionsTests.cpp`
+- Decisions D-036 (settings are not project data) and D-037 (one undo caller)
+
+
 ### UI — the design language finished, and the readouts made live — 2026-08-20
 
 **Added**

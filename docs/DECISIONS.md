@@ -1228,3 +1228,84 @@ asks for.
 
 **Date:** 2026-08-17
 **Status:** ACCEPTED
+
+---
+
+## D-036 — Machine settings live in their own versioned file, never in the project
+
+**Context:** the shell needed an Audio and MIDI settings window, and the values
+it edits — output device, input device, sample rate, block size, connected MIDI
+sources, window geometry, active pane — have to be stored somewhere. The
+project format is already versioned, migrated and tested, and was the obvious
+place to put them.
+
+**Options:**
+
+1. Store device and workspace preferences inside the `.incdaw` project.
+2. A separate `settings.json` in the application support directory, with its
+   own version field and its own reader (`app::AppSettings`).
+
+**Chosen:** option 2.
+
+**Reason:** a project describes the music; settings describe the machine it
+happens to be played on. Putting an interface's device identifier in the
+project makes that project open on the wrong output — or not at all — on a
+second Mac, which is exactly the failure a portable project format exists to
+prevent. The split also lets the settings reader be maximally forgiving (every
+field degrades to a default, hostile values clamp, unknown keys are ignored)
+without weakening the project format's strictness.
+
+**Scope:** deliberately narrow. State that already has an owner does not move
+here: the Browser keeps its own libraries and favourites (`app::Browser::save`)
+and Open Recent stays in user defaults. The file carries only what nothing else
+owns — the device, the MIDI sources, and the workspace.
+
+**Tradeoffs:** two formats to version instead of one, and preferences do not
+travel with a project handed to a collaborator — deliberately. A project-scoped
+override ("this song wants 96 kHz") is a separate feature and is not implied by
+this decision.
+
+**Date:** 2026-08-22
+**Status:** ACCEPTED
+
+---
+
+## D-037 — Undo and redo route through the shell, not through whichever pane has focus
+
+**Context:** the Edit menu's Undo and Redo were inert placeholders with no
+action. Cmd+Z worked only because all five editing panes implemented it in
+their own `keyDown:` — the same three lines copied into the Piano Roll, the
+Playlist, the Channel Rack, the Pattern List and the Mixer. The menu could not
+say what it would undo, undo was unreachable from anything that was not a pane
+(a palette, a script, the accessibility API), and only the Piano Roll's copy
+pruned its selection afterwards — so an undo taken in the Mixer left the Piano
+Roll holding indices into notes that no longer existed.
+
+**Options:**
+
+1. Leave the menu inert and keep the five copies.
+2. Route the menu items through `NSUndoManager`, per pane.
+3. One shell action per verb, calling `app::CommandRegistry` and then resyncing
+   every pane; the panes' own handlers stay as a fallback.
+
+**Chosen:** option 3.
+
+**Reason:** the registry is already the single mutation path (ARCHITECTURE §6),
+so the shell is where the one caller belongs. It makes the menu titles honest —
+"Undo Move Notes" comes from `CommandRegistry::undoName()` — gives the command
+palette the same two entries for free, and puts the selection prune on the path
+every route takes rather than on one of them. `NSUndoManager` was rejected
+because it would mean two undo stacks with no defined interleaving.
+
+**The one thing this must not break:** a menu item that owns Cmd+Z owns it
+globally, including while a text field is being edited. `validateMenuItem:`
+disables both verbs whenever the first responder is an `NSText`, and a disabled
+item does not swallow its key equivalent — so the field editor's own undo still
+receives it.
+
+**Tradeoffs:** the panes' `keyDown:` copies are now unreachable for Cmd+Z in
+normal use and survive only as the field-editor fallback. Collapsing them is
+follow-up work, not a drive-by edit: each pane also refreshes itself there.
+
+**Date:** 2026-08-22
+**Status:** ACCEPTED

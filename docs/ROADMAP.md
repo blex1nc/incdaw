@@ -472,11 +472,30 @@ cut/copy/paste/delete with bit-exact undo; the lookahead limiter (new
 catalogued effect, fixed window, latency into the existing PDC); the
 spectrum analyzer (own FFT, seqlock publication, log-frequency view).
 
+### Increment 11 — the workspace: settings, MIDI in, command search — DONE 2026-08-22
+
+The machine became configurable and the keyboard started playing. Audio and
+MIDI Settings (Cmd+,) over a `settings.json` that is its own versioned file,
+never project data (D-036) — device, rate, block size, MIDI sources, and a
+status line read back from the OPEN device rather than from the request.
+`platform::MidiDevice` is opened by the shell at last, which closes the one
+gap that had made `engine::MidiInput` unreachable from hardware since Phase 5.
+Command Search (Cmd+K) over the walked menu bar plus
+`app::registerStandardActions`, which puts entries in a registry table that
+was empty in the running application until now. The workspace — window frame,
+active pane, song mode — is restored at launch. Undo and redo route through
+one shell path and name what they will do (D-037).
+
+**Exit criterion (met):** a device chosen in Settings survives a relaunch and
+the status line reports what the hardware granted; a MIDI keyboard's CC
+reaches MIDI learn; every menu action is reachable by typing part of its name.
+
 ### Remaining, by gate
 
 - **Dependency approval required (§41):** AU hosting, then VST3; FLAC and
   MP3 export.
-- **Platform + hardware:** MIDI output, clock/sync, controller feedback.
+- **Platform + hardware:** MIDI output, clock/sync, controller feedback,
+  device hot-plug re-enumeration (Settings rescans only when asked).
 - **Its own program:** sandboxed (out-of-process) plugin processing.
 - **Future increments, ungated:** graphical zone-mapping view, per-zone
   envelopes/filters/LFOs, plugin out_events → recordable automation,

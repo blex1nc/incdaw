@@ -34,6 +34,7 @@ know nothing about anything above it.
 │               Channel Rack · Mixer · Audio Editor        │
 ├──────────────────────────────────────────────────────────┤
 │  app/         command registry · undo stack · session    │
+│               standard action table · machine settings   │
 ├──────────────────────────────────────────────────────────┤
 │  project/     serialization · versioning · migration     │
 │               asset management · relinking               │
@@ -197,6 +198,20 @@ this way from the start, and cannot retrofit it cheaply if it does not.
 **Undo** is a stack of executed commands. There is exactly one mutation path
 into the project model: `CommandRegistry::execute()`. Anything that mutates the
 model outside that path is a bug.
+
+There is also exactly one place that *moves* the stack: the shell's Edit menu
+(D-037). It calls `undo()`/`redo()` and then resyncs every pane, which is what
+keeps a step taken in one editor from leaving another holding indices into rows
+that no longer exist. Panes keep their own Cmd+Z handlers only as the fallback
+for when the menu item is disabled — a text field has focus and the field
+editor's undo must win.
+
+The registry's action table is populated by `app::registerStandardActions`, in
+`app/` rather than in the shell: a list of what the application can do is not a
+property of the window system, and one only the shell can build is one no test
+can check. The command palette lists that table beside the menu bar it walks,
+so an action can never be searchable and unreachable, or reachable and
+unsearchable.
 
 ---
 

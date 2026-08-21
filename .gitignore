@@ -26,6 +26,7 @@ graphify-out/.graphify_*
 
 # ── Local tooling ─────────────────────────────────────
 .claude/settings.local.json
+.multicode/
 compile_commands.json
 .cache/
 build-release/

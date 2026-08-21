@@ -56,7 +56,8 @@ public:
     [[nodiscard]] bool canUndo() const noexcept { return !undoStack_.empty(); }
     [[nodiscard]] bool canRedo() const noexcept { return !redoStack_.empty(); }
 
-    /// "Undo Move Notes" / "Redo Move Notes", or empty when nothing applies.
+    /// The name of what would be undone or redone ("Move Notes"), or empty
+    /// when nothing applies. Callers build the menu title around it.
     [[nodiscard]] std::string undoName() const;
     [[nodiscard]] std::string redoName() const;
 

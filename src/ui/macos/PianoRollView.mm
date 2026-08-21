@@ -663,6 +663,10 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     const bool command = (event.modifierFlags & NSEventModifierFlagCommand) != 0;
     const bool shift   = (event.modifierFlags & NSEventModifierFlagShift) != 0;
 
+    // Cmd+Z normally never reaches here: the Edit menu owns it and routes it
+    // through app::CommandRegistry for every pane at once. This remains as the
+    // fallback for the case where the menu item is disabled — a field editor
+    // has focus — and it must prune exactly like the shell's path does.
     if (command && (character == 'z' || character == 'Z')) {
         if (shift) {
             if (_registry->redo())
@@ -673,9 +677,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
                 [self reportAction:[NSString stringWithFormat:@"Undo %@", name]];
         }
 
-        _model->pruneSelection([self currentNotes].size());
-
-        [self setNeedsDisplay:YES];
+        [self pruneSelectionAfterHistoryChange];
         return;
     }
 
@@ -807,6 +809,12 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     }
 
     [super keyDown:event];
+}
+
+- (void)pruneSelectionAfterHistoryChange
+{
+    _model->pruneSelection([self currentNotes].size());
+    [self setNeedsDisplay:YES];
 }
 
 - (void)requestRedraw

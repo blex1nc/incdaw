@@ -1,10 +1,12 @@
 # INCDAW — HANDOFF
 
-Version: 3.6
+Version: 3.7
 Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — the three parallel work lines are
-        merged: UI build-out increments 1-10, the FL2026 feature wave, and
-        the drawn design language
-Last updated: 2026-08-20
+        merged: UI build-out increments 1-11, the FL2026 feature wave, and
+        the drawn design language. Increment 11 made the machine
+        configurable, connected MIDI hardware, and gave every command a
+        name a keystroke can find.
+Last updated: 2026-08-22
 Project: INCDAW
 Reference DAW: FL Studio 2026
 Primary coding agent: Claude Code
@@ -144,7 +146,7 @@ Build state:
   cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)
   ./tools/make-dmg.sh          -> dist/INCDAW-0.1.0.dmg
 
-  424 test cases, 170,135 assertions, green in both Debug and Release.
+  637 test cases, 3,207,384 assertions, green in both Debug and Release.
   Zero compiler warnings (-Werror is on).
 
   third_party/ is gitignored wholesale. A fresh clone refetches:
@@ -1860,6 +1862,74 @@ recording and the Audio Logger all work. What remains in it is polish):
       today), out-of-process AU instantiation, and an AU-specific test
       of automation and of state through a project save (both travel the
       shared seams, which are tested for CLAP).
+
+UI build-out increment 11 — the workspace (2026-08-22):
+
+  What it added, and what each thing was blocking:
+
+    - app/AppSettings + ui/macos/SettingsWindow, reached with Cmd+, —
+      output and input device, sample rate, block size, MIDI sources,
+      "open the input at launch". Applying reopens the device and the
+      MIDI client with the playhead preserved in TICKS (a sample-rate
+      change redefines what a frame position means). The status line is
+      read back from the OPEN device: a refused rate or a rounded block
+      size must never be reported as the value that was asked for. A
+      device that will not open falls back to the system default rather
+      than leaving the application silent. Settings are their OWN
+      versioned file in the application support directory, never project
+      data — D-036 says why, and the short version is that a project
+      carrying its author's interface id is unopenable on a second Mac.
+
+    - platform::MidiDevice is finally OPENED by the shell. This was the
+      one missing link in a chain complete and tested since Phase 5:
+      engine::MidiInput existed, the lock-free queue existed, MIDI learn
+      polled it — and nothing ever fed it, because nobody called
+      MidiDevice::create() outside the tests. A keyboard reached CoreMIDI
+      and stopped there. The client is closed in
+      applicationWillTerminate BEFORE the engine goes away: it delivers
+      on its own thread and holds a reference to the engine's input.
+
+    - ui/macos/CommandPalette, reached with Cmd+K. It owns no catalogue:
+      the shell walks the menu bar and hands it entries each time it
+      opens, so a command cannot be listed there and missing from the
+      menu, or carry a different shortcut in the two places.
+
+    - app::registerStandardActions, in app/ rather than in the shell so a
+      test can reach it. The registry's action table was EMPTY in the
+      running application until this: every edit arrived as a command,
+      but none of them had an id anything could look up (CLAUDE.md §26).
+      Three actions today — add channel, pattern, track. Widening that
+      table is how the palette grows; an action belongs in it once it is
+      meaningful without a selection.
+
+    - The workspace is restored: window frame, active pane, song mode.
+      The frame is only restored if it still intersects an attached
+      screen, and the layout is now measured from the window's real
+      content size instead of the 1280x800 default constant — otherwise
+      a restored smaller window has panes hanging off its edge.
+
+    - Undo and redo route through the shell (D-037) and name what they
+      will do. The five panes' own Cmd+Z handlers survive only as the
+      fallback for when the menu item is disabled, which happens exactly
+      when a text field has focus and the field editor's undo must win.
+
+  Deliberately not in it, and the natural next steps:
+
+    - The panes' Cmd+Z copies are now unreachable in normal use.
+      Collapsing them is real work, not a drive-by edit: each also
+      refreshes its own view there.
+    - The settings window does not offer a channel map, an input-channel
+      count, or a per-project sample-rate override. The last one is a
+      feature, not an omission — see D-036.
+    - Nothing re-enumerates devices on hot-plug. The window rescans when
+      it opens and on its Rescan button; a device unplugged while the
+      window is open is stale until then.
+    - MIDI OUTPUT is still unopened. MidiDevice::sendMessage exists and
+      the settings window lists inputs only.
+    - No test drives the shell. AppSettings and the action table are
+      covered in app/; the wiring in main.mm is covered by building,
+      launching, and the settings file round-tripping through a real
+      quit — which is what was actually done, not a claim of more.
 
 Things to be careful about:
 
