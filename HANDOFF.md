@@ -123,6 +123,25 @@ Do not copy proprietary source code, assets, plugins, presets, or visual identit
 
 # 5. CURRENT STATUS
 
+**2026-08-21 — Phase 21 (workspace, browser, settings) landed.** Phases 0-20
+are complete and released as 0.9.0 (docs/RELEASE.md); the sections below this
+note were written earlier in the run and describe the phases as they landed,
+not the current head. Read CHANGELOG.md first — it is the accurate log.
+
+Phase 21 added the panes around the editors: Settings (⌘,) over a versioned
+`settings.json` (D-034), MIDI input actually opened by the shell for the first
+time, the Browser (⌘B) with libraries/search/favourites and drag-and-drop of
+samples into the Channel Rack, command search (⌘K) over the menu bar and the
+registry, project tempo/time-signature commands with toolbar fields, workspace
+restore and Open Recent.
+
+Deferred out of Phase 21, deliberately: browser audio preview (needs a preview
+path in the render graph), the lock-free tempo-map swap that would stop tempo
+changes from restarting the device (D-035), and dockable panels.
+
+Suite at that point: 522 cases / 1,335,935 assertions green, layering green,
+zero warnings under -Werror.
+
 Current phase:
 
 PHASES 0-8 COMPLETE (2026-08-14)

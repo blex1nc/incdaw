@@ -1,0 +1,221 @@
+#include "app/AppSettings.h"
+
+#include "project/Json.h"
+
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <system_error>
+
+namespace incdaw::app {
+
+using project::Json;
+
+namespace {
+
+/// Block sizes and rates arrive from a file that anyone can edit. A device
+/// asked for zero frames does not fail loudly — it fails as silence — so the
+/// reader clamps rather than trusts.
+double sanitisedSampleRate(double value)
+{
+    return (value >= 8000.0 && value <= 384000.0) ? value : defaultAudioConfig().sampleRate;
+}
+
+std::int64_t sanitisedBufferSize(std::int64_t value)
+{
+    return (value >= 16 && value <= 8192) ? value : defaultAudioConfig().bufferSize;
+}
+
+std::size_t sanitisedChannelCount(std::int64_t value, std::size_t fallback)
+{
+    return (value >= 0 && value <= 64) ? static_cast<std::size_t>(value) : fallback;
+}
+
+} // namespace
+
+void AppSettings::noteRecentProject(const std::filesystem::path& path)
+{
+    if (path.empty())
+        return;
+
+    const std::string entry = path.string();
+
+    recentProjects.erase(std::remove(recentProjects.begin(), recentProjects.end(), entry),
+                         recentProjects.end());
+
+    recentProjects.insert(recentProjects.begin(), entry);
+
+    if (recentProjects.size() > maximumRecentProjects)
+        recentProjects.resize(maximumRecentProjects);
+}
+
+std::string AppSettings::toJson() const
+{
+    Json root = Json::object();
+    root.set("format", "incdaw-settings");
+    root.set("version", currentVersion);
+
+    Json audioObject = Json::object();
+    audioObject.set("outputDevice", audio.outputDeviceIdentifier);
+    audioObject.set("inputDevice", audio.inputDeviceIdentifier);
+    audioObject.set("sampleRate", audio.sampleRate);
+    audioObject.set("bufferSize", static_cast<std::int64_t>(audio.bufferSize));
+    audioObject.set("outputChannels", static_cast<std::int64_t>(audio.outputChannels));
+    audioObject.set("inputChannels", static_cast<std::int64_t>(audio.inputChannels));
+    audioObject.set("openInputAtLaunch", openInputAtLaunch);
+    root.set("audio", std::move(audioObject));
+
+    Json midiObject = Json::object();
+    Json inputs     = Json::array();
+    for (const std::string& identifier : midiInputIdentifiers)
+        inputs.append(Json(identifier));
+    midiObject.set("inputs", std::move(inputs));
+    root.set("midi", std::move(midiObject));
+
+    Json workspaceObject = Json::object();
+    workspaceObject.set("windowX", workspace.windowX);
+    workspaceObject.set("windowY", workspace.windowY);
+    workspaceObject.set("windowWidth", workspace.windowWidth);
+    workspaceObject.set("windowHeight", workspace.windowHeight);
+    workspaceObject.set("activeEditor", static_cast<std::int64_t>(workspace.activeEditor));
+    workspaceObject.set("songMode", workspace.songMode);
+    root.set("workspace", std::move(workspaceObject));
+
+    Json browserObject = Json::object();
+
+    Json roots = Json::array();
+    for (const std::string& entry : browser.roots)
+        roots.append(Json(entry));
+    browserObject.set("roots", std::move(roots));
+
+    Json starred = Json::array();
+    for (const std::string& entry : browser.favourites)
+        starred.append(Json(entry));
+    browserObject.set("favourites", std::move(starred));
+    browserObject.set("seeded", browser.seeded);
+
+    root.set("browser", std::move(browserObject));
+
+    Json recent = Json::array();
+    for (const std::string& entry : recentProjects)
+        recent.append(Json(entry));
+    root.set("recentProjects", std::move(recent));
+
+    return root.dump();
+}
+
+AppSettings AppSettings::fromJson(const std::string& text)
+{
+    AppSettings settings;
+
+    Json        root;
+    std::string error;
+    if (!Json::parse(text, root, error) || !root.isObject())
+        return settings;
+
+    const Json& audioObject = root["audio"];
+    if (audioObject.isObject()) {
+        settings.audio.outputDeviceIdentifier = audioObject["outputDevice"].asString();
+        settings.audio.inputDeviceIdentifier  = audioObject["inputDevice"].asString();
+        settings.audio.sampleRate     = sanitisedSampleRate(audioObject["sampleRate"].asDouble(settings.audio.sampleRate));
+        settings.audio.bufferSize     = sanitisedBufferSize(audioObject["bufferSize"].asInt(settings.audio.bufferSize));
+        settings.audio.outputChannels = sanitisedChannelCount(audioObject["outputChannels"].asInt(
+                                                                  static_cast<std::int64_t>(settings.audio.outputChannels)),
+                                                              settings.audio.outputChannels);
+        settings.audio.inputChannels  = sanitisedChannelCount(audioObject["inputChannels"].asInt(
+                                                                  static_cast<std::int64_t>(settings.audio.inputChannels)),
+                                                              settings.audio.inputChannels);
+        settings.openInputAtLaunch    = audioObject["openInputAtLaunch"].asBool(false);
+    }
+
+    const Json& inputs = root["midi"]["inputs"];
+    if (inputs.isArray()) {
+        for (const Json& element : inputs.elements()) {
+            if (element.isString() && !element.asString().empty())
+                settings.midiInputIdentifiers.push_back(element.asString());
+        }
+    }
+
+    const Json& workspaceObject = root["workspace"];
+    if (workspaceObject.isObject()) {
+        settings.workspace.windowX      = workspaceObject["windowX"].asDouble(0.0);
+        settings.workspace.windowY      = workspaceObject["windowY"].asDouble(0.0);
+        settings.workspace.windowWidth  = workspaceObject["windowWidth"].asDouble(0.0);
+        settings.workspace.windowHeight = workspaceObject["windowHeight"].asDouble(0.0);
+        settings.workspace.activeEditor = static_cast<int>(workspaceObject["activeEditor"].asInt(0));
+        settings.workspace.songMode     = workspaceObject["songMode"].asBool(false);
+    }
+
+    const Json& roots = root["browser"]["roots"];
+    if (roots.isArray()) {
+        for (const Json& element : roots.elements())
+            if (element.isString() && !element.asString().empty())
+                settings.browser.roots.push_back(element.asString());
+    }
+
+    const Json& starred = root["browser"]["favourites"];
+    if (starred.isArray()) {
+        for (const Json& element : starred.elements())
+            if (element.isString() && !element.asString().empty())
+                settings.browser.favourites.push_back(element.asString());
+    }
+
+    settings.browser.seeded = root["browser"]["seeded"].asBool(false);
+
+    const Json& recent = root["recentProjects"];
+    if (recent.isArray()) {
+        for (const Json& element : recent.elements()) {
+            if (element.isString() && !element.asString().empty())
+                settings.recentProjects.push_back(element.asString());
+        }
+
+        if (settings.recentProjects.size() > maximumRecentProjects)
+            settings.recentProjects.resize(maximumRecentProjects);
+    }
+
+    return settings;
+}
+
+bool AppSettings::save(const std::filesystem::path& file) const
+{
+    if (file.empty())
+        return false;
+
+    // Written beside the target and renamed over it: a crash midway through
+    // must not leave a truncated preferences file that the next launch then
+    // reads as "no preferences at all".
+    const std::filesystem::path temporary = std::filesystem::path{file}.concat(".tmp");
+
+    {
+        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+        if (!stream)
+            return false;
+
+        stream << toJson();
+        if (!stream)
+            return false;
+    }
+
+    std::error_code failed;
+    std::filesystem::rename(temporary, file, failed);
+    if (failed) {
+        std::filesystem::remove(temporary, failed);
+        return false;
+    }
+
+    return true;
+}
+
+AppSettings AppSettings::load(const std::filesystem::path& file)
+{
+    std::ifstream stream(file, std::ios::binary);
+    if (!stream)
+        return AppSettings{};
+
+    std::ostringstream text;
+    text << stream.rdbuf();
+
+    return fromJson(text.str());
+}
+
+} // namespace incdaw::app

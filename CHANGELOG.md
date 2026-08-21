@@ -6,6 +6,84 @@ public version yet.
 
 ---
 
+## [Unreleased] — the workspace
+
+The panes that were missing around the editors: settings, a browser,
+command search, a workspace that survives quitting, and a tempo that can
+be changed without editing a file.
+
+### Phase 21 — Workspace, browser and settings — 2026-08-21
+
+**Added**
+
+- `app/AppSettings` and a Settings window (⌘,): output and input device,
+  sample rate, block size with its latency spelled out per option, and
+  which MIDI sources to connect. Applying reopens the device and the MIDI
+  client and reports what the device actually granted, which is not always
+  what was asked for. Settings live in their own versioned file
+  (`~/Library/Application Support/INCDAW/settings.json`, D-034); every
+  field degrades to a default and hostile values clamp.
+- **MIDI input now reaches the running application.** `engine::MidiInput`
+  existed and was tested, but nothing in the shell ever opened a
+  `platform::MidiDevice` — a keyboard plugged into the Mac reached CoreMIDI
+  and stopped there. The shell opens the configured sources at launch (an
+  empty list means every source) and reconnects them on Apply.
+- `app/BrowserModel` and the Browser pane (⌘B): libraries, folder
+  navigation, ranked search across roots, favourites, and file kinds
+  classified by extension. Everything is bounded — search caps depth and
+  results and says when it truncated — because a sample library is
+  routinely a hundred thousand files. An `.incdaw` package lists as a
+  project, not as a folder to walk into.
+- Double-clicking in the browser loads a sample onto the selected channel,
+  imports a MIDI file, or opens a project, by kind. Dragging an audio file
+  onto the Channel Rack loads it onto the row it lands on, or creates a
+  channel for it below the last one — from the browser or from the Finder,
+  through the same handler.
+- `app/commands/MacroCommand`: several commands as one undo entry, with
+  children built lazily so a step can target an entity the previous step
+  minted. The drop-a-sample-into-empty-space gesture is one undo, not two.
+- Command search (⌘K): the menu bar is walked rather than duplicated, so
+  every action is listed with its own title and shortcut and cannot drift
+  from the menu; registered project actions and undo/redo join it. Ranked,
+  so "mix" offers the Mixer before "Import MIDI".
+- Project actions registered by id at last (`channel.add`, `pattern.add`,
+  `track.add`) — the registry's action table was empty in the running
+  application until now (CLAUDE.md §26).
+- `app/commands/TempoCommands`: the project tempo and time signature are
+  editable, reversible and merge across a drag. Toolbar fields for both.
+  Later tempo changes survive an edit to the base tempo; a hostile tempo
+  clamps rather than producing a timeline that never advances.
+- Workspace persistence: window frame (only if it still lands on an
+  attached screen), active editor and transport mode are restored at
+  launch. File ▸ Open Recent, with entries on unmounted volumes skipped
+  rather than forgotten.
+
+**Changed**
+
+- The audio device is opened from the settings rather than from hardcoded
+  constants, and recording's on-demand input open follows the same
+  configuration.
+- `CommandRegistry::undoName`'s documentation matched neither the code nor
+  the callers; the comment was wrong, not the behaviour.
+
+**Known**
+
+- Changing tempo while the transport rolls costs an audible gap: the
+  device is stopped around the tempo-map swap rather than racing the audio
+  thread (D-035). The lock-free swap that removes the gap is the recorded
+  follow-up.
+- Browser preview (CLAUDE.md §19) is not implemented: playing a sample
+  from the browser needs a preview path in the render graph, which is
+  engine work rather than UI work.
+
+**Tests**
+
+- 522 cases, 1,335,935 assertions, green in Debug; layering test green.
+  New: `AppSettingsTests`, `BrowserTests`, `TempoCommandTests`, and macro
+  cases in `CommandTests`.
+
+---
+
 ## [0.9.0] — 2026-08-16 — the core is complete
 
 Every engineering phase of the roadmap (0–20) is done: the first

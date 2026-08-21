@@ -1,6 +1,8 @@
 #include "ui/macos/ChannelRackView.h"
 
+#include "app/BrowserModel.h"
 #include "app/ChannelRackModel.h"
+#include "app/commands/MacroCommand.h"
 #include "app/CommandRegistry.h"
 #include "app/commands/ChannelCommands.h"
 #include "app/commands/SamplerCommands.h"
@@ -12,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -69,6 +72,11 @@ enum class RackDrag { none, volume, paintSteps };
     project::EntityId _dragChannel;
     BOOL              _paintOn;
     int               _lastPaintedStep;
+
+    /// Row a file is hovering over during a drag, or `noRow` for the add row.
+    /// Drawn as a highlight so a drop lands where the user aimed it.
+    std::size_t _dropRow;
+    BOOL        _dropActive;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -85,6 +93,12 @@ enum class RackDrag { none, volume, paintSteps };
     _drag         = RackDrag::none;
     _playheadTick = -1;
     _lastPaintedStep = -1;
+    _dropRow      = app::ChannelRackModel::noRow;
+    _dropActive   = NO;
+
+    // Samples arrive by drag, from the browser or from the Finder — the same
+    // pasteboard type, so one handler serves both.
+    [self registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
 
     return self;
 }
@@ -190,6 +204,138 @@ enum class RackDrag { none, volume, paintSteps };
     fill(addRow, grey(0.13));
     drawText(@"＋  Add channel", {addRow.x + layout.padding, addRow.y + 6.0,
                                   addRow.width, addRow.height}, grey(0.55), 12.0);
+
+    // Where a dragged file would land. Without it a drop is a guess, and a
+    // sample loaded onto the wrong channel is an undo the user has to notice
+    // first.
+    if (_dropActive) {
+        auto target = _model->rowRect(_dropRow == app::ChannelRackModel::noRow ? channels.size()
+                                                                               : _dropRow);
+        target.width = self.bounds.size.width;
+        fill(target, [NSColor colorWithCalibratedRed:0.55 green:0.85 blue:0.65 alpha:0.30]);
+    }
+}
+
+// ── Dropping a sample ────────────────────────────────────────────────────────
+//
+// The browser drags a file URL and so does the Finder, so one handler serves
+// both. Dropping onto a channel loads the sample there; dropping below the last
+// one adds a channel for it — a single gesture, and therefore a single undo
+// entry (app/commands/MacroCommand.h).
+
+- (NSString*)audioPathFromDrag:(id<NSDraggingInfo>)info
+{
+    NSArray* urls = [info.draggingPasteboard
+        readObjectsForClasses:@[ [NSURL class] ]
+                      options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+
+    if (urls.count == 0)
+        return nil;
+
+    NSURL* url = urls.firstObject;
+    if (![url isKindOfClass:[NSURL class]] || !url.isFileURL)
+        return nil;
+
+    // Classified by the browser's own rule, so what the rack accepts and what
+    // the browser shows as audio can never drift apart.
+    if (app::BrowserModel::kindOf(std::filesystem::path{url.path.UTF8String})
+        != app::BrowserItemKind::audio)
+        return nil;
+
+    return url.path;
+}
+
+- (std::size_t)dropRowForInfo:(id<NSDraggingInfo>)info
+{
+    const NSPoint point = [self convertPoint:info.draggingLocation fromView:nil];
+    const auto    hit   = _model->hitTest([self channelCount], [self currentPattern], point.x, point.y);
+
+    return hit.row;
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender
+{
+    return [self draggingUpdated:sender];
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender
+{
+    if ([self audioPathFromDrag:sender] == nil) {
+        [self clearDropFeedback];
+        return NSDragOperationNone;
+    }
+
+    _dropActive = YES;
+    _dropRow    = [self dropRowForInfo:sender];
+    [self setNeedsDisplay:YES];
+
+    return NSDragOperationCopy;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)sender
+{
+    (void)sender;
+    [self clearDropFeedback];
+}
+
+- (void)draggingEnded:(id<NSDraggingInfo>)sender
+{
+    (void)sender;
+    [self clearDropFeedback];
+}
+
+- (void)clearDropFeedback
+{
+    if (!_dropActive)
+        return;
+
+    _dropActive = NO;
+    _dropRow    = app::ChannelRackModel::noRow;
+    [self setNeedsDisplay:YES];
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender
+{
+    NSString* path = [self audioPathFromDrag:sender];
+    [self clearDropFeedback];
+
+    if (path == nil)
+        return NO;
+
+    const std::size_t row = [self dropRowForInfo:sender];
+
+    if (row != app::ChannelRackModel::noRow && row < _project->channels().size()) {
+        const project::EntityId channelId = _project->channels()[row].id;
+
+        [self commit:std::make_unique<app::LoadSampleCommand>(channelId, path.UTF8String)];
+
+        if (self.onSelectChannel != nil)
+            self.onSelectChannel(channelId.value());
+
+        return YES;
+    }
+
+    // Below the rack: a new channel named after the file, with the sample on
+    // it. Two commands, one gesture, one undo.
+    const std::string name = std::filesystem::path{path.UTF8String}.stem().string();
+
+    auto  add    = std::make_unique<app::AddChannelCommand>(name);
+    auto* added  = add.get();
+    auto  gesture = std::make_unique<app::MacroCommand>("channel.dropSample", "Load Sample");
+
+    gesture->add(std::move(add));
+
+    const std::string filePath = path.UTF8String;
+    gesture->addStep([added, filePath](project::Project&) -> app::CommandPtr {
+        return std::make_unique<app::LoadSampleCommand>(added->channelId(), filePath);
+    });
+
+    [self commit:std::move(gesture)];
+
+    if (self.onSelectChannel != nil)
+        self.onSelectChannel(added->channelId().value());
+
+    return YES;
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────

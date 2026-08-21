@@ -123,17 +123,21 @@ target_link_libraries(incdaw_project
 # ── app/ : command registry, undo, session ────────────────────────────────────
 add_library(incdaw_app STATIC
     app/Version.cpp
+    app/AppSettings.cpp
+    app/BrowserModel.cpp
     app/AutomationWriteSession.cpp
     app/CommandRegistry.cpp
     app/PianoRollModel.cpp
     app/ChannelRackModel.cpp
     app/PlaylistModel.cpp
+    app/commands/MacroCommand.cpp
     app/commands/NoteCommands.cpp
     app/commands/ChannelCommands.cpp
     app/commands/MidiMappingCommands.cpp
     app/commands/SamplerCommands.cpp
     app/commands/PatternCommands.cpp
     app/commands/StepCommands.cpp
+    app/commands/TempoCommands.cpp
     app/commands/TrackCommands.cpp
     app/commands/ClipCommands.cpp
     app/commands/MixerCommands.cpp
@@ -156,7 +160,10 @@ if(APPLE)
         ui/macos/PatternListView.mm
         ui/macos/PlaylistView.mm
         ui/macos/MixerView.mm
-        ui/macos/AudioEditorView.mm)
+        ui/macos/AudioEditorView.mm
+        ui/macos/SettingsWindow.mm
+        ui/macos/BrowserView.mm
+        ui/macos/CommandPalette.mm)
     # incdaw_plugins is linked directly: the shell owns the plugin registry and
     # the instance manager, and injects the insert factory into the graph
     # compiler (docs/DECISIONS.md D-028). project/ deliberately does not link
