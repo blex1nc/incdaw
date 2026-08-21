@@ -16,12 +16,15 @@
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+#include "app/AppSettings.h"
 #include "app/AutomationWriteSession.h"
+#include "app/BrowserModel.h"
 #include "app/CommandRegistry.h"
 #include "app/Version.h"
 #include "app/commands/MidiMappingCommands.h"
 #include "app/commands/RecordingCommands.h"
 #include "engine/AudioEngine.h"
+#include "platform/MidiDevice.h"
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
 #include "plugins/PluginRegistry.h"
@@ -34,12 +37,21 @@
 #include "project/ProjectGraphCompiler.h"
 #include "project/RecordingSession.h"
 #include "app/commands/AudioEditCommands.h"
+#include "app/commands/ChannelCommands.h"
+#include "app/commands/MacroCommand.h"
+#include "app/commands/SamplerCommands.h"
+#include "app/commands/PatternCommands.h"
+#include "app/commands/TempoCommands.h"
+#include "app/commands/TrackCommands.h"
+#include "ui/macos/BrowserView.h"
+#include "ui/macos/CommandPalette.h"
 #include "ui/macos/AudioEditorView.h"
 #include "ui/macos/ChannelRackView.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
 #include "ui/macos/MixerView.h"
 #include "ui/macos/PlaylistView.h"
+#include "ui/macos/SettingsWindow.h"
 
 #include <chrono>
 #include <cstdio>
@@ -107,6 +119,13 @@ std::filesystem::path incdawSupportDirectory()
 @property (strong) INCDAWChannelRackView*   channelRack;
 @property (strong) INCDAWPatternListView*   patternList;
 @property (strong) NSTextField*             statusField;
+@property (strong) INCDAWSettingsWindow*    settingsWindow;
+@property (strong) INCDAWBrowserView*       browser;
+@property (strong) NSMenu*                  recentMenu;
+@property (strong) INCDAWCommandPalette*    palette;
+@property (strong) NSTextField*             tempoField;
+@property (strong) NSTextField*             signatureField;
+@property (strong) NSSplitView*             workspaceSplit;
 @end
 
 @implementation INCDAWAppDelegate {
@@ -176,6 +195,31 @@ std::filesystem::path incdawSupportDirectory()
     /// Open; Save falls back to Save As while it is.
     std::filesystem::path _projectPath;
 
+    /// Preferences that belong to the machine rather than to the project:
+    /// which interface plays, at which rate and block size, which MIDI sources
+    /// are connected (app/AppSettings.h). Loaded before the device opens.
+    app::AppSettings      _settings;
+    std::filesystem::path _settingsPath;
+
+    /// What the device is currently open with. Kept because reopening it —
+    /// around a tempo-map swap, say — must not silently change the format the
+    /// session has been running at.
+    platform::AudioDeviceConfig _activeConfig;
+
+    /// The browser's libraries, favourites and search (app/BrowserModel.h).
+    /// Owned here rather than by the view, because the shell is what persists
+    /// it and what decides what opening a file means.
+    app::BrowserModel _browserModel;
+
+    /// The MIDI client. Owned by the shell because the settings window decides
+    /// which sources it connects to; the engine only receives the messages.
+    std::unique_ptr<platform::MidiDevice> _midiDevice;
+    NSString*                             _lastMidiError;
+
+    /// What the settings window says instead of the device line: a refused
+    /// device, or a change that a running take is holding up.
+    NSString* _lastSettingsMessage;
+
     /// The scanned plugin catalogue as menu fodder, built once at launch.
     NSArray<NSDictionary*>* _availableInserts;
 
@@ -199,8 +243,18 @@ std::filesystem::path incdawSupportDirectory()
     // binary at all, because startup time must not scale with the size of a
     // plugin collection (docs/PLUGIN_HOST.md §3). A missing file is the normal
     // first-run state, not an error.
-    if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty())
+    if (const std::filesystem::path support = incdawSupportDirectory(); !support.empty()) {
         (void)_pluginRegistry.load(support / "plugins.tsv");
+
+        // Read before the device opens: the settings file is what decides
+        // which device that is. A missing or unreadable file is the normal
+        // first run and yields the same defaults the shell used to hardcode.
+        _settingsPath = support / "settings.json";
+        _settings     = app::AppSettings::load(_settingsPath);
+    }
+
+    [self adoptBrowserSettings];
+    [self registerActions];
 
     _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
     _parameters      = project::ParameterRegistry::withBuiltins();
@@ -254,7 +308,28 @@ std::filesystem::path incdawSupportDirectory()
 
     self.window.title = @"INCDAW — Pattern 1";
     self.window.backgroundColor = [NSColor colorWithCalibratedWhite:0.10 alpha:1.0];
-    [self.window center];
+
+    // Where the window was left. A DAW window is arranged around the work —
+    // second display, particular height — and re-centring it every launch
+    // undoes that arrangement daily.
+    const app::AppSettings::Workspace& saved = _settings.workspace;
+    if (saved.windowWidth > 200.0 && saved.windowHeight > 200.0) {
+        const NSRect restored = NSMakeRect(saved.windowX, saved.windowY,
+                                           saved.windowWidth, saved.windowHeight);
+
+        // Only if it still lands on a screen: a window restored onto a display
+        // that is no longer attached is a window the user cannot reach.
+        BOOL visible = NO;
+        for (NSScreen* screen in [NSScreen screens])
+            visible = visible || NSIntersectsRect(restored, screen.visibleFrame);
+
+        if (visible)
+            [self.window setFrame:restored display:NO];
+        else
+            [self.window center];
+    } else {
+        [self.window center];
+    }
 
     NSView* content = self.window.contentView;
 
@@ -262,6 +337,7 @@ std::filesystem::path incdawSupportDirectory()
     constexpr CGFloat toolbarHeight = 30.0;
     constexpr CGFloat listWidth     = 150.0;
     constexpr CGFloat rackHeight    = 220.0;
+    constexpr CGFloat browserWidth  = 210.0;
 
     const NSRect body = NSMakeRect(0, statusHeight, frame.size.width,
                                    frame.size.height - statusHeight - toolbarHeight);
@@ -379,16 +455,34 @@ std::filesystem::path incdawSupportDirectory()
     [editors addSubview:editorContainer];
     [editors addSubview:rackScroll];
 
+    // The browser sits outside the project: it is the one pane that shows the
+    // file system rather than the song, which is why it is leftmost and why it
+    // survives switching editors.
+    self.browser = [[INCDAWBrowserView alloc]
+        initWithFrame:NSMakeRect(0, 0, browserWidth, body.size.height)
+              browser:&_browserModel];
+
+    self.browser.autoresizingMask = NSViewHeightSizable;
+
+    __weak INCDAWAppDelegate* weakSelfForBrowser = self;
+    self.browser.onActivateFile    = ^(NSString* path) { [weakSelfForBrowser openBrowsedFile:path]; };
+    self.browser.onLibraryChanged  = ^{ [weakSelfForBrowser storeBrowserSettings]; };
+    self.browser.onTransportToggle = ^{ [weakSelfForBrowser toggleTransport]; };
+
     NSSplitView* workspace = [[NSSplitView alloc] initWithFrame:body];
     workspace.vertical         = YES;
     workspace.dividerStyle     = NSSplitViewDividerStyleThin;
     workspace.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [workspace addSubview:self.browser];
     [workspace addSubview:listScroll];
     [workspace addSubview:editors];
 
+    self.workspaceSplit = workspace;
+
     [content addSubview:workspace];
 
-    [workspace setPosition:listWidth ofDividerAtIndex:0];
+    [workspace setPosition:browserWidth ofDividerAtIndex:0];
+    [workspace setPosition:browserWidth + listWidth ofDividerAtIndex:1];
     [editors setPosition:body.size.height - rackHeight ofDividerAtIndex:0];
 
     [workspace adjustSubviews];
@@ -410,11 +504,63 @@ std::filesystem::path incdawSupportDirectory()
     self.transportModeSelector.selectedSegment = 0;
     self.transportModeSelector.frame = NSMakeRect(340, frame.size.height - toolbarHeight + 3, 150, 24);
 
+    // Tempo and time signature. Until these existed the tempo map could only
+    // be set by loading a project — the model carried it and the engine
+    // honoured it, but nothing in the application could change it.
+    NSTextField* tempoLabel = [NSTextField labelWithString:@"BPM"];
+    tempoLabel.frame     = NSMakeRect(505, frame.size.height - toolbarHeight + 6, 32, 18);
+    tempoLabel.font      = [NSFont systemFontOfSize:11.0];
+    tempoLabel.textColor = [NSColor colorWithCalibratedWhite:0.55 alpha:1.0];
+    tempoLabel.autoresizingMask = NSViewMinYMargin;
+    [content addSubview:tempoLabel];
+
+    self.tempoField = [[NSTextField alloc]
+        initWithFrame:NSMakeRect(537, frame.size.height - toolbarHeight + 4, 62, 22)];
+    self.tempoField.font      = [NSFont monospacedDigitSystemFontOfSize:11.0
+                                                                 weight:NSFontWeightRegular];
+    self.tempoField.alignment = NSTextAlignmentRight;
+    self.tempoField.target    = self;
+    self.tempoField.action    = @selector(tempoEdited:);
+    self.tempoField.autoresizingMask = NSViewMinYMargin;
+    [content addSubview:self.tempoField];
+
+    NSTextField* signatureLabel = [NSTextField labelWithString:@"Sig"];
+    signatureLabel.frame     = NSMakeRect(609, frame.size.height - toolbarHeight + 6, 24, 18);
+    signatureLabel.font      = [NSFont systemFontOfSize:11.0];
+    signatureLabel.textColor = [NSColor colorWithCalibratedWhite:0.55 alpha:1.0];
+    signatureLabel.autoresizingMask = NSViewMinYMargin;
+    [content addSubview:signatureLabel];
+
+    self.signatureField = [[NSTextField alloc]
+        initWithFrame:NSMakeRect(633, frame.size.height - toolbarHeight + 4, 52, 22)];
+    self.signatureField.font      = [NSFont monospacedDigitSystemFontOfSize:11.0
+                                                                     weight:NSFontWeightRegular];
+    self.signatureField.alignment = NSTextAlignmentCenter;
+    self.signatureField.target    = self;
+    self.signatureField.action    = @selector(signatureEdited:);
+    self.signatureField.autoresizingMask = NSViewMinYMargin;
+    [content addSubview:self.signatureField];
+
+    [self refreshTempoFields];
+
     self.editorSelector.autoresizingMask        = NSViewMinYMargin;
     self.transportModeSelector.autoresizingMask = NSViewMinYMargin;
 
     [content addSubview:self.editorSelector];
     [content addSubview:self.transportModeSelector];
+
+    // The pane and the mode the session was left in. Applied through the same
+    // selectors the user would have clicked, so nothing can restore into a
+    // state the UI cannot reach.
+    if (_settings.workspace.activeEditor > 0 && _settings.workspace.activeEditor < 4)
+        [self showEditorAtSegment:_settings.workspace.activeEditor];
+
+    self.editorSelector.selectedSegment = _settings.workspace.activeEditor;
+
+    if (_settings.workspace.songMode) {
+        _songMode = YES;
+        self.transportModeSelector.selectedSegment = 1;
+    }
 
     self.statusField = [NSTextField labelWithString:@""];
     self.statusField.frame = NSMakeRect(10, 4, frame.size.width - 20, statusHeight - 8);
@@ -829,19 +975,622 @@ std::filesystem::path incdawSupportDirectory()
     [self refreshStatus];
 }
 
+// ── Browser ──────────────────────────────────────────────────────────────────
+
+/// Libraries and favourites from the settings file, with a first-run default.
+///
+/// The default is the user's Music folder rather than nothing: a browser that
+/// opens empty asks the user to configure it before it can be used once, and
+/// the folder every Mac already has is the one place samples are likely to be.
+- (void)adoptBrowserSettings
+{
+    std::vector<std::filesystem::path> roots;
+    for (const std::string& entry : _settings.browser.roots)
+        roots.emplace_back(entry);
+
+    if (roots.empty() && !_settings.browser.seeded) {
+        for (const NSSearchPathDirectory directory : {NSMusicDirectory, NSDownloadsDirectory}) {
+            NSString* path = [NSSearchPathForDirectoriesInDomains(directory, NSUserDomainMask, YES)
+                firstObject];
+
+            if (path != nil)
+                roots.emplace_back(path.UTF8String);
+        }
+    }
+
+    _browserModel.setRoots(roots);
+
+    std::vector<std::filesystem::path> starred;
+    for (const std::string& entry : _settings.browser.favourites)
+        starred.emplace_back(entry);
+
+    _browserModel.setFavourites(starred);
+
+    // Recorded immediately, so that removing every library is a choice that
+    // survives the next launch rather than one the defaults undo.
+    if (!_settings.browser.seeded) {
+        _settings.browser.seeded = true;
+        [self storeBrowserSettings];
+    }
+}
+
+- (void)storeBrowserSettings
+{
+    _settings.browser.roots.clear();
+    for (const app::BrowserModel::Root& root : _browserModel.roots())
+        _settings.browser.roots.push_back(root.path.string());
+
+    _settings.browser.favourites.clear();
+    for (const std::filesystem::path& path : _browserModel.favouritePaths())
+        _settings.browser.favourites.push_back(path.string());
+
+    [self persistSettings];
+}
+
+/// What opening a file in the browser means, by kind.
+///
+/// The browser deliberately does not decide this: loading a sample onto a
+/// channel, importing MIDI and opening a project are application gestures, and
+/// only the shell knows which channel is selected or what happens to the
+/// project that is already open.
+- (void)openBrowsedFile:(NSString*)path
+{
+    const std::filesystem::path file{path.UTF8String};
+
+    switch (app::BrowserModel::kindOf(file)) {
+        case app::BrowserItemKind::audio:
+            [self loadSampleIntoSelectedChannel:path];
+            return;
+
+        case app::BrowserItemKind::midi:
+            [self importMidiFromPath:file];
+            return;
+
+        case app::BrowserItemKind::project:
+            [self openProjectAtPath:file];
+            return;
+
+        case app::BrowserItemKind::folder:
+        case app::BrowserItemKind::preset:
+        case app::BrowserItemKind::other:
+            break;
+    }
+
+    NSBeep();
+}
+
+/// Loads a sample onto the channel the editors are pointed at, or onto a new
+/// channel when the rack is empty — one gesture, one undo entry either way.
+- (void)loadSampleIntoSelectedChannel:(NSString*)path
+{
+    const std::string filePath = path.UTF8String;
+
+    if (const project::Channel* selected =
+            _project->findChannel(project::EntityId{self.pianoRoll.channelIdValue});
+        selected != nullptr) {
+        if (_registry->execute(std::make_unique<app::LoadSampleCommand>(selected->id, filePath)))
+            [self projectEditedFromBrowser];
+
+        return;
+    }
+
+    auto  add     = std::make_unique<app::AddChannelCommand>(
+        std::filesystem::path{filePath}.stem().string());
+    auto* added   = add.get();
+    auto  gesture = std::make_unique<app::MacroCommand>("channel.dropSample", "Load Sample");
+
+    gesture->add(std::move(add));
+    gesture->addStep([added, filePath](project::Project&) -> app::CommandPtr {
+        return std::make_unique<app::LoadSampleCommand>(added->channelId(), filePath);
+    });
+
+    if (!_registry->execute(std::move(gesture)))
+        return;
+
+    [self selectChannel:added->channelId().value()];
+    [self projectEditedFromBrowser];
+}
+
+- (void)projectEditedFromBrowser
+{
+    [self.channelRack setNeedsDisplay:YES];
+    [self.mixer setNeedsDisplay:YES];
+    [self rebuildGraph];
+}
+
+// ── Tempo and time signature ─────────────────────────────────────────────────
+
+- (void)refreshTempoFields
+{
+    const engine::TempoMap&      map       = _project->tempoMap();
+    const engine::TimeSignature  signature = map.timeSignatureAtTick(0);
+
+    self.tempoField.stringValue     = [NSString stringWithFormat:@"%.2f", map.tempoAtTick(0)];
+    self.signatureField.stringValue = [NSString stringWithFormat:@"%d/%d",
+                                                                 signature.numerator,
+                                                                 signature.denominator];
+}
+
+- (void)tempoEdited:(NSTextField*)sender
+{
+    const double typed = sender.doubleValue;
+
+    // Merging, so holding the field and typing several values is one undo
+    // entry rather than one per keystroke that committed.
+    if (_registry->executeMerging(std::make_unique<app::SetProjectTempoCommand>(typed)))
+        [self applyProjectTempo];
+
+    // Rewritten from the model, not from what was typed: the command clamps,
+    // and a field showing 900 while the project plays at 400 is a lie.
+    [self refreshTempoFields];
+    [self refreshStatus];
+}
+
+- (void)signatureEdited:(NSTextField*)sender
+{
+    int numerator   = 0;
+    int denominator = 0;
+
+    if (std::sscanf(sender.stringValue.UTF8String, "%d/%d", &numerator, &denominator) == 2
+        && app::SetTimeSignatureCommand::isValid(numerator, denominator)) {
+        if (_registry->execute(std::make_unique<app::SetTimeSignatureCommand>(numerator, denominator)))
+            [self applyProjectTempo];
+    } else {
+        NSBeep();
+    }
+
+    [self refreshTempoFields];
+}
+
+/// Publishes the project's tempo map to the transport, with the device stopped.
+///
+/// The transport's map is read on the AUDIO THREAD every block, and instrument
+/// and automation nodes hold pointers into it
+/// (engine/instrument/InstrumentNode.h, engine/transport/Transport.h §
+/// tempoMapForEdit). Replacing it while the device runs is a data race, and a
+/// race in the render path is never an acceptable price for avoiding a gap.
+/// A tempo change is a rare, deliberate edit; the device restart it costs is
+/// audible once and correct always.
+///
+/// A lock-free tempo-map swap — the same retire-and-reclaim treatment the
+/// graph already gets — is the engine change that would remove the gap. It is
+/// deliberately not being made here.
+- (void)applyProjectTempo
+{
+    if (!_audioReady || _audio == nullptr)
+        return;
+
+    const engine::Tick position   = _audio->transport().positionInTicks();
+    const BOOL         wasPlaying = _audio->transport().isPlaying();
+
+    if (wasPlaying)
+        _audio->transport().stop();
+
+    _audio->stop();
+    _audio->transport().tempoMapForEdit() = _project->tempoMap();
+
+    std::string error;
+    if (!_audio->start(_activeConfig, error)) {
+        NSLog(@"INCDAW: could not reopen the device after a tempo change: %s", error.c_str());
+        _audioReady     = NO;
+        _lastGraphError = [NSString stringWithFormat:@"audio: %s", error.c_str()];
+        return;
+    }
+
+    _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
+
+    [self rebuildGraph];
+    [self retargetLoop];
+    _audio->transport().seekToTick(position);
+
+    if (wasPlaying)
+        _audio->transport().play();
+
+    [self.playlist setNeedsDisplay:YES];
+    [self.pianoRoll requestRedraw];
+}
+
+// ── Commands ─────────────────────────────────────────────────────────────────
+
+/// Project actions, registered by id.
+///
+/// CLAUDE.md §26: an action addressable by id is one a menu, a shortcut, a
+/// controller mapping, the palette and a future script can all reach without
+/// any of them knowing which view implements it. Until this existed the
+/// registry's action table was empty in the running application — every edit
+/// arrived as a command, but none of them had a name anything could look up.
+- (void)registerActions
+{
+    app::CommandRegistry* registry = _registry.get();
+
+    registry->registerAction({"channel.add", "Add Channel", "Channel Rack", "", [registry] {
+        return std::make_unique<app::AddChannelCommand>(
+            "Channel " + std::to_string(registry->project().channels().size() + 1));
+    }});
+
+    registry->registerAction({"pattern.add", "Add Pattern", "Patterns", "", [registry] {
+        return std::make_unique<app::AddPatternCommand>(
+            "Pattern " + std::to_string(registry->project().patterns().size() + 1));
+    }});
+
+    registry->registerAction({"track.add", "Add Track", "Playlist", "", [registry] {
+        return std::make_unique<app::AddTrackCommand>(
+            "Track " + std::to_string(registry->project().tracks().size() + 1));
+    }});
+}
+
+/// Everything the palette can run, gathered fresh each time it opens.
+///
+/// The menu bar is walked rather than duplicated: an action that has a menu
+/// entry is listed with the same title and the same shortcut, and can never
+/// drift from it. Registered project actions come next, and undo/redo last —
+/// those two are the only entries the palette synthesises, because the Edit
+/// menu's items are handled by whichever pane has focus.
+- (NSArray<INCDAWCommandEntry*>*)paletteEntries
+{
+    NSMutableArray<INCDAWCommandEntry*>* entries = [NSMutableArray array];
+
+    for (NSMenuItem* top in NSApp.mainMenu.itemArray)
+        [self collectMenuItemsOf:top.submenu into:entries category:top.submenu.title];
+
+    for (const app::CommandRegistry::Entry& action : _registry->actions()) {
+        const std::string identifier = action.id;
+
+        __weak INCDAWAppDelegate* weakSelf = self;
+        [entries addObject:[INCDAWCommandEntry
+            entryWithTitle:@(action.displayName.c_str())
+                  category:@(action.category.c_str())
+                  shortcut:@(action.defaultShortcut.c_str())
+                       run:^{ [weakSelf invokeAction:@(identifier.c_str())]; }]];
+    }
+
+    __weak INCDAWAppDelegate* weakUndo = self;
+
+    if (_registry->canUndo()) {
+        [entries addObject:[INCDAWCommandEntry
+            entryWithTitle:[NSString stringWithFormat:@"Undo %s", _registry->undoName().c_str()]
+                  category:@"Edit"
+                  shortcut:@"⌘Z"
+                       run:^{ [weakUndo undoFromPalette]; }]];
+    }
+
+    if (_registry->canRedo()) {
+        [entries addObject:[INCDAWCommandEntry
+            entryWithTitle:[NSString stringWithFormat:@"Redo %s", _registry->redoName().c_str()]
+                  category:@"Edit"
+                  shortcut:@"⇧⌘Z"
+                       run:^{ [weakUndo redoFromPalette]; }]];
+    }
+
+    return entries;
+}
+
+- (void)collectMenuItemsOf:(NSMenu*)menu
+                      into:(NSMutableArray<INCDAWCommandEntry*>*)entries
+                  category:(NSString*)category
+{
+    for (NSMenuItem* item in menu.itemArray) {
+        if (item.isSeparatorItem)
+            continue;
+
+        if (item.submenu != nil) {
+            [self collectMenuItemsOf:item.submenu into:entries category:item.title];
+            continue;
+        }
+
+        // An item with no action does nothing when clicked either; listing it
+        // would offer the user a command that cannot run.
+        if (item.action == nullptr)
+            continue;
+
+        [entries addObject:[INCDAWCommandEntry
+            entryWithTitle:item.title
+                  category:category
+                  shortcut:[self shortcutTextFor:item]
+                       run:^{ [NSApp sendAction:item.action to:item.target from:item]; }]];
+    }
+}
+
+- (NSString*)shortcutTextFor:(NSMenuItem*)item
+{
+    if (item.keyEquivalent.length == 0)
+        return @"";
+
+    NSMutableString* text = [NSMutableString string];
+
+    const NSEventModifierFlags flags = item.keyEquivalentModifierMask;
+    if ((flags & NSEventModifierFlagControl) != 0) [text appendString:@"⌃"];
+    if ((flags & NSEventModifierFlagOption)  != 0) [text appendString:@"⌥"];
+    if ((flags & NSEventModifierFlagShift)   != 0) [text appendString:@"⇧"];
+    if ((flags & NSEventModifierFlagCommand) != 0) [text appendString:@"⌘"];
+
+    // An uppercase key equivalent already implies Shift, which AppKit does not
+    // put in the modifier mask.
+    NSString* key = item.keyEquivalent;
+    if ([key isEqualToString:key.uppercaseString] && ![key isEqualToString:key.lowercaseString]
+        && (flags & NSEventModifierFlagShift) == 0)
+        [text appendString:@"⇧"];
+
+    [text appendString:key.uppercaseString];
+    return text;
+}
+
+- (void)invokeAction:(NSString*)identifier
+{
+    if (_registry->invoke(identifier.UTF8String))
+        [self projectEditedFromBrowser];
+
+    [self.patternList setNeedsDisplay:YES];
+    [self.playlist setNeedsDisplay:YES];
+    [self refreshStatus];
+}
+
+- (void)undoFromPalette
+{
+    if (_registry->undo())
+        [self projectEditedFromBrowser];
+
+    [self.patternList setNeedsDisplay:YES];
+    [self.playlist setNeedsDisplay:YES];
+    [self.pianoRoll requestRedraw];
+    [self refreshStatus];
+}
+
+- (void)redoFromPalette
+{
+    if (_registry->redo())
+        [self projectEditedFromBrowser];
+
+    [self.patternList setNeedsDisplay:YES];
+    [self.playlist setNeedsDisplay:YES];
+    [self.pianoRoll requestRedraw];
+    [self refreshStatus];
+}
+
+- (void)showCommandPalette:(id)sender
+{
+    (void)sender;
+
+    if (self.palette == nil)
+        self.palette = [[INCDAWCommandPalette alloc] init];
+
+    [self.palette showWithEntries:[self paletteEntries] relativeToWindow:self.window];
+}
+
+// ── Workspace and recent projects ────────────────────────────────────────────
+
+- (void)persistSettings
+{
+    if (!_settingsPath.empty())
+        (void)_settings.save(_settingsPath);
+}
+
+/// Records where the window is and what it is showing, so the next launch
+/// resumes rather than resets.
+- (void)captureWorkspace
+{
+    if (self.window == nil)
+        return;
+
+    const NSRect frame = self.window.frame;
+
+    _settings.workspace.windowX      = frame.origin.x;
+    _settings.workspace.windowY      = frame.origin.y;
+    _settings.workspace.windowWidth  = frame.size.width;
+    _settings.workspace.windowHeight = frame.size.height;
+    _settings.workspace.activeEditor = static_cast<int>(self.editorSelector.selectedSegment);
+    _settings.workspace.songMode     = _songMode == YES;
+}
+
+- (void)noteRecentProject:(const std::filesystem::path&)path
+{
+    _settings.noteRecentProject(path);
+    [self persistSettings];
+    [self rebuildRecentMenu];
+}
+
+/// Rebuilds Open Recent from the settings file.
+///
+/// Entries whose project is no longer there are skipped rather than deleted:
+/// an external drive that is not mounted today is mounted tomorrow, and a
+/// menu that forgets a project because a volume was asleep is a menu that
+/// loses work the user still has.
+- (void)rebuildRecentMenu
+{
+    if (self.recentMenu == nil)
+        return;
+
+    [self.recentMenu removeAllItems];
+
+    NSInteger listed = 0;
+    for (const std::string& entry : _settings.recentProjects) {
+        const std::filesystem::path path{entry};
+
+        std::error_code failed;
+        if (!std::filesystem::exists(path, failed) || failed)
+            continue;
+
+        NSMenuItem* item = [self.recentMenu addItemWithTitle:@(path.filename().string().c_str())
+                                                       action:@selector(openRecent:)
+                                                keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @(entry.c_str());
+        item.toolTip           = @(entry.c_str());
+        ++listed;
+    }
+
+    if (listed == 0) {
+        NSMenuItem* empty = [self.recentMenu addItemWithTitle:@"No Recent Projects"
+                                                       action:nil
+                                                keyEquivalent:@""];
+        empty.enabled = NO;
+        return;
+    }
+
+    [self.recentMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* clear = [self.recentMenu addItemWithTitle:@"Clear Menu"
+                                                   action:@selector(clearRecent:)
+                                            keyEquivalent:@""];
+    clear.target = self;
+}
+
+- (void)openRecent:(NSMenuItem*)item
+{
+    [self openProjectAtPath:std::filesystem::path{[item.representedObject UTF8String]}];
+}
+
+- (void)clearRecent:(id)sender
+{
+    (void)sender;
+
+    _settings.recentProjects.clear();
+    [self persistSettings];
+    [self rebuildRecentMenu];
+}
+
+- (void)toggleBrowser:(id)sender
+{
+    (void)sender;
+
+    if (self.browser == nil)
+        return;
+
+    self.browser.hidden = !self.browser.hidden;
+    [self.workspaceSplit adjustSubviews];
+
+    if (!self.browser.hidden)
+        [self.workspaceSplit setPosition:210.0 ofDividerAtIndex:0];
+}
+
+- (void)showSettings:(id)sender
+{
+    (void)sender;
+
+    if (self.settingsWindow == nil) {
+        self.settingsWindow = [[INCDAWSettingsWindow alloc] initWithSettings:&_settings];
+
+        __weak INCDAWAppDelegate* weakSelf = self;
+        self.settingsWindow.onApply        = ^{ [weakSelf applySettings]; };
+        self.settingsWindow.statusProvider = ^NSString*(void) { return [weakSelf deviceStatusLine]; };
+    }
+
+    [self.settingsWindow show];
+}
+
+/// What the device actually granted, which is not always what was asked for.
+///
+/// A device may refuse a rate, round a block size, or hand the callback larger
+/// blocks than the property query reported. Reporting the request back would
+/// look tidy and be a lie; every latency figure here comes from the open
+/// device (docs/AUDIO_ENGINE.md §2).
+- (NSString*)deviceStatusLine
+{
+    if (_lastSettingsMessage != nil)
+        return _lastSettingsMessage;
+
+    if (!_audioReady || _audio == nullptr)
+        return @"Audio device unavailable — the settings below are saved and applied at next launch.";
+
+    const double       rate   = _audio->sampleRate();
+    const std::int64_t buffer = _audio->bufferSize();
+    const double       millis = rate > 0.0 ? (static_cast<double>(buffer) / rate) * 1000.0 : 0.0;
+
+    NSString* midi = _lastMidiError != nil
+                         ? [NSString stringWithFormat:@"  ·  ⚠ %@", _lastMidiError]
+                         : @"";
+
+    return [NSString stringWithFormat:@"%s  ·  %.0f Hz  ·  %lld frames (%.1f ms)  ·  in %lu / out %lu%@",
+                                      _audio->deviceName().c_str(), rate,
+                                      static_cast<long long>(buffer), millis,
+                                      static_cast<unsigned long>(_audio->inputChannels()),
+                                      static_cast<unsigned long>(_audio->outputChannels()),
+                                      midi];
+}
+
+/// Reopens the device and the MIDI client with the settings just applied.
+///
+/// The file is written first and independently of whether the device opens:
+/// someone who selects an interface that is currently asleep must still find
+/// it selected at the next launch.
+- (void)applySettings
+{
+    if (!_settingsPath.empty())
+        (void)_settings.save(_settingsPath);
+
+    if (_recording.isRecording()) {
+        // Restarting the device under a running take would truncate its file.
+        _lastSettingsMessage = @"Stop recording before changing the audio device.";
+        return;
+    }
+
+    _lastSettingsMessage = nil;
+
+    if (_audio == nullptr) {
+        [self startAudio];
+        return;
+    }
+
+    // Captured in ticks, not frames: a sample-rate change redefines what a
+    // frame position means, and the playhead must stay on the same beat.
+    const engine::Tick position  = _audio->transport().positionInTicks();
+    const BOOL         wasPlaying = _audioReady && _audio->transport().isPlaying();
+
+    if (wasPlaying)
+        _audio->transport().stop();
+
+    _audio->stop();
+
+    platform::AudioDeviceConfig config = _settings.audio;
+
+    // Input stays open if it is open now — changing the block size must not
+    // silently drop input monitoring — unless the user chose "None".
+    if (!_settings.openInputAtLaunch && _audio->inputChannels() == 0)
+        config.inputDeviceIdentifier.clear();
+
+    std::string error;
+    if (!_audio->start(config, error)) {
+        NSLog(@"INCDAW: audio device refused the new settings: %s", error.c_str());
+        _lastSettingsMessage = [NSString stringWithFormat:@"⚠ %s", error.c_str()];
+
+        // Fall back to the system default rather than leaving the application
+        // silent: a wrong preference must not cost the user their session.
+        platform::AudioDeviceConfig fallback = app::defaultAudioConfig();
+        std::string                 fallbackError;
+        if (!_audio->start(fallback, fallbackError)) {
+            NSLog(@"INCDAW: audio restart failed: %s", fallbackError.c_str());
+            _audioReady = NO;
+            return;
+        }
+    }
+
+    _audioReady   = YES;
+    _activeConfig = config;
+    _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
+    _audio->transport().seekToTick(position);
+
+    [self openMidiInputs];
+    [self rebuildGraph];
+
+    if (wasPlaying) {
+        [self retargetLoop];
+        _audio->transport().play();
+    }
+}
+
 - (void)startAudio
 {
     _audio = std::make_unique<engine::AudioEngine>();
 
-    platform::AudioDeviceConfig config;
-    config.sampleRate     = 48000.0;
+    // Whatever the user chose last time (app/AppSettings.h). Defaults are the
+    // system default device at 48 kHz and 512 frames — the block size a shared
+    // Bluetooth output can sustain, not the lowest the hardware admits to.
+    platform::AudioDeviceConfig config = _settings.audio;
 
-    // 512 rather than the lowest the hardware allows: this is set on the SHARED
-    // device, and Bluetooth outputs cannot sustain small blocks without
-    // crackling. Latency tuning belongs in audio settings (Phase 18), per
-    // device, not in a hardcoded aggressive default.
-    config.bufferSize     = 512;
-    config.outputChannels = 2;
+    // Recording is opt-in: unless the input was asked for explicitly, the
+    // device opens output-only and arming a take opens it on demand.
+    if (!_settings.openInputAtLaunch)
+        config.inputDeviceIdentifier.clear();
 
     std::string error;
     if (!_audio->start(config, error)) {
@@ -852,14 +1601,52 @@ std::filesystem::path incdawSupportDirectory()
         return;
     }
 
-    _audioReady = YES;
+    _audioReady   = YES;
+    _activeConfig = config;
     _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
 
     NSLog(@"INCDAW: audio started — %s, %.0f Hz, %lld frames",
           _audio->deviceName().c_str(), _audio->sampleRate(),
           static_cast<long long>(_audio->bufferSize()));
 
+    [self openMidiInputs];
     [self rebuildGraph];
+}
+
+/// Connects the configured MIDI sources to the engine's input.
+///
+/// Until this existed, `engine::MidiInput` was fed by nothing but the tests:
+/// a keyboard plugged into the Mac reached CoreMIDI and stopped there, which
+/// made MIDI learn and live playing dead ends in the running application.
+///
+/// An empty identifier list connects every source — what someone who plugs in
+/// a keyboard and presses a key expects, and what the platform layer already
+/// means by an empty list.
+- (void)openMidiInputs
+{
+    if (_audio == nullptr)
+        return;
+
+    if (_midiDevice != nullptr)
+        _midiDevice->close();
+    else
+        _midiDevice = platform::MidiDevice::create();
+
+    if (_midiDevice == nullptr) {
+        _lastMidiError = @"MIDI unavailable";
+        return;
+    }
+
+    std::string error;
+    if (!_midiDevice->open(_settings.midiInputIdentifiers, _audio->midiInput(), error)) {
+        // Not fatal, and deliberately so: a DAW that refuses to open because a
+        // controller is missing is worse than one that plays without it.
+        NSLog(@"INCDAW: MIDI input unavailable: %s", error.c_str());
+        _lastMidiError = [NSString stringWithFormat:@"midi: %s", error.c_str()];
+        return;
+    }
+
+    _lastMidiError = nil;
 }
 
 /// Rebuilds the render graph from the current project and swaps it in.
@@ -1220,8 +2007,13 @@ std::filesystem::path incdawSupportDirectory()
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
         return;
 
-    const auto imported = project::importAsPattern(
-        *_project, std::filesystem::path{panel.URL.path.UTF8String});
+    [self importMidiFromPath:std::filesystem::path{panel.URL.path.UTF8String}];
+}
+
+/// The import itself, reachable from the menu and from the browser.
+- (void)importMidiFromPath:(const std::filesystem::path&)file
+{
+    const auto imported = project::importAsPattern(*_project, file);
 
     if (!imported) {
         NSAlert* alert        = [[NSAlert alloc] init];
@@ -1260,6 +2052,8 @@ std::filesystem::path incdawSupportDirectory()
 
     self.window.title =
         [NSString stringWithFormat:@"INCDAW — %s", _projectPath.stem().string().c_str()];
+
+    [self noteRecentProject:_projectPath];
 }
 
 - (void)openProject:(id)sender
@@ -1274,8 +2068,13 @@ std::filesystem::path incdawSupportDirectory()
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil)
         return;
 
-    const std::filesystem::path chosen{panel.URL.path.UTF8String};
+    [self openProjectAtPath:std::filesystem::path{panel.URL.path.UTF8String}];
+}
 
+/// Opening itself, reachable from the menu, the browser and later the recent
+/// list. The panel is one way in, not the only one.
+- (void)openProjectAtPath:(const std::filesystem::path&)chosen
+{
     if (!project::ProjectFile::isProjectPackage(chosen)) {
         NSAlert* alert        = [[NSAlert alloc] init];
         alert.messageText     = @"Not an INCDAW project";
@@ -1303,6 +2102,7 @@ std::filesystem::path incdawSupportDirectory()
     _registry->clearHistory();
     _projectPath = chosen;
 
+    [self noteRecentProject:chosen];
     [self adoptLoadedProject];
 }
 
@@ -1328,6 +2128,8 @@ std::filesystem::path incdawSupportDirectory()
         _audio->transport().tempoMapForEdit() = _project->tempoMap();
         _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
     }
+
+    [self refreshTempoFields];
 
     [self rebuildGraph];
 
@@ -1413,14 +2215,16 @@ std::filesystem::path incdawSupportDirectory()
 
     _audio->stop();
 
-    platform::AudioDeviceConfig config;
-    config.sampleRate            = 48000.0;
-    config.bufferSize            = 512;
-    config.outputChannels        = 2;
-    config.inputDeviceIdentifier = platform::AudioDeviceConfig::defaultInput;
+    // The configured device, with the input turned on: arming a take is what
+    // opens the microphone when the settings did not open it at launch.
+    platform::AudioDeviceConfig config = _settings.audio;
+    if (config.inputDeviceIdentifier.empty())
+        config.inputDeviceIdentifier = platform::AudioDeviceConfig::defaultInput;
 
     std::string error;
-    if (!_audio->start(config, error)) {
+    if (_audio->start(config, error)) {
+        _activeConfig = config;
+    } else {
         // The input could not open (a Bluetooth HFP microphone at 24 kHz lands
         // here). Reopen without input so playback keeps working, and say why.
         NSLog(@"INCDAW: input unavailable: %s", error.c_str());
@@ -1434,6 +2238,7 @@ std::filesystem::path incdawSupportDirectory()
             return NO;
         }
 
+        _activeConfig = config;
         [self rebuildGraph];
         return NO;
     }
@@ -1659,6 +2464,20 @@ std::filesystem::path incdawSupportDirectory()
     [menuBar addItem:appItem];
 
     NSMenu* appMenu = [[NSMenu alloc] init];
+
+    // Cmd+, — where every macOS application keeps this, and the first place
+    // anyone looks when the audio comes out of the wrong interface.
+    NSMenuItem* settingsItem = [appMenu addItemWithTitle:@"Settings…"
+                                                  action:@selector(showSettings:)
+                                           keyEquivalent:@","];
+    settingsItem.target = self;
+
+    NSMenuItem* paletteItem = [appMenu addItemWithTitle:@"Command Search…"
+                                                 action:@selector(showCommandPalette:)
+                                          keyEquivalent:@"k"];
+    paletteItem.target = self;
+
+    [appMenu addItem:[NSMenuItem separatorItem]];
     [appMenu addItemWithTitle:@"Quit INCDAW" action:@selector(terminate:) keyEquivalent:@"q"];
     appItem.submenu = appMenu;
 
@@ -1670,6 +2489,12 @@ std::filesystem::path incdawSupportDirectory()
 
     NSMenu* fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
     [fileMenu addItemWithTitle:@"Open…" action:@selector(openProject:) keyEquivalent:@"o"];
+
+    NSMenuItem* recentItem = [fileMenu addItemWithTitle:@"Open Recent" action:nil keyEquivalent:@""];
+    self.recentMenu   = [[NSMenu alloc] initWithTitle:@"Open Recent"];
+    recentItem.submenu = self.recentMenu;
+    [self rebuildRecentMenu];
+
     [fileMenu addItem:[NSMenuItem separatorItem]];
     [fileMenu addItemWithTitle:@"Save" action:@selector(saveProject:) keyEquivalent:@"s"];
     [fileMenu addItemWithTitle:@"Save As…" action:@selector(saveProjectAs:) keyEquivalent:@"S"];
@@ -1710,6 +2535,13 @@ std::filesystem::path incdawSupportDirectory()
                                                       action:@selector(showAudioEditor:)
                                                keyEquivalent:@"6"];
     audioEditorItem.target = self;
+
+    // The browser is a pane rather than an editor: it does not replace what is
+    // on screen, it appears beside it, so it toggles instead of switching.
+    NSMenuItem* browserItem = [viewMenu addItemWithTitle:@"Browser"
+                                                  action:@selector(toggleBrowser:)
+                                           keyEquivalent:@"b"];
+    browserItem.target = self;
 
     [viewMenu addItem:[NSMenuItem separatorItem]];
 
@@ -1839,6 +2671,16 @@ std::filesystem::path incdawSupportDirectory()
 
         _audio->stop();
     }
+
+    // The MIDI client delivers on its own thread and holds a pointer to the
+    // engine's input: it must be closed before the engine goes away.
+    if (_midiDevice != nullptr) {
+        _midiDevice->close();
+        _midiDevice.reset();
+    }
+
+    [self captureWorkspace];
+    [self persistSettings];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender

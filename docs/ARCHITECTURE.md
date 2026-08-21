@@ -264,6 +264,30 @@ Metal because it must cull ten thousand notes inside a frame, the rack, the
 pattern list and the playlist are CoreGraphics because they are tens of
 rectangles and mostly text (D-015).
 
+### The panes that are not editors
+
+Three panes show something other than the song, and each keeps that difference
+explicit.
+
+The **browser** (`app::BrowserModel` + `ui/macos/BrowserView`) shows the file
+system. Its model is headless and bounded — listing never recurses, search caps
+depth and result count and reports when it truncated — because a sample library
+is routinely a hundred thousand files across a network volume. It classifies by
+extension and loads nothing itself: what "open this file" means (a sample onto
+a channel, a MIDI import, a project) is the shell's decision, and the shell is
+the only thing that knows which channel is selected.
+
+**Settings** (`app::AppSettings` + `ui/macos/SettingsWindow`) edits the machine,
+not the music: device, sample rate, block size, MIDI sources, window geometry,
+browser libraries. It lives in its own versioned file so a project never carries
+a device id to a Mac that does not have it (D-034).
+
+**Command search** (`ui/macos/CommandPalette`) lists what the application can
+do. It owns no catalogue: the shell walks the menu bar and the registry's action
+table each time it opens, so a command cannot be listed here and missing there.
+That the registry has an action table at all is what makes ids addressable by a
+shortcut, a controller mapping and eventually a script (CLAUDE.md §26).
+
 ### Patterns, tracks and the two transport modes
 
 A channel makes sound; a track holds placements. They are deliberately not the

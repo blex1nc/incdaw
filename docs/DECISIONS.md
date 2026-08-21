@@ -1123,3 +1123,78 @@ is versioned, id-keyed and forward-tolerant.
 
 **Date:** 2026-08-16
 **Status:** ACCEPTED
+
+---
+
+## D-034 — Machine settings live in their own versioned file, never in the project
+
+**Context:** Phase 21 needs an audio/MIDI settings window, and the values
+it edits — output device, sample rate, block size, connected MIDI sources,
+window geometry, browser libraries — have to be stored somewhere. The
+project format is versioned, migrated and tested, and was the obvious
+place to put them.
+
+**Options:**
+
+1. Store device and workspace preferences inside the `.incdaw` project.
+2. A separate `settings.json` in the application support directory, with
+   its own version field and its own reader (`app::AppSettings`).
+
+**Chosen:** option 2.
+
+**Reason:** a project describes the music; settings describe the machine
+it happens to be played on. Putting the interface's device id in the
+project makes that project open silently on the wrong output — or not at
+all — on a second Mac, which is exactly the failure a portable project
+format exists to prevent. The split also lets the settings reader be
+maximally forgiving (every field degrades to a default, hostile values
+clamp) without weakening the project format's strictness.
+
+**Tradeoffs:** two formats to version instead of one, and preferences do
+not travel with a project handed to a collaborator — deliberately. A
+project-scoped override (this song wants 96 kHz) is a separate feature
+and is not implied by this decision.
+
+**Date:** 2026-08-21
+**Status:** ACCEPTED
+
+---
+
+## D-035 — A tempo-map change stops the device rather than racing the audio thread
+
+**Context:** the toolbar's tempo and time-signature fields edit the
+project's `TempoMap`, and the transport holds the map the audio thread
+reads every block. Instrument and automation nodes hold pointers into
+that same object (`engine/instrument/InstrumentNode.h`,
+`engine/automation/AutomationNode.h`), so replacing its contents while a
+graph renders is a data race — and `Transport::tempoMapForEdit` documents
+exactly that.
+
+**Options:**
+
+1. Assign the new map in place and rely on the edit being rare.
+2. Give the tempo map the retire-and-reclaim treatment the render graph
+   already has: an atomically swapped pointer, old maps freed once the
+   block counter proves no callback can hold them.
+3. Stop the device around the swap, restart it with the same config, and
+   restore the transport's musical position.
+
+**Chosen:** option 3, for now.
+
+**Reason:** option 1 is a race in the render path, which the prime
+directive rules out regardless of how rare the edit is. Option 2 is the
+right end state and is a change to the realtime core — it needs its own
+design, its own tests and explicit approval, not a drive-by edit made
+while building a toolbar field. Option 3 is provably correct with the
+machinery that exists: `AudioDevice::stop` guarantees no callback is in
+flight when it returns, the position is captured and restored in TICKS so
+a sample-rate difference cannot move the playhead, and playback resumes
+if it was running.
+
+**Tradeoffs:** changing tempo while playing costs an audible gap of a
+device restart. Acceptable for a deliberate, occasional edit; not
+acceptable for tempo automation or for a tempo fader, which is why option
+2 remains the recorded follow-up.
+
+**Date:** 2026-08-21
+**Status:** ACCEPTED — superseded when the lock-free swap lands

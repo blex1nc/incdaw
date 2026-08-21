@@ -390,6 +390,25 @@ launches INCDAW successfully by the documented procedure.
 
 ---
 
+## Phase 21 — Workspace, browser and settings
+
+The panes around the editors, and the preferences they need. Audio and MIDI
+settings (device, sample rate, block size, connected sources) in their own
+versioned file (D-034); the browser, its libraries, search and favourites;
+drag and drop of samples into the Channel Rack; command search over the whole
+menu bar; project tempo and time signature as reversible commands; window
+geometry, active pane and recent projects restored at launch.
+
+**Exit criterion:** a session can choose its interface, find a sample, drop it
+on a channel, set the tempo and be resumed after a quit — without editing a
+file by hand or rebuilding. ✅ MET (2026-08-21)
+
+Deferred, deliberately: browser preview of audio (needs a preview path in the
+render graph), a lock-free tempo-map swap so tempo changes do not stop the
+device (D-035), and dockable/rearrangeable panels.
+
+---
+
 ## Deliberately out of scope
 
 - **VST2 hosting** — not licensable (D-007)

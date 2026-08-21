@@ -1,6 +1,8 @@
 #include "doctest.h"
 
 #include "app/CommandRegistry.h"
+#include "app/commands/ChannelCommands.h"
+#include "app/commands/MacroCommand.h"
 #include "app/commands/NoteCommands.h"
 
 #include <memory>
@@ -21,6 +23,23 @@ project::MidiEvent note(Tick tick, int key = 60, Tick duration = 480, int veloci
     event.value    = velocity;
     return event;
 }
+
+/// Records the order in which a macro ran its children, and the order in which
+/// it undid them (negated, so the two are distinguishable).
+class OrderCommand final : public Command {
+public:
+    OrderCommand(std::vector<int>& log, int mark) : log_(&log), mark_(mark) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "test.order"; }
+    [[nodiscard]] std::string name() const override { return "Order"; }
+
+    [[nodiscard]] bool execute(project::Project&) override { log_->push_back(mark_); return true; }
+    void undo(project::Project&) override { log_->push_back(-mark_); }
+
+private:
+    std::vector<int>* log_;
+    int               mark_;
+};
 
 /// A project with one channel and one pattern holding `count` notes, one per
 /// beat. Note edits address a (pattern, channel) pair, so a test needs both.
@@ -530,4 +549,109 @@ TEST_CASE("commands targeting a pattern that no longer exists fail safely")
                                                                        1.0)));
 
     CHECK(registry.undoDepth() == 0);
+}
+
+// ── Macros: one gesture, one undo entry ──────────────────────────────────────
+
+TEST_CASE("a macro executes its children in order and undoes them in reverse")
+{
+    project::Project project;
+
+    std::vector<int> order;
+
+    auto macro = std::make_unique<MacroCommand>("test.macro", "Test Macro");
+    macro->add(std::make_unique<OrderCommand>(order, 1));
+    macro->add(std::make_unique<OrderCommand>(order, 2));
+    macro->add(std::make_unique<OrderCommand>(order, 3));
+
+    CHECK(macro->execute(project));
+    CHECK(order == std::vector<int>{1, 2, 3});
+
+    order.clear();
+    macro->undo(project);
+    CHECK(order == std::vector<int>{-3, -2, -1});
+}
+
+TEST_CASE("a macro is one undo entry, named once")
+{
+    project::Project project;
+    CommandRegistry  registry{project};
+
+    auto macro = std::make_unique<MacroCommand>("channel.dropSample", "Load Sample");
+    macro->add(std::make_unique<AddChannelCommand>("Kick"));
+    macro->add(std::make_unique<AddChannelCommand>("Snare"));
+
+    REQUIRE(registry.execute(std::move(macro)));
+    CHECK(project.channels().size() == 2);
+    CHECK(registry.undoDepth() == 1);
+    CHECK(registry.undoName() == "Load Sample");   // the entry names the gesture, once
+
+    CHECK(registry.undo());
+    CHECK(project.channels().empty());
+
+    CHECK(registry.redo());
+    CHECK(project.channels().size() == 2);
+}
+
+TEST_CASE("a later step can target what an earlier one minted")
+{
+    // The drop gesture: add a channel, then act on the channel that command
+    // created. The id does not exist until the first child has run.
+    project::Project project;
+    CommandRegistry  registry{project};
+
+    auto add    = std::make_unique<AddChannelCommand>("Dropped");
+    auto* added = add.get();
+
+    auto macro = std::make_unique<MacroCommand>("test.mint", "Drop");
+    macro->add(std::move(add));
+    macro->addStep([added](project::Project&) -> CommandPtr {
+        return std::make_unique<RenameChannelCommand>(added->channelId(), "Renamed");
+    });
+
+    REQUIRE(registry.execute(std::move(macro)));
+    REQUIRE(project.channels().size() == 1);
+    CHECK(project.channels()[0].name == "Renamed");
+
+    CHECK(registry.undo());
+    CHECK(project.channels().empty());
+
+    // Redo replays the children rather than rebuilding them, so the second
+    // child still addresses the channel the first one restored.
+    CHECK(registry.redo());
+    REQUIRE(project.channels().size() == 1);
+    CHECK(project.channels()[0].name == "Renamed");
+}
+
+TEST_CASE("a macro of no-ops is itself a no-op")
+{
+    project::Project project;
+    CommandRegistry  registry{project};
+
+    auto empty = std::make_unique<MacroCommand>("test.empty", "Nothing");
+    CHECK_FALSE(empty->execute(project));
+
+    auto noops = std::make_unique<MacroCommand>("test.noops", "Nothing");
+    noops->addStep([](project::Project&) -> CommandPtr { return nullptr; });
+    noops->add(std::make_unique<RenameChannelCommand>(EntityId{}, "ghost"));   // no such channel
+
+    CHECK_FALSE(registry.execute(std::move(noops)));
+    CHECK(registry.undoDepth() == 0);
+}
+
+TEST_CASE("children that did nothing are dropped rather than replayed")
+{
+    project::Project project;
+    const EntityId   channelId = project.addChannel("Kick").id;
+
+    auto macro = std::make_unique<MacroCommand>("test.mixed", "Mixed");
+    macro->add(std::make_unique<RenameChannelCommand>(channelId, "Kick"));      // same name: a no-op
+    macro->add(std::make_unique<RenameChannelCommand>(channelId, "Kick 2"));
+
+    CHECK(macro->execute(project));
+    CHECK(macro->childCount() == 1);
+    CHECK(project.channels()[0].name == "Kick 2");
+
+    macro->undo(project);
+    CHECK(project.channels()[0].name == "Kick");
 }
