@@ -27,7 +27,7 @@ constexpr CGFloat dragThreshold = 4.0;
 
 NSPasteboardType const INCDAWPluginPasteboardType = @"com.incdaw.plugin";
 
-@interface INCDAWPluginPickerView () <NSDraggingSource>
+@interface INCDAWPluginPickerView () <NSDraggingSource, NSSearchFieldDelegate>
 @end
 
 @implementation INCDAWPluginPickerView {
@@ -60,6 +60,7 @@ NSPasteboardType const INCDAWPluginPasteboardType = @"com.incdaw.plugin";
     _search.autoresizingMask  = NSViewWidthSizable | NSViewMinYMargin;
     _search.sendsSearchStringImmediately = YES;
     _search.sendsWholeSearchString       = NO;
+    _search.delegate                     = self;
     [self addSubview:_search];
 
     return self;
@@ -170,6 +171,35 @@ NSPasteboardType const INCDAWPluginPasteboardType = @"com.incdaw.plugin";
         return;
 
     self.onChoose(@(entry->plugin.toString().c_str()));
+}
+
+/// Return and the arrow keys, while the caret is in the search field.
+///
+/// Without this they never reach the view: a focused NSTextField owns its
+/// field editor, which answers Return by firing the field's action and
+/// swallowing the key. Typing a filter and pressing Return is the whole point
+/// of the search box, so the keys are routed back here rather than left to
+/// AppKit's default, which is to do nothing visible.
+- (BOOL)control:(NSControl*)control
+               textView:(NSTextView*)textView
+    doCommandBySelector:(SEL)command
+{
+    (void)control;
+    (void)textView;
+
+    if (command == @selector(insertNewline:)) {
+        [self chooseRow:_model->highlight()];
+        return YES;
+    }
+
+    if (command == @selector(moveDown:) || command == @selector(moveUp:)) {
+        _model->moveHighlight(command == @selector(moveDown:) ? 1 : -1);
+        [self revealHighlight];
+        [self setNeedsDisplay:YES];
+        return YES;
+    }
+
+    return NO;
 }
 
 - (void)keyDown:(NSEvent*)event

@@ -20,7 +20,9 @@ public version yet.
   they do (Dynamics, Tone, Modulation, Space, Utility) and every scanned
   plugin below them. Double-click or Return appends to the chain; typing
   filters by name or category; the arrow keys walk the entries and step
-  over the headings.
+  over the headings. Return and the arrows work from inside the search
+  field too — a focused text field owns its field editor and would
+  otherwise swallow both.
 - **Drag a plugin onto the link it should occupy.** A drop between two
   inserts lands between them, in one undo entry. Dragging across the desk
   re-selects the strip under the pointer, so a chain that was not on show
