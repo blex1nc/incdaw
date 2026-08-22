@@ -8,6 +8,33 @@ public version yet.
 
 ## [Unreleased]
 
+### Playlist — folder tracks, and a group that mutes as one — 2026-08-23
+
+- **Folders group tracks.** `TrackType::folder` and `Track::parent` were in
+  the model, serialized, and reachable by nothing. A folder is now created,
+  named, coloured, reparented, collapsed and removed through commands, one
+  undo entry each.
+- **Mute and solo propagate down, in both compilers.** A muted folder
+  silences its group's pattern clips (the arrangement compiler) and its
+  audio tracks (the graph compiler) together; a soloed folder lets the whole
+  group through without flagging a single child, so un-soloing it puts the
+  group back exactly as it was. Mute still beats solo, as it always has.
+- **Collapse is a view, not a mute.** A closed folder's children keep
+  playing. The state is undoable and saved, because it is something the
+  user arranged on purpose.
+- **A folder that is removed does not take its tracks with it.** Its
+  children move up to its own parent; deleting a folder row and deleting
+  eight tracks of work are the same gesture, and only one of them is ever
+  what anyone means.
+- **Reparenting moves the row, not just the link.** A track — or a folder
+  and everything under it — lands directly after its new parent in the
+  track list, because that list is the order the playlist draws. Making a
+  track its own ancestor, or filing one under a track that is not a folder,
+  is refused before it happens.
+- **Project format 1.7.** Tracks gained `collapsed`. A 1.6 file reads back
+  with every folder open, and the grouping it already described starts
+  propagating with no conversion at all.
+
 ### Playlist — a clip can be pinned in place — 2026-08-23
 
 - **Per-clip lock.** `Clip::locked` was the third field the model stored,

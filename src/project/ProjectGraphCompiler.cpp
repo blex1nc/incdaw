@@ -673,7 +673,12 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         for (const Track& track : project.tracks()) {
             if (track.type != TrackType::audio)
                 continue;
-            if (track.muted || (anyTrackSoloed && !track.soloed))
+
+            // The same folder propagation the arrangement compiler applies to
+            // pattern clips, so a folder mutes or solos its audio tracks and
+            // its instrument tracks together.
+            if (trackEffectivelyMuted(project, track)
+                || (anyTrackSoloed && !trackEffectivelySoloed(project, track)))
                 continue;
 
             auto node = std::make_unique<engine::AudioClipNode>();

@@ -57,6 +57,7 @@ add_executable(incdaw_tests
     unit/AudioEditsTests.cpp
     unit/AudioClipEditingTests.cpp
     unit/ClipPropertyTests.cpp
+    unit/FolderTrackTests.cpp
     unit/AutomationClipTests.cpp
     unit/InputMonitorTests.cpp
     unit/LoopRecordingTests.cpp

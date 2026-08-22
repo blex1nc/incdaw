@@ -5,6 +5,7 @@
 #include "project/Model.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -22,10 +23,18 @@ using project::Track;
 
 class AddTrackCommand final : public Command {
 public:
-    explicit AddTrackCommand(std::string name) : name_(std::move(name)) {}
+    /// The type defaults so that every existing caller keeps its meaning; a
+    /// folder is created through the same verb rather than a second command,
+    /// because it is the same entity in the same list.
+    explicit AddTrackCommand(std::string name,
+                             project::TrackType type = project::TrackType::instrument)
+        : name_(std::move(name)), type_(type) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "track.add"; }
-    [[nodiscard]] std::string name() const override { return "Add Track"; }
+    [[nodiscard]] std::string name() const override
+    {
+        return type_ == project::TrackType::folder ? "Add Folder" : "Add Track";
+    }
 
     [[nodiscard]] bool execute(Project& project) override;
     void undo(Project& project) override;
@@ -34,10 +43,11 @@ public:
     [[nodiscard]] EntityId trackId() const noexcept { return track_.id; }
 
 private:
-    std::string name_;
-    Track       track_;
-    std::size_t index_  = 0;
-    bool        minted_ = false;
+    std::string        name_;
+    project::TrackType type_ = project::TrackType::instrument;
+    Track              track_;
+    std::size_t        index_  = 0;
+    bool               minted_ = false;
 };
 
 /// Removes a track and every clip on it.
@@ -45,6 +55,11 @@ private:
 /// The clips go with it: a clip whose track is gone is unreachable in the
 /// playlist and silent on playback, so leaving it behind would be a leak the
 /// user cannot see. Both come back together on undo.
+///
+/// Removing a folder does not remove what was inside it. Its children move up
+/// to its own parent, so closing a group keeps the tracks and loses only the
+/// grouping — deleting a folder row and silently deleting eight tracks of work
+/// are the same gesture, and only one of them is what anyone means.
 class RemoveTrackCommand final : public Command {
 public:
     explicit RemoveTrackCommand(EntityId track) : trackId_(track) {}
@@ -61,10 +76,85 @@ private:
         project::Clip clip;
     };
 
+    struct Reparented {
+        EntityId track;
+        EntityId previousParent;
+    };
+
     EntityId                 trackId_;
     Track                    track_;
     std::size_t              index_ = 0;
     std::vector<RemovedClip> clips_;
+    std::vector<Reparented>  reparented_;
+};
+
+/// Moves a track into a folder, out of one, or between two.
+///
+/// The track (and, for a folder, everything under it) also moves in the track
+/// list to sit directly after its new parent: the playlist draws that list in
+/// order, and a folder whose children are scattered through it is a folder in
+/// name only.
+class SetTrackParentCommand final : public Command {
+public:
+    /// An invalid `parent` moves the track back out to the top level.
+    SetTrackParentCommand(EntityId track, EntityId parent)
+        : trackId_(track), parent_(parent) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "track.setParent"; }
+    [[nodiscard]] std::string name() const override
+    {
+        return parent_.isValid() ? "Move Track Into Folder" : "Move Track Out Of Folder";
+    }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    EntityId trackId_;
+    EntityId parent_;
+
+    EntityId           previousParent_;
+    std::vector<Track> previousOrder_;   ///< the whole list, restored wholesale
+};
+
+/// Opens and closes a folder in the playlist.
+///
+/// Presentation only: the children keep playing either way. It is undoable and
+/// it is saved, because it is a state the user arranged deliberately.
+class SetTrackCollapsedCommand final : public Command {
+public:
+    SetTrackCollapsedCommand(EntityId track, bool collapsed)
+        : trackId_(track), collapsed_(collapsed) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "track.setCollapsed"; }
+    [[nodiscard]] std::string name() const override
+    {
+        return collapsed_ ? "Collapse Folder" : "Expand Folder";
+    }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    EntityId trackId_;
+    bool     collapsed_ = false;
+};
+
+class SetTrackColourCommand final : public Command {
+public:
+    SetTrackColourCommand(EntityId track, std::uint32_t colour)
+        : trackId_(track), colour_(colour) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "track.setColour"; }
+    [[nodiscard]] std::string name() const override { return "Set Track Colour"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    EntityId      trackId_;
+    std::uint32_t colour_         = 0u;
+    std::uint32_t previousColour_ = 0u;
 };
 
 class RenameTrackCommand final : public Command {

@@ -269,6 +269,7 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("muted", track.muted);
         json.set("soloed", track.soloed);
         json.set("height", static_cast<std::int64_t>(track.height));
+        json.set("collapsed", track.collapsed);
         tracks.append(std::move(json));
     }
     document.set("tracks", std::move(tracks));
@@ -648,6 +649,7 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         track.muted           = json["muted"].asBool(false);
         track.soloed          = json["soloed"].asBool(false);
         track.height          = static_cast<int>(json["height"].asInt(64));
+        track.collapsed       = json["collapsed"].asBool(false);
         project.tracks().push_back(std::move(track));
     }
 
@@ -928,6 +930,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // reads back empty, and a mixer node without `stereoWidth` reads back at
     // unity — those projects had no timeline markers and untouched width.
     if (major == 1 && minor == 5) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.6 -> 1.7. Purely additive: `Track::collapsed` is absent from a 1.6
+    // document and reads back false — every folder open, which is how those
+    // projects were last drawn, since 1.6 had no way to close one.
+    if (major == 1 && minor == 6) {
         result.succeeded = true;
         return result;
     }

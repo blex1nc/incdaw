@@ -117,15 +117,17 @@ void expand(const Pattern& pattern, const PatternChannelContent& content,
 ///
 /// A clip whose track has been deleted is silent rather than an error: the
 /// arrangement can outlive a track for as long as an undo entry holds it.
-bool isTrackAudible(const Track* track, bool anySoloed) noexcept
+bool isTrackAudible(const Project& project, const Track* track, bool anySoloed) noexcept
 {
     if (track == nullptr)
         return false;
 
-    if (track->muted)
+    // Folders propagate: a muted folder mutes everything under it, and a
+    // soloed one lets its whole group through without flagging each child.
+    if (trackEffectivelyMuted(project, *track))
         return false;
 
-    return !anySoloed || track->soloed;
+    return !anySoloed || trackEffectivelySoloed(project, *track);
 }
 
 } // namespace
@@ -167,7 +169,7 @@ std::vector<engine::SequencedNote> compileArrangement(const Project& project, En
         if (clip.type != ClipType::pattern || clip.muted)
             continue;
 
-        if (!isTrackAudible(project.findTrack(clip.track), anyTrackSoloed))
+        if (!isTrackAudible(project, project.findTrack(clip.track), anyTrackSoloed))
             continue;
 
         const Pattern* pattern = project.findPattern(clip.source);

@@ -84,6 +84,8 @@ requires a migration step.
 | 1.3 | 14 | Channels gained `samplerZones[]`, the builtin sampler's program — each zone names an audio asset by id plus key/velocity range, slice, sustain loop, crossfade, reverse and gain. Additive. |
 | 1.4 | 16 | The project gained `midiMappings[]` — hardware controls bound to parameters by registry key and target entity, with a normalised (possibly inverted) output range. Additive. |
 | 1.5 | UI build-out 4 | Channels gained `instrumentParameters[]` — stored instrument parameter values ({id, value}, plain units), applied through the instrument's sink at every compile (D-034). Additive. |
+| 1.6 | FL2026 P3/P5 | The project gained `markers[]` — named musical positions with an optional length — and mixer nodes gained `stereoWidth`. Additive. |
+| 1.7 | TRACK B / B4 | Tracks gained `collapsed`, whether a folder track hides its children. `type` has always serialized as an integer and `parent` has always been written, so folder tracks themselves need no conversion. Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -125,6 +127,19 @@ node's volume) is kept permanently.
 empty — those instruments played at their defaults and still do.
 `tests/fixtures/v1.5/Fixture.incdaw` (frozen: a sampler channel carrying two
 stored parameter values) is kept permanently.
+
+**Reading a 1.5 file.** Purely additive: no `markers`, read back empty, and a
+mixer node without `stereoWidth` reads back at unity.
+`tests/fixtures/v1.6/Fixture.incdaw` (frozen: one marker and one region) is
+kept permanently.
+
+**Reading a 1.6 file.** Purely additive: no `collapsed`, read back false —
+every folder open, which is how those projects were last drawn, because 1.6
+had no way to close one. The grouping itself is not new: a 1.6 file that named
+a folder in a track's `parent` gets that folder's mute and solo propagation
+under 1.7 without any conversion. `tests/fixtures/v1.7/Fixture.incdaw` (frozen:
+a collapsed folder holding an instrument track and an audio track) is kept
+permanently.
 
 ---
 

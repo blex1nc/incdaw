@@ -240,6 +240,14 @@ struct Track {
     bool          soloed   = false;
     int           height   = 64;   ///< UI row height, persisted with the project
 
+    /// Whether a folder track hides its children.
+    ///
+    /// Presentation, not signal: a collapsed folder's children still play, and
+    /// the compilers never read this. It persists with the project because a
+    /// song reopened with every folder thrown open is a song the user has to
+    /// tidy up before working, which is not what they saved.
+    bool          collapsed = false;
+
     [[nodiscard]] friend bool operator==(const Track&, const Track&) = default;
 };
 
@@ -556,5 +564,39 @@ private:
 
     EntityId master_;
 };
+
+// ── Folder tracks ─────────────────────────────────────────────────────────────
+//
+// A folder is a track like any other — same vector, same ids — that carries no
+// clips and whose `parent` link the tracks under it point at. Every walk up the
+// chain below stops at a parent that does not resolve, so a dangling id is a
+// root rather than a crash, and every walk is bounded by the track count, so a
+// cycle that survived the commands' refusal cannot hang the compiler.
+
+/// True when `track` or any folder above it is muted.
+[[nodiscard]] bool trackEffectivelyMuted(const Project& project, const Track& track) noexcept;
+
+/// True when `track` or any folder above it is soloed.
+///
+/// Soloing a folder is how a whole group is soloed: the children need no flag
+/// of their own, and un-soloing the folder puts the group back exactly as it
+/// was rather than leaving a trail of flags behind.
+[[nodiscard]] bool trackEffectivelySoloed(const Project& project, const Track& track) noexcept;
+
+/// True when a collapsed folder above `track` hides it from the playlist.
+///
+/// Presentation only. A hidden track's clips still compile and still play —
+/// collapsing a folder tidies a view, it does not mute a group.
+[[nodiscard]] bool trackHidden(const Project& project, const Track& track) noexcept;
+
+/// True when making `track` a child of `parent` would close a loop.
+///
+/// Also true when they are the same track. Checked before the reparent rather
+/// than defended against afterwards: a cycle in the tree is a corrupt project,
+/// and the only honest moment to refuse one is before it exists.
+[[nodiscard]] bool trackWouldCycle(const Project& project, EntityId track, EntityId parent) noexcept;
+
+/// Every track under `folder`, at any depth, in `tracks()` order.
+[[nodiscard]] std::vector<EntityId> tracksUnder(const Project& project, EntityId folder);
 
 } // namespace incdaw::project

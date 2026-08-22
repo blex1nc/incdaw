@@ -40,7 +40,13 @@ inline constexpr int projectFormatMajor = 1;
 /// named musical positions with an optional length — and a mixer node carries
 /// stereo separation. Additive: earlier files have neither and read back with
 /// no markers and untouched width.
-inline constexpr int projectFormatMinor = 6;
+///
+/// 1.7 (TRACK B / B4): a track carries whether it is collapsed. `TrackType`
+/// has always serialized as an integer and `Track::parent` has always been
+/// written, so folder tracks themselves need no conversion — a 1.6 file simply
+/// has no `collapsed` field and reads back with every folder open, which is
+/// the state those projects were last seen in.
+inline constexpr int projectFormatMinor = 7;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

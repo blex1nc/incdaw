@@ -622,4 +622,87 @@ bool operator==(const Project& a, const Project& b)
         && a.master_ == b.master_;
 }
 
+// ── Folder tracks ─────────────────────────────────────────────────────────────
+
+namespace {
+
+/// Walks up the parent chain, calling `predicate` on each track including the
+/// one it starts at, and stops at the first true.
+///
+/// The step budget is the track count: a chain longer than that has revisited
+/// a track, which means a cycle, and the walk gives up rather than spinning.
+/// The commands refuse to build one — this is the belt to that pair of braces,
+/// because a project file can be edited by hand.
+template <typename Predicate>
+bool anyAncestor(const Project& project, const Track& track, Predicate predicate)
+{
+    const Track* current = &track;
+
+    for (std::size_t step = 0; step <= project.tracks().size(); ++step) {
+        if (predicate(*current))
+            return true;
+
+        current = project.findTrack(current->parent);
+        if (current == nullptr)
+            return false;
+    }
+
+    return false;
+}
+
+} // namespace
+
+bool trackEffectivelyMuted(const Project& project, const Track& track) noexcept
+{
+    return anyAncestor(project, track, [](const Track& node) { return node.muted; });
+}
+
+bool trackEffectivelySoloed(const Project& project, const Track& track) noexcept
+{
+    return anyAncestor(project, track, [](const Track& node) { return node.soloed; });
+}
+
+bool trackHidden(const Project& project, const Track& track) noexcept
+{
+    const Track* parent = project.findTrack(track.parent);
+    if (parent == nullptr)
+        return false;
+
+    // The track's own collapsed flag hides its children, not itself, so the
+    // walk starts one level up.
+    return anyAncestor(project, *parent, [](const Track& node) { return node.collapsed; });
+}
+
+bool trackWouldCycle(const Project& project, EntityId track, EntityId parent) noexcept
+{
+    if (!track.isValid() || !parent.isValid())
+        return false;
+    if (track == parent)
+        return true;
+
+    const Track* candidate = project.findTrack(parent);
+    if (candidate == nullptr)
+        return false;
+
+    return anyAncestor(project, *candidate,
+                       [track](const Track& node) { return node.id == track; });
+}
+
+std::vector<EntityId> tracksUnder(const Project& project, EntityId folder)
+{
+    std::vector<EntityId> under;
+    if (!folder.isValid())
+        return under;
+
+    for (const Track& track : project.tracks()) {
+        if (track.id == folder)
+            continue;
+
+        if (anyAncestor(project, track, [folder](const Track& node) { return node.id == folder; }))
+            under.push_back(track.id);
+    }
+
+    return under;
+}
+
 } // namespace incdaw::project
