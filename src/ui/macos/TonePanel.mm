@@ -568,7 +568,9 @@ enum class Drag { none, knob, advanced };
     window.releasedWhenClosed = NO;
     window.title              = title;
     window.contentView        = view;
-    window.appearance         = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    window.appearance         = [NSAppearance appearanceNamed:theme::paletteIsLight()
+                                                                  ? NSAppearanceNameAqua
+                                                                  : NSAppearanceNameDarkAqua];
     window.backgroundColor    = theme::ink(Ink::windowBackground);
 
     return window;

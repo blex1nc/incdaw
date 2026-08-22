@@ -590,6 +590,42 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
 
     NSMenu* menu = [[NSMenu alloc] init];
 
+    // The instrument submenu. Until SetChannelInstrumentCommand existed a
+    // channel could only become a sampler, by having a sample dropped on it;
+    // this is where a channel is given anything else.
+    NSMenuItem* instrumentItem = [menu addItemWithTitle:@"Instrument"
+                                                 action:nil
+                                          keyEquivalent:@""];
+    NSMenu* instruments = [[NSMenu alloc] init];
+
+    const project::Channel& channel = _project->channels()[hit.row];
+
+    for (const engine::BuiltinInstrumentInfo& info : engine::builtinInstruments()) {
+        NSMenuItem* entry = [instruments addItemWithTitle:@(info.displayName)
+                                                   action:@selector(setInstrumentFromMenu:)
+                                            keyEquivalent:@""];
+        entry.target           = self;
+        entry.representedObject = @{
+            @"channel": @(channelId.value()),
+            @"uid":     @(info.uid),
+        };
+
+        // A channel with no instrument yet plays the reference synth, so that
+        // is what the tick sits beside — the menu says what is sounding, not
+        // what happens to be stored.
+        const std::string current = channel.instrument.uid.empty()
+                                        ? plugins::builtinSimpleSynth().uid
+                                        : channel.instrument.uid;
+
+        entry.state = channel.instrument.format == plugins::Format::builtin
+                              || channel.instrument.uid.empty()
+                          ? (current == info.uid ? NSControlStateValueOn
+                                                 : NSControlStateValueOff)
+                          : NSControlStateValueOff;
+    }
+
+    instrumentItem.submenu = instruments;
+
     NSMenuItem* loadSample = [menu addItemWithTitle:@"Load Sample…"
                                              action:@selector(loadSampleFromMenu:)
                                       keyEquivalent:@""];
@@ -641,6 +677,22 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
 
     [self commit:std::make_unique<app::LoadSampleCommand>(channelId,
                                                           panel.URL.path.UTF8String)];
+}
+
+- (void)setInstrumentFromMenu:(NSMenuItem*)item
+{
+    NSDictionary* payload = item.representedObject;
+    if (![payload isKindOfClass:[NSDictionary class]])
+        return;
+
+    const project::EntityId channelId{[payload[@"channel"] unsignedLongLongValue]};
+
+    plugins::PluginIdentifier identifier;
+    identifier.format = plugins::Format::builtin;
+    identifier.uid    = [payload[@"uid"] UTF8String];
+
+    [self commit:std::make_unique<app::SetChannelInstrumentCommand>(channelId,
+                                                                    identifier)];
 }
 
 - (void)editInstrumentFromMenu:(NSMenuItem*)item

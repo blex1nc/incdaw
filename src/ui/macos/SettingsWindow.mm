@@ -216,6 +216,13 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     _window.delegate           = self;
     _window.backgroundColor    = theme::ink(Ink::windowBackground);
 
+    // Tabs, scrollers, pop-ups and switches are AppKit's, not the shell's: with
+    // a light palette selected they have to arrive light, or the tab where the
+    // palette was chosen is the one place it visibly did not take.
+    _window.appearance = [NSAppearance appearanceNamed:theme::paletteIsLight()
+                                                          ? NSAppearanceNameAqua
+                                                          : NSAppearanceNameDarkAqua];
+
     NSView* content = _window.contentView;
 
     // Four tabs rather than one column. The window held audio, MIDI and
@@ -626,6 +633,9 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     theme::setPalette(_editing);
 
     _window.backgroundColor = theme::ink(Ink::windowBackground);
+    _window.appearance      = [NSAppearance appearanceNamed:theme::paletteIsLight()
+                                                                ? NSAppearanceNameAqua
+                                                                : NSAppearanceNameDarkAqua];
     retintLabels(_window.contentView);
     theme::refreshViewTree(_window.contentView);
 

@@ -106,7 +106,9 @@ std::filesystem::path pathOf(NSString* text)
     // The rest of the shell draws itself dark whatever the system is set to.
     // Asking AppKit for the dark appearance keeps this pane's stock controls
     // in the same room as the custom-drawn ones.
-    self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    self.appearance = [NSAppearance appearanceNamed:theme::paletteIsLight()
+                                                        ? NSAppearanceNameAqua
+                                                        : NSAppearanceNameDarkAqua];
 
     _search = [[NSSearchField alloc]
         initWithFrame:NSMakeRect(padding,
@@ -166,6 +168,10 @@ std::filesystem::path pathOf(NSString* text)
                      queue:NSOperationQueue.mainQueue
                 usingBlock:^(NSNotification* note) {
                     (void)note;
+                    weakSelf.appearance =
+                        [NSAppearance appearanceNamed:theme::paletteIsLight()
+                                                          ? NSAppearanceNameAqua
+                                                          : NSAppearanceNameDarkAqua];
                     weakSelf.outlineView.backgroundColor = theme::ink(Ink::panel);
                     [weakSelf.outlineView reloadData];
                 }];
