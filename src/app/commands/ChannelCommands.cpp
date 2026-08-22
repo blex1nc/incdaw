@@ -146,6 +146,42 @@ void SetChannelVolumeCommand::undo(Project& project)
         channel->volume = previousVolume_;
 }
 
+bool SetChannelPanCommand::execute(Project& project)
+{
+    Channel* channel = project.findChannel(channelId_);
+    if (channel == nullptr)
+        return false;
+
+    const double clamped = std::clamp(pan_, -1.0, 1.0);
+    if (channel->pan == clamped)
+        return false;
+
+    previousPan_ = channel->pan;
+    pan_         = clamped;
+    channel->pan = clamped;
+    return true;
+}
+
+void SetChannelPanCommand::undo(Project& project)
+{
+    if (Channel* channel = project.findChannel(channelId_))
+        channel->pan = previousPan_;
+}
+
+bool SetChannelPanCommand::canMergeWith(const Command& next) const noexcept
+{
+    const auto* other = dynamic_cast<const SetChannelPanCommand*>(&next);
+    return other != nullptr && other->channelId_ == channelId_;
+}
+
+void SetChannelPanCommand::mergeWith(const Command& next)
+{
+    // As with volume: the merged entry keeps where the knob started and adopts
+    // where it is now, so undoing a drag returns to before the drag.
+    if (const auto* other = dynamic_cast<const SetChannelPanCommand*>(&next))
+        pan_ = other->pan_;
+}
+
 bool SetChannelVolumeCommand::canMergeWith(const Command& next) const noexcept
 {
     const auto* other = dynamic_cast<const SetChannelVolumeCommand*>(&next);

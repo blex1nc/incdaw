@@ -8,47 +8,51 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
-### The update check — 2026-08-22
+### UI — the Channel Rack, shaped like a step sequencer — 2026-08-22
 
 **Added**
 
-- **INCDAW says when it is out of date.** Shipped as a .dmg it has no
-  package manager behind it, so nothing told a user that the version
-  they installed had been superseded. At launch — at most once a day —
-  and from **INCDAW → Check for Updates…** at any time, it reads its own
-  public release feed, compares, and reports. `app::UpdateCheck`.
-- **It checks; it does not update itself** (D-038). "Download" opens the
-  release page in a browser. No binary is fetched, nothing is replaced,
-  and no signature scheme is being pretended at.
-- **A Settings switch, and what it does said plainly.** *Check for a
-  newer version at launch*, on by default, with the line "Reads INCDAW's
-  public release page, at most once a day. No account, nothing uploaded,
-  nothing installed." underneath it.
-- **Skip This Version** silences one version and nothing above it —
-  passing on 0.9.1 says nothing about 1.0.0 — and the manual check
-  reports it anyway. Turning the launch check back on clears the skip.
-- `platform::Http`: one HTTPS GET, one timeout, one callback delivered on
-  the main thread by every path including the ones that never start a
-  request. Ephemeral session — no cookies, no cache, no credential store.
-  The only socket in INCDAW, and never reachable from the audio thread.
-- `AppSettings::updates`: the launch preference, when the check last ran,
-  and the skipped version. An addition rather than a change of meaning,
-  so the settings format stays at version 1 and an older file reads back
-  as "never asked".
+- **Pan, at last.** `Channel::pan` has been in the model since Phase 4
+  and applied by the graph compiler since Phase 10 — serialized,
+  compiled and audible, with no command able to set it, because the row
+  had nowhere to put a knob. `SetChannelPanCommand` is that command:
+  bipolar, clamped, merging, so a drag is one undo entry.
+- **Two knobs where there was one fader.** Volume and pan, both turned
+  by dragging vertically (140 points end to end), both recentred by
+  double-click — unity for volume, centre for pan. Two knobs fit where
+  one fader did, and the width they save goes to the steps.
+- **Every row says what makes its sound**, set right inside the channel
+  button: the instrument's name, and the zone count when it is a
+  sampler. The rack used to name every channel and tell you nothing
+  about any of them.
+- **Steps are grouped in fours**, with a real gap between groups. Beats
+  are read spatially before they are read by colour, and the grouping
+  survives a colour scheme that shading does not. The gap belongs to the
+  bar rather than to the scroll position, so scrolling never moves where
+  a bar appears to start.
 
-**Notes**
+**Changed**
 
-- No dependency was added: NSURLSession is Foundation, already linked.
-  Nothing entered `third_party/`.
-- A check that got no answer — offline, rate-limited, or a repository
-  with no releases published — says nothing on the launch path and does
-  not stamp its clock, so one offline launch cannot postpone the next
-  attempt by a day.
-- 26 assertions cover the two failures nobody would notice: reporting
-  "up to date" when it is not, and nagging about a skipped version. A tag
-  that is not a version is declined rather than read as 0.0.0, a
-  pre-release never outranks its release, and a build ahead of the newest
-  release is current rather than told to downgrade.
+- **The row is shaped like a step sequencer's**: mute lamp, solo, the
+  channel's own button, volume, pan, then the steps — the order the
+  hardware ones had, and the one that matches how a row is used.
+- **The lamp is the mute switch and the colour swatch at once**, lit in
+  the channel's colour when it is heard and dark when it is not. A
+  separate swatch said the same thing twice and cost the row width.
+- The channel button is the widest control in the row, tinted with the
+  channel's colour, because it is the one that opens the instrument.
+- `swatchRect` was the model's only geometry the view ignored and
+  recomputed for itself. The two agree again.
+- Step offsets come from one function (`stepOffset`) that the grid, the
+  ruler and the hit test all measure with. The group gaps make the
+  offset non-linear in the step index, and three separate calculations
+  would have drifted apart.
+
+**Files**
+
+- `src/app/commands/ChannelCommands.{h,cpp}`, `src/app/ChannelRackModel.{h,cpp}`
+- `src/ui/macos/ChannelRackView.mm`
+- `tests/unit/ChannelRackTests.cpp` — 8 new cases
 
 ### UI — the Piano Roll gets a velocity lane — 2026-08-22
 

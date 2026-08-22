@@ -26,13 +26,42 @@ Tick ChannelRackModel::tickForStep(int step) const noexcept
     return static_cast<Tick>(step) * stepTicks_;
 }
 
+/// Where a step's cell starts, measured from the first visible step.
+///
+/// One function so the grid, the ruler and the hit test cannot disagree about
+/// where a group gap falls — which they would, since the gap makes the offset
+/// non-linear in the step index.
+double ChannelRackModel::stepOffset(int step) const noexcept
+{
+    const int    index = step - firstStep_;
+    const double pitch = layout_.stepWidth + layout_.stepGap;
+
+    if (layout_.stepsPerGroup <= 0)
+        return static_cast<double>(index) * pitch;
+
+    // Gaps BEFORE this step, counted from the pattern's own step zero rather
+    // than from the scroll position: the grouping is a property of the bar, and
+    // scrolling must not move where the bars appear to start.
+    const auto gapsBefore = [this](int at) {
+        return static_cast<double>(at / layout_.stepsPerGroup) * layout_.stepGroupGap;
+    };
+
+    return static_cast<double>(index) * pitch + gapsBefore(step) - gapsBefore(firstStep_);
+}
+
 int ChannelRackModel::visibleStepCount(double width) const noexcept
 {
     const double pitch = layout_.stepWidth + layout_.stepGap;
     if (pitch <= 0.0 || width <= 0.0)
         return 0;
 
-    return static_cast<int>(std::floor(width / pitch));
+    // Walk rather than divide: the group gaps make the offset non-linear, and
+    // dividing would over-report by one cell per group and draw off the edge.
+    int step = firstStep_;
+    while (stepOffset(step + 1) <= width)
+        ++step;
+
+    return step - firstStep_;
 }
 
 double ChannelRackModel::rowY(std::size_t row) const noexcept
@@ -47,10 +76,8 @@ ChannelRackModel::Rect ChannelRackModel::rulerRect(double width) const noexcept
 
 ChannelRackModel::Rect ChannelRackModel::rulerStepRect(int step) const noexcept
 {
-    const double pitch = layout_.stepWidth + layout_.stepGap;
-    const double x = layout_.headerWidth + static_cast<double>(step - firstStep_) * pitch;
-
-    return {x, 0.0, layout_.stepWidth, layout_.rulerHeight};
+    return {layout_.headerWidth + stepOffset(step), 0.0, layout_.stepWidth,
+            layout_.rulerHeight};
 }
 
 ChannelRackModel::Rect ChannelRackModel::rowRect(std::size_t row) const noexcept
@@ -58,54 +85,98 @@ ChannelRackModel::Rect ChannelRackModel::rowRect(std::size_t row) const noexcept
     return {0.0, rowY(row), layout_.headerWidth, layout_.rowHeight};
 }
 
-ChannelRackModel::Rect ChannelRackModel::swatchRect(std::size_t row) const noexcept
+// ── The row, left to right ───────────────────────────────────────────────────
+//
+// A mute lamp, the channel's own button, its pan and volume knobs, then the
+// steps. That order is what a step sequencer's row has looked like since the
+// hardware ones, and it survives because it matches how the row is used: the
+// lamp is hit constantly while writing a part, the button opens the sound, and
+// the knobs are set once and left.
+
+namespace {
+
+constexpr double edgeInset = 4.0;   ///< margin at the row's leading edge
+
+/// Centres a control of `size` in a row that starts at `top`.
+double centred(double top, double rowHeight, double size) noexcept
 {
-    return {0.0, rowY(row), layout_.swatchWidth, layout_.rowHeight};
+    return top + (rowHeight - size) / 2.0;
 }
 
-ChannelRackModel::Rect ChannelRackModel::nameRect(std::size_t row) const noexcept
-{
-    const double left  = layout_.swatchWidth + layout_.padding;
-    const double right = muteRect(row).x - layout_.padding;
+} // namespace
 
-    return {left, rowY(row), std::max(0.0, right - left), layout_.rowHeight};
+ChannelRackModel::Rect ChannelRackModel::swatchRect(std::size_t row) const noexcept
+{
+    // The mute lamp IS the colour: it is lit in the channel's own colour when
+    // the channel is heard and dark when it is not, so one control carries both
+    // the identity and the state. A separate swatch beside it would say the
+    // same thing twice and cost the row six points.
+    const double size = layout_.ledWidth;
+    return {edgeInset, centred(rowY(row), layout_.rowHeight, size), size, size};
+}
+
+double ChannelRackModel::contentLeft() const noexcept
+{
+    return edgeInset + layout_.ledWidth + layout_.padding + layout_.buttonWidth
+         + layout_.padding;
 }
 
 ChannelRackModel::Rect ChannelRackModel::muteRect(std::size_t row) const noexcept
 {
-    const double x = layout_.headerWidth - layout_.padding - layout_.volumeWidth
-                   - 2.0 * layout_.buttonWidth - 2.0 * layout_.padding;
-
-    // Square and centred in the row: a mute switch that stretches with the row
-    // height stops looking like a switch as soon as rows grow.
-    const double size  = std::min(layout_.buttonWidth, layout_.rowHeight - 8.0);
-    const double inset = (layout_.rowHeight - size) / 2.0;
-
-    return {x, rowY(row) + inset, size, size};
+    // The lamp and the mute switch are the same control.
+    return swatchRect(row);
 }
 
 ChannelRackModel::Rect ChannelRackModel::soloRect(std::size_t row) const noexcept
 {
-    const Rect mute = muteRect(row);
-    return {mute.x + layout_.buttonWidth + layout_.padding, mute.y, mute.width, mute.height};
+    const double size = layout_.buttonWidth;
 
+    return {edgeInset + layout_.ledWidth + layout_.padding,
+            centred(rowY(row), layout_.rowHeight, size), size, size};
+}
+
+ChannelRackModel::Rect ChannelRackModel::nameRect(std::size_t row) const noexcept
+{
+    const double left  = contentLeft();
+    const double right = volumeRect(row).x - layout_.padding;
+
+    // Nearly the full row height: the button is the largest target in the row
+    // because it is the one that opens the channel's instrument.
+    return {left, rowY(row) + 2.0, std::max(0.0, right - left), layout_.rowHeight - 4.0};
 }
 
 ChannelRackModel::Rect ChannelRackModel::volumeRect(std::size_t row) const noexcept
 {
-    const double x = layout_.headerWidth - layout_.padding - layout_.volumeWidth;
-    const double height = std::min(14.0, layout_.rowHeight - 12.0);
+    const double size = layout_.knobWidth;
 
-    return {x, rowY(row) + (layout_.rowHeight - height) / 2.0, layout_.volumeWidth, height};
+    return {panRect(row).x - layout_.padding - size,
+            centred(rowY(row), layout_.rowHeight, size), size, size};
+}
+
+ChannelRackModel::Rect ChannelRackModel::panRect(std::size_t row) const noexcept
+{
+    const double size = layout_.knobWidth;
+
+    return {layout_.headerWidth - layout_.padding - size,
+            centred(rowY(row), layout_.rowHeight, size), size, size};
+}
+
+double ChannelRackModel::knobForDrag(double startValue, double startY, double y,
+                                     double minimum, double maximum) noexcept
+{
+    // Up increases. The travel is the whole range end to end, and much longer
+    // than the knob, so the last few percent are reachable without a steady
+    // hand.
+    const double span = maximum - minimum;
+    return std::clamp(startValue - (y - startY) * span / knobDragTravel, minimum, maximum);
 }
 
 ChannelRackModel::Rect ChannelRackModel::stepRect(std::size_t row, int step) const noexcept
 {
-    const double pitch = layout_.stepWidth + layout_.stepGap;
-    const double x = layout_.headerWidth + static_cast<double>(step - firstStep_) * pitch;
+    const double inset = std::min(4.0, layout_.rowHeight / 8.0);
 
-    const double inset = std::min(5.0, layout_.rowHeight / 6.0);
-    return {x, rowY(row) + inset, layout_.stepWidth, layout_.rowHeight - 2.0 * inset};
+    return {layout_.headerWidth + stepOffset(step), rowY(row) + inset, layout_.stepWidth,
+            layout_.rowHeight - 2.0 * inset};
 }
 
 double ChannelRackModel::contentHeight(std::size_t channelCount) const noexcept
@@ -154,6 +225,8 @@ ChannelRackModel::Hit ChannelRackModel::hitTest(std::size_t channelCount, const 
             hit.zone = Zone::solo;
         else if (volumeRect(row).contains(x, y))
             hit.zone = Zone::volume;
+        else if (panRect(row).contains(x, y))
+            hit.zone = Zone::pan;
         else
             hit.zone = Zone::name;
 
@@ -161,20 +234,29 @@ ChannelRackModel::Hit ChannelRackModel::hitTest(std::size_t channelCount, const 
     }
 
     const double stepPitch = layout_.stepWidth + layout_.stepGap;
-    if (stepPitch <= 0.0)
+    if (stepPitch <= 0.0 || pattern == nullptr)
         return hit;
 
-    const int step = firstStep_
-                   + static_cast<int>(std::floor((x - layout_.headerWidth) / stepPitch));
+    // An estimate from the constant pitch, then corrected: the group gaps make
+    // the true offset non-linear, and an uncorrected divide picks the cell
+    // before the right one by a whole step near the end of a long bar.
+    const double alongGrid = x - layout_.headerWidth;
+
+    int step = firstStep_ + static_cast<int>(std::floor(alongGrid / stepPitch));
+
+    while (step > firstStep_ && stepOffset(step) > alongGrid)
+        --step;
+    while (stepOffset(step + 1) <= alongGrid)
+        ++step;
 
     // Past the end of the pattern there is no step to toggle, and inventing one
     // would silently extend the pattern.
-    if (pattern == nullptr || step < 0 || step >= stepCount(*pattern))
+    if (step < 0 || step >= stepCount(*pattern))
         return hit;
 
-    // The gap between cells, like the gap between rows, is not a cell.
+    // The gap between cells — and the wider gap between groups — is not a cell.
     const Rect cell = stepRect(row, step);
-    if (x >= cell.x + cell.width)
+    if (x < cell.x || x >= cell.x + cell.width)
         return hit;
 
     hit.zone = Zone::step;
@@ -182,13 +264,6 @@ ChannelRackModel::Hit ChannelRackModel::hitTest(std::size_t channelCount, const 
     return hit;
 }
 
-double ChannelRackModel::volumeForX(std::size_t row, double x) const noexcept
-{
-    const Rect rect = volumeRect(row);
-    if (rect.width <= 0.0)
-        return 0.0;
 
-    return std::clamp((x - rect.x) / rect.width, 0.0, 1.0);
-}
 
 } // namespace incdaw::app

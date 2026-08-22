@@ -7,6 +7,8 @@
 #include "app/commands/ImportCommands.h"
 #include "app/commands/SamplerCommands.h"
 #include "app/commands/StepCommands.h"
+#include "engine/instrument/BuiltinInstruments.h"
+#include "plugins/PluginIdentifier.h"
 #include "project/Model.h"
 #include "ui/macos/Theme.h"
 
@@ -36,7 +38,7 @@ NSRect box(app::ChannelRackModel::Rect rect)
 
 /// What a drag started on, so that dragging keeps doing the same thing even
 /// when the cursor leaves the control it began in.
-enum class RackDrag { none, volume, paintSteps };
+enum class RackDrag { none, volume, pan, paintSteps };
 
 } // namespace
 
@@ -52,6 +54,11 @@ enum class RackDrag { none, volume, paintSteps };
 
     RackDrag          _drag;
     project::EntityId _dragChannel;
+
+    /// Where a knob drag began, and the value it began at. Shared by both
+    /// knobs, because only one of them can be turning at a time.
+    double            _knobDragStartY;
+    double            _knobDragStart;
     BOOL              _paintOn;
     int               _lastPaintedStep;
 }
@@ -80,6 +87,8 @@ enum class RackDrag { none, volume, paintSteps };
     _drag         = RackDrag::none;
     _playheadTick = -1;
     _lastPaintedStep = -1;
+    _knobDragStartY = 0.0;
+    _knobDragStart  = 0.0;
 
     return self;
 }
@@ -219,6 +228,36 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
     }
 }
 
+/// What the row's second line says about where its sound comes from.
+///
+/// Read from the channel rather than from any engine handle: the rack draws
+/// from the project model, and a name that needed a live graph would be blank
+/// exactly when the graph failed to build.
+- (NSString*)sourceNameForChannel:(const project::Channel&)channel
+{
+    NSString* instrument = @"No instrument";
+
+    if (channel.instrument.uid.empty()) {
+        // An empty identifier is not "silent": the compiler falls back to the
+        // builtin synth, and the row must say what will actually be heard.
+        if (const auto* info = engine::findBuiltinInstrument(plugins::builtinSimpleSynth().uid))
+            instrument = @(info->displayName);
+    } else if (const auto* info = engine::findBuiltinInstrument(channel.instrument.uid)) {
+        instrument = @(info->displayName);
+    } else {
+        // A hosted plugin whose catalogue entry is not reachable from here.
+        // Its uid is worse than a name and better than nothing.
+        instrument = @(channel.instrument.uid.c_str());
+    }
+
+    if (channel.samplerZones.empty())
+        return instrument;
+
+    return [NSString stringWithFormat:@"%@ · %lu %s", instrument,
+                                      static_cast<unsigned long>(channel.samplerZones.size()),
+                                      channel.samplerZones.size() == 1 ? "zone" : "zones"];
+}
+
 - (void)drawChannels:(const std::vector<project::Channel>&)channels
              pattern:(const project::Pattern*)pattern
             lastStep:(int)lastStep
@@ -232,35 +271,71 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
 
         NSColor* colour = theme::fromArgb(channel.colour);
 
-        // ── Header: the channel's own strip ──────────────────────────────────
-        const NSRect header = NSInsetRect(box(_model->rowRect(row)), 2.0, 0.0);
-        theme::drawPanel(header, theme::metrics::radiusControl, selected, true);
+        // ── The row: lamp, switch, button, two knobs ─────────────────────────
+        //
+        // The order a step sequencer's row has had since the hardware ones, and
+        // it survives because it matches how the row is used: the lamp is hit
+        // constantly while writing a part, the button opens the sound, and the
+        // knobs are set once and left.
 
-        if (selected)
-            theme::strokeRounded(header, theme::metrics::radiusControl, theme::ink(Ink::accent));
+        // The lamp is the mute switch AND the colour swatch — lit in the
+        // channel's own colour when the channel is heard, dark when it is not.
+        // A separate swatch beside it would say the same thing twice and cost
+        // the row points it needs for steps.
+        const NSRect lamp = box(_model->muteRect(row));
 
-        // The colour tile: a channel is identified by its colour before it is
-        // read by its name, which is why it gets a lit tile and not a hairline.
-        const NSRect swatch = NSMakeRect(NSMinX(header) + 5.0, NSMinY(header) + 5.0,
-                                         layout.swatchWidth,
-                                         header.size.height - 10.0);
+        theme::fillRounded(NSInsetRect(lamp, -1.5, -1.5), lamp.size.height / 2.0 + 1.5,
+                           theme::ink(Ink::panelSunken));
 
-        theme::fillGradient(swatch, 2.5, theme::lighten(colour, 0.25),
-                            theme::darken(colour, channel.muted ? 0.65 : 0.15), true);
+        theme::fillRounded(lamp, lamp.size.height / 2.0,
+                           channel.muted ? theme::darken(colour, 0.7) : colour);
 
-        theme::drawTextCentred(@(channel.name.c_str()), box(_model->nameRect(row)),
-                               channel.muted ? theme::ink(Ink::textDim)
-                                             : theme::ink(Ink::textPrimary),
-                               theme::labelFont(12.0, NSFontWeightMedium));
-
-        theme::drawToggle(box(_model->muteRect(row)), @"M", channel.muted,
-                          theme::ink(Ink::mute), true);
+        if (!channel.muted)
+            theme::fillRounded(NSInsetRect(lamp, 3.0, 3.0), lamp.size.height / 5.0,
+                               theme::withAlpha(theme::lighten(colour, 0.65), 0.9));
 
         theme::drawToggle(box(_model->soloRect(row)), @"S", channel.soloed,
                           theme::ink(Ink::solo), true);
 
-        theme::drawSlider(box(_model->volumeRect(row)), channel.volume,
-                          channel.muted ? theme::ink(Ink::textDim) : colour, true);
+        // The channel button: the widest thing in the row, because it is the
+        // one that opens the instrument. Tinted with the channel's colour, so
+        // the rack stays scannable by colour when the names all read alike.
+        const NSRect button = box(_model->nameRect(row));
+
+        theme::fillGradient(button, theme::metrics::radiusControl,
+                            theme::mix(theme::ink(Ink::panelRaised), colour,
+                                       channel.muted ? 0.08 : 0.24),
+                            theme::mix(theme::ink(Ink::panel), colour,
+                                       channel.muted ? 0.04 : 0.12), true);
+
+        theme::strokeRounded(button, theme::metrics::radiusControl,
+                             selected ? theme::ink(Ink::accent)
+                                      : theme::withAlpha(theme::ink(Ink::textDim), 0.35),
+                             selected ? 1.5 : 1.0);
+
+        const NSRect label = NSInsetRect(button, 8.0, 0.0);
+
+        theme::drawText(@(channel.name.c_str()), label,
+                        channel.muted ? theme::ink(Ink::textDim)
+                                      : theme::ink(Ink::textPrimary),
+                        theme::labelFont(12.0, NSFontWeightMedium));
+
+        // What makes the sound, set right inside the same button. The rack used
+        // to name every channel and tell you nothing about any of them — a
+        // sampler and a synth were indistinguishable until you opened one — and
+        // this says it without costing the row a second line.
+        theme::drawText([self sourceNameForChannel:channel], label,
+                        theme::ink(Ink::textDim), theme::labelFont(9.0),
+                        theme::Align::right);
+
+        // Two knobs rather than a fader: both fit where one fader would, and
+        // the width they save goes to the steps. Pan is bipolar, because centre
+        // is a value and not the absence of one.
+        theme::drawKnob(box(_model->volumeRect(row)), channel.volume,
+                        channel.muted ? theme::ink(Ink::textDim) : colour);
+
+        theme::drawKnob(box(_model->panRect(row)), (channel.pan + 1.0) / 2.0,
+                        channel.muted ? theme::ink(Ink::textDim) : colour, true);
 
         if (pattern == nullptr)
             continue;
@@ -361,9 +436,32 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
             return;
 
         case app::ChannelRackModel::Zone::volume:
-            _drag        = RackDrag::volume;
-            _dragChannel = channelId;
-            [self applyVolumeAt:point row:hit.row];
+            // Double-click restores unity, the way double-clicking pan
+            // recentres it: a knob needs a way back to its default that does
+            // not depend on landing exactly on it by hand.
+            if (event.clickCount == 2) {
+                [self commit:std::make_unique<app::SetChannelVolumeCommand>(channelId, 1.0)];
+                return;
+            }
+
+            _drag           = RackDrag::volume;
+            _dragChannel    = channelId;
+            _knobDragStartY = point.y;
+            _knobDragStart  = channel.volume;
+            return;
+
+        case app::ChannelRackModel::Zone::pan:
+            // Double-click recentres. A bipolar control needs a way back to
+            // zero that does not depend on landing exactly on it by hand.
+            if (event.clickCount == 2) {
+                [self commit:std::make_unique<app::SetChannelPanCommand>(channelId, 0.0)];
+                return;
+            }
+
+            _drag           = RackDrag::pan;
+            _dragChannel    = channelId;
+            _knobDragStartY = point.y;
+            _knobDragStart  = channel.pan;
             return;
 
         case app::ChannelRackModel::Zone::step:
@@ -386,11 +484,22 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
 
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
 
+    // Both knobs turn from where the drag started, not from where the knob is
+    // now: reading the current value on each move compounds rounding, and the
+    // knob creeps away from the cursor over a long drag.
     if (_drag == RackDrag::volume) {
-        const std::size_t row = _project->indexOfChannel(_dragChannel);
-        if (row != project::Project::notFound)
-            [self applyVolumeAt:point row:row];
+        const double volume = app::ChannelRackModel::volumeForDrag(_knobDragStart,
+                                                                   _knobDragStartY, point.y);
 
+        [self merge:std::make_unique<app::SetChannelVolumeCommand>(_dragChannel, volume)];
+        return;
+    }
+
+    if (_drag == RackDrag::pan) {
+        const double pan = app::ChannelRackModel::panForDrag(_knobDragStart,
+                                                             _knobDragStartY, point.y);
+
+        [self merge:std::make_unique<app::SetChannelPanCommand>(_dragChannel, pan)];
         return;
     }
 
@@ -685,13 +794,7 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
     [self commit:std::make_unique<app::ToggleStepCommand>(cell)];
 }
 
-- (void)applyVolumeAt:(NSPoint)point row:(std::size_t)row
-{
-    const double volume = _model->volumeForX(row, point.x);
 
-    if (_registry->executeMerging(std::make_unique<app::SetChannelVolumeCommand>(_dragChannel, volume)))
-        [self changed];
-}
 
 - (void)addChannel
 {
@@ -734,6 +837,14 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
 - (void)commit:(app::CommandPtr)command
 {
     if (_registry->execute(std::move(command)))
+        [self changed];
+}
+
+/// A step of a continuous gesture: merges into the entry the gesture opened,
+/// so a knob drag is one undo and not one per mouse move.
+- (void)merge:(app::CommandPtr)command
+{
+    if (_registry->executeMerging(std::move(command)))
         [self changed];
 }
 

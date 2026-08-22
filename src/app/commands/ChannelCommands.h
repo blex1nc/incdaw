@@ -148,6 +148,33 @@ private:
     double   previousVolume_ = 1.0;
 };
 
+/// Moves a channel in the stereo field.
+///
+/// The model has carried `Channel::pan` since Phase 4 and the graph compiler
+/// has applied it since Phase 10 — it was serialized, compiled and audible,
+/// and no command could set it. This is that command. Bipolar: -1 hard left,
+/// 0 centre, +1 hard right. Consecutive edits merge, so a knob drag is one
+/// undo entry.
+class SetChannelPanCommand final : public Command {
+public:
+    SetChannelPanCommand(EntityId channel, double pan)
+        : channelId_(channel), pan_(pan) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "channel.setPan"; }
+    [[nodiscard]] std::string name() const override { return "Set Channel Pan"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    [[nodiscard]] bool canMergeWith(const Command& next) const noexcept override;
+    void mergeWith(const Command& next) override;
+
+private:
+    EntityId channelId_;
+    double   pan_         = 0.0;
+    double   previousPan_ = 0.0;
+};
+
 /// One stored instrument parameter (Model.h ChannelInstrumentParameter).
 /// The value is plain, in the instrument's own terms; the compiler applies
 /// it through the instrument's sink at every build (D-034). Consecutive

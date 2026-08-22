@@ -522,6 +522,19 @@ offline, or pointed at a project with no releases says nothing at all.
 feed, every check correctly answers "no releases have been published yet" and
 the feature is invisible.
 
+### Increment 13 — the Channel Rack, shaped like a step sequencer — DONE 2026-08-22
+
+The row now reads mute lamp, solo, channel button, volume, pan, steps — the
+order a step sequencer's row has had since the hardware ones. The fader became
+two knobs, which made room for pan: the third instance of the same pattern the
+velocity lane closed, since `Channel::pan` was modelled, serialized and applied
+by the compiler with no command able to set it. Steps are grouped in fours with
+a real gap, measured through one `stepOffset` the grid, ruler and hit test share.
+
+**Exit criterion (met):** pan is reachable, undoable and audible through the
+existing compiler path; the hit test agrees with the drawn geometry at every
+step of a 32-step pattern, gaps included, asserted rather than eyeballed.
+
 ### Remaining, by gate
 
 - **Dependency approval required (§41):** AU hosting, then VST3; FLAC and

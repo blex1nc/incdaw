@@ -409,7 +409,6 @@ TEST_CASE("rack hit testing finds rows, buttons and steps")
     const app::ChannelRackModel::Hit volumeHit =
         rack.hitTest(4, &pattern, volume.x + volume.width / 2.0, volume.y + 1.0);
     CHECK(volumeHit.zone == app::ChannelRackModel::Zone::volume);
-    CHECK(rack.volumeForX(1, volume.x + volume.width / 2.0) == doctest::Approx(0.5));
 
     // A step in the first row.
     const auto cell = rack.stepRect(0, 3);
@@ -528,4 +527,234 @@ TEST_CASE("the rack's step ruler pushes the rows down and is not a row itself")
     // The ruler's own cells line up with the pads under them.
     CHECK(rack.rulerStepRect(2).x == doctest::Approx(cell.x));
     CHECK(rack.rulerRect(400.0).height == doctest::Approx(20.0));
+}
+
+// ── Pan, and the two-line row that gave it somewhere to live ─────────────────
+//
+// Channel::pan has been in the model since Phase 4 and applied by the graph
+// compiler since Phase 10. It was serialized, compiled and audible, and no
+// command could set it — the rack's row had one line and no space left on it.
+
+TEST_CASE("panning a channel round-trips through undo")
+{
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddChannelCommand>("Kick")));
+
+    const project::Project before = project;
+    const project::EntityId id = project.channels().front().id;
+
+    REQUIRE(registry.execute(std::make_unique<app::SetChannelPanCommand>(id, -0.6)));
+    CHECK(project.findChannel(id)->pan == doctest::Approx(-0.6));
+
+    REQUIRE(registry.undo());
+    CHECK(project == before);
+}
+
+TEST_CASE("pan is clamped to the stereo field, and centre is reachable")
+{
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddChannelCommand>("Kick")));
+    const project::EntityId id = project.channels().front().id;
+
+    REQUIRE(registry.execute(std::make_unique<app::SetChannelPanCommand>(id, 4.0)));
+    CHECK(project.findChannel(id)->pan == doctest::Approx(1.0));
+
+    REQUIRE(registry.execute(std::make_unique<app::SetChannelPanCommand>(id, -4.0)));
+    CHECK(project.findChannel(id)->pan == doctest::Approx(-1.0));
+
+    // Centre is a value, not the absence of one: the double-click that
+    // recentres a knob must leave an undo entry like any other edit.
+    REQUIRE(registry.execute(std::make_unique<app::SetChannelPanCommand>(id, 0.0)));
+    CHECK(project.findChannel(id)->pan == doctest::Approx(0.0));
+}
+
+TEST_CASE("a pan command that changes nothing leaves no undo entry")
+{
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddChannelCommand>("Kick")));
+    const project::EntityId id = project.channels().front().id;
+
+    const std::size_t depth = registry.undoDepth();
+
+    // A fresh channel is already centred.
+    CHECK_FALSE(registry.execute(std::make_unique<app::SetChannelPanCommand>(id, 0.0)));
+    CHECK(registry.undoDepth() == depth);
+}
+
+TEST_CASE("dragging a pan knob is one undo, and returns to where the drag began")
+{
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddChannelCommand>("Kick")));
+    const project::EntityId id = project.channels().front().id;
+
+    const std::size_t depth = registry.undoDepth();
+
+    // Every point of the drag, the first included: merging cannot tell one
+    // gesture from the next, so the entry the drag opens is the whole drag.
+    for (const double pan : {-0.4, -0.2, 0.1, 0.35})
+        REQUIRE(registry.executeMerging(std::make_unique<app::SetChannelPanCommand>(id, pan)));
+
+    CHECK(registry.undoDepth() == depth + 1);
+    CHECK(project.findChannel(id)->pan == doctest::Approx(0.35));
+
+    // One undo returns to before the drag, not to its second-to-last position.
+    REQUIRE(registry.undo());
+    CHECK(project.findChannel(id)->pan == doctest::Approx(0.0));
+}
+
+TEST_CASE("a pan drag is vertical, travels further than the knob, and pins at the ends")
+{
+    using app::ChannelRackModel;
+
+    // Up is right: a knob turning clockwise under an upward drag.
+    CHECK(ChannelRackModel::panForDrag(0.0, 100.0, 40.0) > 0.0);
+    CHECK(ChannelRackModel::panForDrag(0.0, 100.0, 160.0) < 0.0);
+
+    // The travel is the whole bipolar sweep, so from centre half of it reaches
+    // an end and a quarter of it reaches halfway.
+    CHECK(ChannelRackModel::panForDrag(0.0, 100.0, 100.0 - ChannelRackModel::knobDragTravel / 2.0)
+          == doctest::Approx(1.0));
+    CHECK(ChannelRackModel::panForDrag(0.0, 100.0, 100.0 - ChannelRackModel::knobDragTravel / 4.0)
+          == doctest::Approx(0.5));
+
+    // Past the ends it pins rather than wrapping, and it starts from where the
+    // drag began rather than from centre.
+    CHECK(ChannelRackModel::panForDrag(0.0, 100.0, -900.0) == doctest::Approx(1.0));
+    CHECK(ChannelRackModel::panForDrag(0.0, 100.0, 900.0) == doctest::Approx(-1.0));
+    CHECK(ChannelRackModel::panForDrag(-1.0, 100.0, 100.0) == doctest::Approx(-1.0));
+}
+
+TEST_CASE("a row reads left to right and every control stays inside the header")
+{
+    app::ChannelRackModel model;
+
+    const app::ChannelRackModel::Layout layout = model.layout();
+    const auto row = model.rowRect(0);
+
+    const auto lamp   = model.muteRect(0);
+    const auto solo   = model.soloRect(0);
+    const auto name   = model.nameRect(0);
+    const auto volume = model.volumeRect(0);
+    const auto pan    = model.panRect(0);
+
+    // Lamp, switch, button, volume, pan — the order a step sequencer's row has
+    // had since the hardware ones.
+    CHECK(lamp.x + lamp.width <= solo.x);
+    CHECK(solo.x + solo.width <= name.x);
+    CHECK(name.x + name.width <= volume.x);
+    CHECK(volume.x + volume.width <= pan.x);
+
+    // Nothing escapes the header, and everything is vertically inside the row.
+    for (const auto& rect : {lamp, solo, name, volume, pan}) {
+        CHECK(rect.x >= 0.0);
+        CHECK(rect.x + rect.width <= layout.headerWidth + 0.001);
+        CHECK(rect.y >= row.y);
+        CHECK(rect.y + rect.height <= row.y + row.height + 0.001);
+    }
+
+    // The lamp IS the colour swatch: one control carries identity and state,
+    // and a separate swatch would say the same thing twice.
+    const auto swatch = model.swatchRect(0);
+    CHECK(swatch.x == doctest::Approx(lamp.x));
+    CHECK(swatch.width == doctest::Approx(lamp.width));
+
+    // Both knobs are square, so they read as knobs and not as short faders.
+    CHECK(pan.width == doctest::Approx(pan.height));
+    CHECK(volume.width == doctest::Approx(volume.height));
+
+    // The button is the largest target in the row: it is the one that opens
+    // the channel's instrument.
+    CHECK(name.width > pan.width + volume.width);
+}
+
+TEST_CASE("each knob is its own hit zone, and the button takes the space between")
+{
+    app::ChannelRackModel model;
+
+    const auto pan    = model.panRect(0);
+    const auto volume = model.volumeRect(0);
+
+    const auto onPan = model.hitTest(1, nullptr, pan.x + pan.width / 2.0,
+                                     pan.y + pan.height / 2.0);
+    CHECK(onPan.zone == app::ChannelRackModel::Zone::pan);
+    CHECK(onPan.row == 0);
+
+    const auto onVolume = model.hitTest(1, nullptr, volume.x + volume.width / 2.0,
+                                        volume.y + volume.height / 2.0);
+    CHECK(onVolume.zone == app::ChannelRackModel::Zone::volume);
+
+    const auto onName = model.hitTest(1, nullptr, model.contentLeft() + 2.0,
+                                      model.rowRect(0).y + model.layout().rowHeight / 2.0);
+    CHECK(onName.zone == app::ChannelRackModel::Zone::name);
+
+    // The lamp is the mute switch.
+    const auto lamp = model.muteRect(0);
+    CHECK(model.hitTest(1, nullptr, lamp.x + lamp.width / 2.0,
+                        lamp.y + lamp.height / 2.0).zone
+          == app::ChannelRackModel::Zone::mute);
+}
+
+TEST_CASE("steps are grouped in fours, and the gap between groups is not a step")
+{
+    app::ChannelRackModel model;
+
+    project::Project project;
+    project::Pattern pattern;
+    pattern.length = ticksPerQuarterNote * 8;    // 32 steps
+    project.patterns().push_back(pattern);
+
+    const app::ChannelRackModel::Layout layout = model.layout();
+
+    // Within a group the cells are at the plain pitch; crossing a boundary
+    // costs one extra gap.
+    const double pitch = layout.stepWidth + layout.stepGap;
+
+    CHECK(model.stepOffset(1) - model.stepOffset(0) == doctest::Approx(pitch));
+    CHECK(model.stepOffset(4) - model.stepOffset(3)
+          == doctest::Approx(pitch + layout.stepGroupGap));
+    CHECK(model.stepOffset(8) - model.stepOffset(7)
+          == doctest::Approx(pitch + layout.stepGroupGap));
+
+    // The hit test agrees with the geometry at every step, including the ones
+    // pushed out of line by the accumulated gaps.
+    for (int step = 0; step < 32; ++step) {
+        const auto cell = model.stepRect(0, step);
+        const auto hit  = model.hitTest(1, &project.patterns().front(),
+                                        cell.x + cell.width / 2.0, cell.y + 2.0);
+
+        CHECK(hit.zone == app::ChannelRackModel::Zone::step);
+        CHECK(hit.step == step);
+    }
+
+    // Landing in the group gap is landing on nothing, like the gap between two
+    // cells inside a group.
+    const auto lastOfGroup = model.stepRect(0, 3);
+    const auto gapHit = model.hitTest(1, &project.patterns().front(),
+                                      lastOfGroup.x + lastOfGroup.width + 2.0,
+                                      lastOfGroup.y + 2.0);
+    CHECK(gapHit.zone == app::ChannelRackModel::Zone::none);
+    CHECK(gapHit.row == 0);
+}
+
+TEST_CASE("scrolling does not move where the bars appear to start")
+{
+    app::ChannelRackModel model;
+    const app::ChannelRackModel::Layout layout = model.layout();
+    const double pitch = layout.stepWidth + layout.stepGap;
+
+    // Scrolled to a group boundary, the grid looks exactly as it did at zero:
+    // the grouping belongs to the bar, not to the scroll position.
+    model.setFirstStep(4);
+    CHECK(model.stepOffset(4) == doctest::Approx(0.0));
+    CHECK(model.stepOffset(5) - model.stepOffset(4) == doctest::Approx(pitch));
+    CHECK(model.stepOffset(8) - model.stepOffset(7)
+          == doctest::Approx(pitch + layout.stepGroupGap));
 }

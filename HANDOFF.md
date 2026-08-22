@@ -2025,6 +2025,41 @@ UI build-out increment 12 — the velocity lane (2026-08-22):
       The lane reports through it like every other gesture; the shell
       builds its own status line and ignores it.
 
+UI build-out increment 13 — the Channel Rack (2026-08-22):
+
+    - The row is ONE line again (rowHeight 32) and reads left to right:
+      mute lamp, solo, channel button, volume knob, pan knob, steps. An
+      earlier pass in this same session made it two lines and mixer-like;
+      that halved how many channels fit on screen, and a rack is read by
+      scanning down it. Do not restack it.
+    - muteRect and swatchRect are THE SAME RECT. The lamp carries both
+      identity (the channel's colour) and state (lit or dark). If you add
+      a swatch back, delete the lamp's colour first or the row says the
+      same thing twice.
+    - stepOffset is the only place the group gaps are computed. The grid,
+      the ruler and the hit test all call it. The offset is NON-LINEAR in
+      the step index, so any new caller that divides by (stepWidth +
+      stepGap) will be wrong by a whole cell near the end of a long bar —
+      the hit test estimates with that divide and then corrects, which is
+      what the 32-step assertion in ChannelRackTests guards.
+    - Gaps are counted from the pattern's step zero, not from firstStep_,
+      so scrolling does not move where a bar appears to start.
+    - Both knobs drag vertically and RELATIVELY, from the value the drag
+      began at (ChannelRackModel::knobForDrag). Reading the current value
+      on each move compounds rounding and the knob creeps away from the
+      cursor. knobDragTravel is the END-TO-END sweep, so half of it from
+      centre reaches an end of a bipolar range.
+    - SetChannelPanCommand closes the third instance of a recurring
+      pattern here: a property the model, the file format and the
+      compiler all support, with no command and therefore no way to set
+      it. Channel::pan was compiled at ProjectGraphCompiler.cpp:569 the
+      whole time. When adding a control, check the compiler first — the
+      audio path is usually already there.
+    - Merging cannot tell one gesture from the next: the entry a drag
+      opens is the whole drag, and one undo returns to before its first
+      point. The pan tests say so explicitly, because the first version
+      of them assumed otherwise.
+
 Things to be careful about:
 
   - third_party/ is gitignored: a fresh clone or worktree has neither
