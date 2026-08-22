@@ -630,3 +630,125 @@ TEST_CASE("where two bars share a column, the one drawn on top is picked")
 
     CHECK(model.barAtPoint(notes, column, 760.0) == 2);
 }
+
+// ── The ruler, and the ghosts of other channels ──────────────────────────────
+
+namespace {
+
+/// The editing model with the numbered band across the top.
+PianoRollModel makeRuledModel()
+{
+    PianoRollModel model = makeModel();
+
+    PianoRollModel::Viewport viewport = model.viewport();
+    viewport.rulerHeight = 22.0;
+    model.setViewport(viewport);
+
+    return model;
+}
+
+} // namespace
+
+TEST_CASE("without a ruler height the grid starts at the top, as it always did")
+{
+    const PianoRollModel model = makeModel();
+
+    CHECK_FALSE(model.hasRuler());
+    CHECK(model.gridTop() == doctest::Approx(0.0));
+    CHECK_FALSE(model.isInRuler(0.0));
+    CHECK_FALSE(model.isInRuler(-5.0));
+}
+
+TEST_CASE("the ruler pushes the grid down and is not part of it")
+{
+    const PianoRollModel model = makeRuledModel();
+
+    REQUIRE(model.hasRuler());
+    CHECK(model.gridTop() == doctest::Approx(22.0));
+
+    CHECK(model.isInRuler(0.0));
+    CHECK(model.isInRuler(21.5));
+    CHECK_FALSE(model.isInRuler(22.0));      // the grid's first point
+    CHECK_FALSE(model.isInRuler(-1.0));
+
+    // The highest visible key now starts under the band, not at zero.
+    const auto& viewport = model.viewport();
+    const int highest = viewport.lowestKey + viewport.visibleKeys - 1;
+    CHECK(model.keyToY(highest) == doctest::Approx(22.0));
+}
+
+TEST_CASE("keys and y coordinates still round-trip with a ruler in the way")
+{
+    const PianoRollModel model = makeRuledModel();
+    const auto& viewport = model.viewport();
+
+    for (int key = viewport.lowestKey; key < viewport.lowestKey + viewport.visibleKeys; ++key)
+        CHECK(model.yToKey(model.keyToY(key) + 1.0) == key);
+}
+
+TEST_CASE("a click in the ruler is not a click on a note")
+{
+    const PianoRollModel model = makeRuledModel();
+
+    // A note on the highest visible key, whose row begins immediately below
+    // the band — the case a ruler that was merely "the top of the grid" would
+    // get wrong.
+    const int highest = model.viewport().lowestKey + model.viewport().visibleKeys - 1;
+    const NoteList notes{noteAt(0, highest, 100)};
+
+    CHECK(model.noteAtPoint(notes, 4.0, model.gridTop() + 2.0) == 0);
+    CHECK(model.noteAtPoint(notes, 4.0, 10.0) == PianoRollModel::noNote);
+}
+
+TEST_CASE("the velocity lane sits below the ruler and the grid, not below the grid alone")
+{
+    PianoRollModel model = makeRuledModel();
+
+    PianoRollModel::Viewport viewport = model.viewport();
+    viewport.velocityLaneHeight = 88.0;
+    model.setViewport(viewport);
+
+    CHECK(model.velocityLaneTop() == doctest::Approx(22.0 + 720.0));
+    CHECK(model.velocityLaneBottom() == doctest::Approx(22.0 + 720.0 + 88.0));
+
+    // The band at the top is not the lane at the bottom.
+    CHECK_FALSE(model.isInVelocityLane(10.0));
+}
+
+TEST_CASE("appending gathers several channels' notes into one list")
+{
+    const PianoRollModel model = makeModel();
+
+    const NoteList first{noteAt(0, 60, 100), noteAt(240, 62, 100)};
+    const NoteList second{noteAt(480, 64, 100)};
+
+    std::vector<PianoRollModel::VisibleNote> out;
+
+    model.collectVisibleNotes(first, out);
+    CHECK(out.size() == 2);
+
+    model.collectVisibleNotes(second, out, /*append=*/true);
+    CHECK(out.size() == 3);
+
+    // Without the flag the buffer is cleared, which is what every existing
+    // caller relies on.
+    model.collectVisibleNotes(second, out);
+    CHECK(out.size() == 1);
+}
+
+TEST_CASE("a ghost carries the index it had in its own channel, not in the merged list")
+{
+    const PianoRollModel model = makeModel();
+
+    const NoteList first{noteAt(0, 60, 100)};
+    const NoteList second{noteAt(0, 62, 100), noteAt(240, 64, 100)};
+
+    std::vector<PianoRollModel::VisibleNote> out;
+    model.collectVisibleNotes(first, out);
+    model.collectVisibleNotes(second, out, /*append=*/true);
+
+    REQUIRE(out.size() == 3);
+    CHECK(out[0].index == 0);
+    CHECK(out[1].index == 0);     // the second channel's first note
+    CHECK(out[2].index == 1);
+}

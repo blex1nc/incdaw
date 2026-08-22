@@ -56,9 +56,14 @@ public:
 
         double width  = 1000.0;   ///< in points
 
-        /// The NOTE GRID's height, not the view's. The velocity lane is added
-        /// below it, so a view that shows the lane gives a smaller height here
-        /// and everything that draws or hit-tests notes is unaffected.
+        /// The numbered band above the grid, where bars are counted. Zero
+        /// leaves the grid at the top, which is what the geometry tests
+        /// describe; the view gives it a real height.
+        double rulerHeight = 0.0;
+
+        /// The NOTE GRID's height — not the view's, and not counting the ruler
+        /// above it or the velocity lane below. Everything that draws or
+        /// hit-tests a note measures against this and is unaffected by either.
         double height = 600.0;
 
         /// Height of the velocity lane below the grid, in points. Zero hides
@@ -96,10 +101,25 @@ public:
         return scale > 0.0 ? viewport_.firstTick + static_cast<Tick>(x / scale + 0.5) : viewport_.firstTick;
     }
 
+    /// The band above the grid where bars are numbered.
+    [[nodiscard]] double gridTop() const noexcept { return viewport_.rulerHeight; }
+
+    [[nodiscard]] bool hasRuler() const noexcept { return viewport_.rulerHeight > 0.0; }
+
+    /// True for points in the ruler. A click there is not an edit — it must
+    /// never draw a note, which is what it would do if the band were simply
+    /// the top of the grid.
+    [[nodiscard]] bool isInRuler(double y) const noexcept
+    {
+        return hasRuler() && y >= 0.0 && y < viewport_.rulerHeight;
+    }
+
     /// Higher keys are drawn higher on screen, so y increases as pitch falls.
     [[nodiscard]] double keyToY(int key) const noexcept
     {
-        return static_cast<double>(viewport_.lowestKey + viewport_.visibleKeys - 1 - key) * keyHeight();
+        return gridTop()
+             + static_cast<double>(viewport_.lowestKey + viewport_.visibleKeys - 1 - key)
+               * keyHeight();
     }
 
     [[nodiscard]] int yToKey(double y) const noexcept
@@ -108,7 +128,8 @@ public:
         if (height <= 0.0)
             return viewport_.lowestKey;
 
-        return viewport_.lowestKey + viewport_.visibleKeys - 1 - static_cast<int>(y / height);
+        return viewport_.lowestKey + viewport_.visibleKeys - 1
+             - static_cast<int>((y - gridTop()) / height);
     }
 
     // ── Culling ─────────────────────────────────────────────────────────────
@@ -119,7 +140,11 @@ public:
     /// state costs no allocation at all. Building a fresh vector per frame is
     /// the difference between smooth scrolling and a stutter every time the
     /// allocator decides to grow.
-    void collectVisibleNotes(const NoteList& notes, std::vector<VisibleNote>& out) const;
+    /// `append` keeps what `out` already holds, which is how the ghosts of
+    /// several other channels are gathered into one list without a buffer per
+    /// channel.
+    void collectVisibleNotes(const NoteList& notes, std::vector<VisibleNote>& out,
+                             bool append = false) const;
 
     // ── Hit testing ─────────────────────────────────────────────────────────
 
@@ -190,11 +215,14 @@ public:
         return viewport_.velocityLaneHeight > 0.0;
     }
 
-    [[nodiscard]] double velocityLaneTop() const noexcept { return viewport_.height; }
+    [[nodiscard]] double velocityLaneTop() const noexcept
+    {
+        return gridTop() + viewport_.height;
+    }
 
     [[nodiscard]] double velocityLaneBottom() const noexcept
     {
-        return viewport_.height + viewport_.velocityLaneHeight;
+        return velocityLaneTop() + viewport_.velocityLaneHeight;
     }
 
     /// False whenever the lane is hidden, so callers need only one test.

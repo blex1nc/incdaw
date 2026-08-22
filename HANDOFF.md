@@ -2060,6 +2060,33 @@ UI build-out increment 13 — the Channel Rack (2026-08-22):
       point. The pan tests say so explicitly, because the first version
       of them assumed otherwise.
 
+UI build-out increment 14 — the Piano Roll's ruler, ghosts and key
+(2026-08-23):
+
+    - Viewport::height is the GRID alone. The view's height is
+      rulerHeight + height + velocityLaneHeight, and applyViewportGeometry
+      is the only place that divides it. keyToY adds gridTop(); anything
+      that computes a row's y without it will draw under the band.
+    - Both hit tests refuse points in the ruler (isInRuler). Do not rely
+      on yToKey returning something out of range there — it does, but
+      that is arithmetic, not a guard, and it stops being true the moment
+      the band is taller than a row.
+    - Ghosts are the OTHER channels of the same pattern, appended into one
+      list via collectVisibleNotes(..., append=true). Their `index` is
+      the index in their own channel's event vector, which is meaningless
+      here — ghosts are drawn and never hit-tested, and must stay that
+      way or a click would move a note in a channel the editor is not
+      editing.
+    - Text is a pool of CATextLayers over the Metal layer, reset per frame
+      by beginLabels/endLabels. The renderer draws rectangles and only
+      rectangles; that is what makes ten thousand notes one draw call, and
+      adding a glyph path to it would be a change to the thing D-006's
+      performance model rests on. Labels are capped at bar numbers and one
+      name per octave for the same reason.
+    - Scale highlighting reads _keyRootPc and _scale — the SAME state the
+      nudge tool uses. If a key-signature control is ever added, it sets
+      those two and both follow.
+
 Things to be careful about:
 
   - third_party/ is gitignored: a fresh clone or worktree has neither

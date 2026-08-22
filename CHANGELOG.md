@@ -8,6 +8,43 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### UI — the Piano Roll gets its ruler, its ghosts and its key — 2026-08-23
+
+**Added**
+
+- **A numbered bar ruler across the top.** The Playlist and the Channel
+  Rack both had one; the Piano Roll was the last pane with a time axis
+  and no way to read it. Bars numbered, beats ticked, the playhead
+  running through it. A click there is a click on a bar number, not a
+  new note on whatever key sits under it.
+- **Ghost notes** — what the pattern's other channels are playing, drawn
+  faded behind this one's and never selectable. Writing a counter-line
+  against a part you cannot see is guesswork. `G` toggles them.
+- **Scale highlighting.** Rows outside the key signature are dimmed, so
+  the notes that belong are the ones the eye lands on. The key and scale
+  are the ones the nudge tool (`[` and `]`) already works in, so the grid
+  and the tool cannot disagree about what "in key" means.
+- **Key names on the keyboard** — a C every octave, which is what makes
+  the pitch axis countable. Bar numbers and key names are the only two
+  things in this pane that are not rectangles; they ride as a recycled
+  pool of `CATextLayer`s over the Metal layer rather than through a
+  glyph atlas, so the renderer still draws one primitive in one call.
+
+**Changed**
+
+- `PianoRollModel::Viewport::height` is the note grid's height alone now
+  — ruler above, velocity lane below, neither counted in it. Everything
+  that draws or hit-tests a note is unaffected; `keyToY` and `yToKey`
+  offset by the band, and both hit tests refuse points inside it.
+- `collectVisibleNotes` takes an `append` flag, which is how several
+  channels' ghosts are gathered into one list without a buffer each.
+
+**Files**
+
+- `src/app/PianoRollModel.{h,cpp}`, `src/ui/macos/PianoRollView.mm`
+- `tests/unit/PianoRollTests.cpp` — 7 new cases
+
+
 ### UI — the Channel Rack, shaped like a step sequencer — 2026-08-22
 
 **Added**

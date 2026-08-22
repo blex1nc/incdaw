@@ -12,6 +12,8 @@
 
 #import <QuartzCore/CAMetalLayer.h>
 #import <QuartzCore/CADisplayLink.h>
+#import <QuartzCore/CATextLayer.h>
+#import <QuartzCore/CATransaction.h>
 
 #include <memory>
 #include <vector>
@@ -33,6 +35,10 @@ constexpr double velocityLaneExtent = 88.0;
 /// window the lane gives way instead — losing the notes to keep the lane would
 /// be the wrong trade in every case.
 constexpr double minimumGridHeight = 140.0;
+
+/// The numbered band across the top, where bars are counted. Every other pane
+/// with a time axis has one; the Piano Roll was the last without.
+constexpr double rulerExtent = 22.0;
 
 /// Which pitch classes are black keys. Used for both the keyboard strip and the
 /// row shading behind the grid, so the two can never disagree.
@@ -107,8 +113,20 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 
     std::vector<ui::Rect>                        _rectangles;
     std::vector<app::PianoRollModel::VisibleNote> _visible;
+    std::vector<app::PianoRollModel::VisibleNote> _ghosts;
     std::vector<app::PianoRollModel::VelocityBar> _bars;
     std::vector<std::size_t>                     _hits;
+
+    /// Text the renderer cannot draw.
+    ///
+    /// PianoRollRenderer draws one primitive and it is a rectangle, which is
+    /// what makes ten thousand notes cost one draw call. Bar numbers and key
+    /// names are the two things in this pane that are not rectangles, so they
+    /// ride as CATextLayers over the Metal layer — a pool, repositioned rather
+    /// than rebuilt, because allocating layers per frame would undo the point
+    /// of the renderer.
+    NSMutableArray<CATextLayer*>* _labels;
+    NSUInteger                    _labelsUsed;
 
     CAMetalLayer* _metalLayer;
     NSString*     _rendererError;
@@ -129,6 +147,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     /// index lists, and a selection that changed mid-drag would break the merge
     /// and leave one undo entry per mouse move.
     BOOL                     _velocityLaneVisible;
+    BOOL                     _ghostsVisible;
     std::vector<std::size_t> _velocityTargets;
     int                      _dragAppliedVelocity;
 
@@ -161,6 +180,14 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     // lane nobody uses, and the grid is still the larger half of the view.
     _velocityLaneVisible = YES;
     _dragAppliedVelocity = -1;
+
+    // Ghost notes: what the pattern's other channels are playing, behind what
+    // this one is. Writing a counter-line against a part you cannot see is
+    // guesswork, which is why every piano roll worth using shows them.
+    _ghostsVisible = YES;
+
+    _labels     = [NSMutableArray array];
+    _labelsUsed = 0;
     _playheadTick     = -1;
     _statusText       = @"Ready";
     _stampChordIndex  = 0;
@@ -306,12 +333,15 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     const double want = _velocityLaneVisible ? velocityLaneExtent : 0.0;
 
     auto viewport = _model->viewport();
-    viewport.width  = size.width - keyboardWidth;
-    viewport.height = std::max(minimumGridHeight, size.height - want);
+    viewport.width       = size.width - keyboardWidth;
+    viewport.rulerHeight = rulerExtent;
+
+    const double belowRuler = size.height - viewport.rulerHeight;
+    viewport.height = std::max(minimumGridHeight, belowRuler - want);
 
     // Whatever is genuinely left over, which is less than `want` in a window
     // too short to give the grid its minimum.
-    viewport.velocityLaneHeight = std::max(0.0, size.height - viewport.height);
+    viewport.velocityLaneHeight = std::max(0.0, belowRuler - viewport.height);
 
     _model->setViewport(viewport);
 }
@@ -345,7 +375,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     // lane shares the grid's time axis, and a beat that stops at the boundary
     // makes the two read as unrelated panes.
     const double laneHeight  = viewport.velocityLaneHeight;
-    const double totalHeight = viewport.height + laneHeight;
+    const double totalHeight = _model->gridTop() + viewport.height + laneHeight;
 
     const Rgb whiteRow  = components(theme::mix(theme::ink(Ink::panel),
                                                 theme::ink(Ink::panelRaised), 0.35));
@@ -370,7 +400,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 
     // The keyboard's own ground, so that the dark keys read as keys rather than
     // as gaps in the strip.
-    _rectangles.push_back(makeRect(0.0, 0.0, keyboardWidth, viewport.height,
+    _rectangles.push_back(makeRect(0.0, _model->gridTop(), keyboardWidth, viewport.height,
                                    components(theme::ink(Ink::panelRaised))));
 
     // Key rows. Black-key rows are darker, which is what makes the pitch axis
@@ -381,6 +411,14 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 
         _rectangles.push_back(makeRect(keyboardWidth, y, gridWidth, rowHeight,
                                        black ? blackRow : whiteRow));
+
+        // Scale highlighting: rows outside the key signature are dimmed, so
+        // the notes that belong are the ones the eye lands on. The key and
+        // scale are the ones the nudge tool already works in ([ and ]), so the
+        // grid and the tool can never disagree about what "in key" means.
+        if (app::music::degreeOf(_keyRootPc, _scale, ((key % 12) + 12) % 12) < 0)
+            _rectangles.push_back(makeRect(keyboardWidth, y, gridWidth, rowHeight,
+                                           {0.0, 0.0, 0.0}, 0.22));
 
         // Octave separators, so twelve rows read as one octave.
         if (key % 12 == 0)
@@ -432,8 +470,27 @@ constexpr std::array<const char*, 8> stampSuffixes = {
             continue;
 
         const bool isBar = (tick % bar) == 0;
-        _rectangles.push_back(makeRect(x, 0.0, isBar ? 1.5 : 1.0, totalHeight,
+        _rectangles.push_back(makeRect(x, _model->gridTop(), isBar ? 1.5 : 1.0,
+                                       totalHeight - _model->gridTop(),
                                        isBar ? barLine : beatLine));
+    }
+
+    // Ghost notes: the pattern's other channels, behind this one's. Drawn
+    // before them and without a lit edge, so they read as context and are
+    // never mistaken for something this editor can move.
+    if (_ghostsVisible) {
+        [self collectGhostNotes];
+
+        const Rgb ghost = components(theme::ink(Ink::textDim));
+
+        for (const auto& visible : _ghosts) {
+            const double x = keyboardWidth + visible.x;
+            const double width  = std::max(2.0, visible.width - 1.0);
+            const double height = std::max(2.0, visible.height - 2.0);
+
+            _rectangles.push_back(makeRect(x, visible.y + 1.0, width, height, ghost, 0.30,
+                                           std::min(3.0, std::min(width, height) / 2.0)));
+        }
     }
 
     // Notes.
@@ -502,12 +559,164 @@ constexpr std::array<const char*, 8> stampSuffixes = {
         _rectangles.push_back(makeRect(x, y, width, height, selection, 0.22, 3.0));
     }
 
+    // The ruler band, over everything the grid drew and under the playhead.
+    if (_model->hasRuler()) {
+        const double height = _model->gridTop();
+
+        _rectangles.push_back(makeRect(0.0, 0.0, keyboardWidth + gridWidth, height,
+                                       components(theme::ink(Ink::panelRaised))));
+
+        _rectangles.push_back(makeRect(0.0, height - 1.0, keyboardWidth + gridWidth, 1.0,
+                                       barLine, 0.9));
+
+        // A tick per beat, taller on the bar. The numbers are text and ride
+        // above as layers; these are what makes the band readable without them.
+        for (Tick tick = firstBeat; tick <= lastTick; tick += beat) {
+            const double x = keyboardWidth + _model->tickToX(tick);
+            if (x < keyboardWidth)
+                continue;
+
+            const bool isBar = (tick % bar) == 0;
+
+            _rectangles.push_back(makeRect(x, isBar ? height * 0.35 : height * 0.6,
+                                           isBar ? 1.5 : 1.0,
+                                           isBar ? height * 0.65 : height * 0.4,
+                                           isBar ? barLine : beatLine));
+        }
+    }
+
     // Playhead.
     if (_playheadTick >= 0) {
         const double x = keyboardWidth + _model->tickToX(_playheadTick);
         if (x >= keyboardWidth && x <= keyboardWidth + gridWidth)
             _rectangles.push_back(makeRect(x, 0.0, 2.0, totalHeight, playhead));
     }
+}
+
+/// Gathers what the pattern's other channels are playing into `_ghosts`.
+- (void)collectGhostNotes
+{
+    _ghosts.clear();
+
+    const project::Pattern* pattern = [self currentPattern];
+    if (pattern == nullptr || _project == nullptr)
+        return;
+
+    for (const project::Channel& channel : _project->channels()) {
+        if (channel.id.value() == _channelIdValue)
+            continue;
+
+        if (const std::vector<project::MidiEvent>* events = pattern->events(channel.id))
+            _model->collectVisibleNotes(*events, _ghosts, /*append=*/true);
+    }
+}
+
+// ── Text over the rectangles ─────────────────────────────────────────────────
+
+/// Hands out one CATextLayer per call, recycling the pool rather than growing
+/// it. `beginLabels` resets the cursor; `endLabels` hides whatever the frame
+/// did not use, which is what keeps a scrolled-away bar number from lingering.
+- (void)beginLabels
+{
+    _labelsUsed = 0;
+}
+
+- (CATextLayer*)nextLabelWithText:(NSString*)text
+                            frame:(NSRect)frame
+                           colour:(NSColor*)colour
+                             size:(CGFloat)size
+                        alignment:(NSString*)alignment
+{
+    CATextLayer* label = nil;
+
+    if (_labelsUsed < _labels.count) {
+        label = _labels[_labelsUsed];
+    } else {
+        label = [CATextLayer layer];
+        label.contentsScale = _metalLayer.contentsScale;
+        [_labels addObject:label];
+        [_metalLayer addSublayer:label];
+    }
+
+    ++_labelsUsed;
+
+    // Implicit animation would smear every label across the screen as the view
+    // scrolls; these are readouts, not objects that move.
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
+    label.hidden           = NO;
+    label.string           = text;
+    label.font             = (__bridge CFTypeRef)ui::theme::labelFont(size, NSFontWeightMedium);
+    label.fontSize         = size;
+    label.foregroundColor  = colour.CGColor;
+    label.alignmentMode    = alignment;
+    label.frame            = frame;
+
+    [CATransaction commit];
+    return label;
+}
+
+- (void)endLabels
+{
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
+    for (NSUInteger index = _labelsUsed; index < _labels.count; ++index)
+        _labels[index].hidden = YES;
+
+    [CATransaction commit];
+}
+
+/// Bar numbers in the ruler, and the name of every C on the keyboard.
+///
+/// Those two, and nothing else: a label per beat would be a wall of digits at
+/// this pitch, and a name per key would be one at any pitch. A C every octave
+/// is what makes the keyboard countable.
+- (void)layoutLabels
+{
+    namespace theme = incdaw::ui::theme;
+    using theme::Ink;
+
+    [self beginLabels];
+
+    const auto&  viewport = _model->viewport();
+    const double rowHeight = _model->keyHeight();
+
+    if (_model->hasRuler()) {
+        const Tick bar = ticksPerQuarterNote * 4;
+        const Tick lastTick = viewport.firstTick + viewport.visibleTicks;
+        const Tick firstBar = (viewport.firstTick / bar) * bar;
+
+        for (Tick tick = firstBar; tick <= lastTick; tick += bar) {
+            const double x = keyboardWidth + _model->tickToX(tick);
+            if (x < keyboardWidth - 1.0)
+                continue;
+
+            [self nextLabelWithText:[NSString stringWithFormat:@"%lld", tick / bar + 1]
+                              frame:NSMakeRect(x + 4.0, 3.0, 44.0, 13.0)
+                             colour:theme::ink(Ink::textSecondary)
+                               size:9.5
+                          alignment:kCAAlignmentLeft];
+        }
+    }
+
+    // Key names, only where a row is tall enough to hold one.
+    if (rowHeight >= 9.0) {
+        for (int key = viewport.lowestKey; key < viewport.lowestKey + viewport.visibleKeys; ++key) {
+            if (key % 12 != 0)
+                continue;
+
+            [self nextLabelWithText:@(app::music::noteName(key).c_str())
+                              frame:NSMakeRect(6.0, _model->keyToY(key) + (rowHeight - 11.0) / 2.0,
+                                               keyboardWidth - 18.0, 11.0)
+                             colour:theme::ink(Ink::panelSunken)
+                               size:9.0
+                          alignment:kCAAlignmentLeft];
+        }
+    }
+
+    [self endLabels];
 }
 
 - (void)renderFrame
@@ -528,6 +737,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     }
 
     [self updateDrawableSize];
+    [self layoutLabels];
 
     _renderer->draw(_metalLayer, _rectangles,
                     static_cast<float>(self.bounds.size.width),
@@ -561,6 +771,13 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 
     // Clicking the keyboard strip is not an edit.
     if (viewPoint.x < keyboardWidth) {
+        _dragMode = DragMode::none;
+        return;
+    }
+
+    // The ruler is a label, not the top of the grid. Without this guard a
+    // click on a bar number would draw a note on whatever key sits under it.
+    if (_model->isInRuler(grid.y)) {
         _dragMode = DragMode::none;
         return;
     }
@@ -791,10 +1008,10 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 
     const NSPoint grid = [self gridPointFromEvent:event];
 
-    // A right-click in the lane is not a delete. yToKey would answer with a
-    // key below the lowest visible one and find nothing, but relying on that
-    // would make the lane's safety an accident of the key arithmetic.
-    if (_model->isInVelocityLane(grid.y))
+    // A right-click in the ruler or the lane is not a delete. yToKey would
+    // answer with a key outside the visible range and find nothing, but relying
+    // on that would make their safety an accident of the key arithmetic.
+    if (_model->isInRuler(grid.y) || _model->isInVelocityLane(grid.y))
         return;
 
     const std::size_t hit = _model->noteAtPoint([self currentNotes], grid.x, grid.y);
@@ -934,6 +1151,13 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     // E for event lane, which is what FL Studio calls the strip this is.
     if (!command && (character == 'e' || character == 'E')) {
         [self toggleVelocityLane];
+        return;
+    }
+
+    if (!command && (character == 'g' || character == 'G')) {
+        _ghostsVisible = !_ghostsVisible;
+        _statusText    = _ghostsVisible ? @"Ghost notes shown" : @"Ghost notes hidden";
+        [self setNeedsDisplay:YES];
         return;
     }
 

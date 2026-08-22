@@ -15,11 +15,13 @@ bool keyIsVisible(const MidiEvent& event, const PianoRollModel::Viewport& viewpo
 
 } // namespace
 
-void PianoRollModel::collectVisibleNotes(const NoteList& notes, std::vector<VisibleNote>& out) const
+void PianoRollModel::collectVisibleNotes(const NoteList& notes, std::vector<VisibleNote>& out,
+                                         bool append) const
 {
     // Cleared, not reassigned: the capacity earned on previous frames is what
     // keeps a steady-state frame allocation-free.
-    out.clear();
+    if (!append)
+        out.clear();
 
     const double scale  = pointsPerTick();
     const double height = keyHeight();
@@ -166,6 +168,11 @@ std::size_t PianoRollModel::noteAtPoint(const NoteList& notes, double x, double 
     const double height = keyHeight();
 
     if (scale <= 0.0 || height <= 0.0)
+        return noNote;
+
+    // The ruler is a label, not the top row of the grid. Without this a click
+    // in the band would resolve to whatever key sits under it.
+    if (isInRuler(y))
         return noNote;
 
     const int  key  = yToKey(y);

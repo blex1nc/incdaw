@@ -535,6 +535,19 @@ a real gap, measured through one `stepOffset` the grid, ruler and hit test share
 existing compiler path; the hit test agrees with the drawn geometry at every
 step of a 32-step pattern, gaps included, asserted rather than eyeballed.
 
+### Increment 14 — the Piano Roll's ruler, ghosts and key — DONE 2026-08-23
+
+Three things a piano roll is expected to have and this one did not: a numbered
+bar ruler (the last pane with a time axis and no way to read it), ghost notes
+from the pattern's other channels, and scale highlighting keyed to the same
+root and scale the nudge tool works in. Key names on the keyboard came with the
+text layer the ruler needed — the Metal renderer draws rectangles only, so the
+two labelled things in the pane ride as a recycled CATextLayer pool above it.
+
+**Exit criterion (met):** the grid, the ruler and the velocity lane divide the
+view's height without overlapping; a click in the ruler draws nothing; and key
+and y still round-trip with the band in the way, asserted per key.
+
 ### Remaining, by gate
 
 - **Dependency approval required (§41):** AU hosting, then VST3; FLAC and
