@@ -555,4 +555,32 @@ void SetClipPanCommand::mergeWith(const Command& next)
         pan_ = other->pan_;
 }
 
+// ── SetClipReversedCommand ────────────────────────────────────────────────────
+
+bool SetClipReversedCommand::execute(Project& project)
+{
+    previous_.clear();
+
+    for (const EntityId id : clips_) {
+        Clip* clip = project.findClip(id);
+        if (clip == nullptr || clip->type != project::ClipType::audio)
+            continue;
+        if (clip->reversed == reversed_)
+            continue;
+
+        previous_.push_back({id, clip->reversed});
+        clip->reversed = reversed_;
+    }
+
+    return !previous_.empty();
+}
+
+void SetClipReversedCommand::undo(Project& project)
+{
+    for (const Previous& entry : previous_) {
+        if (Clip* clip = project.findClip(entry.id))
+            clip->reversed = entry.reversed;
+    }
+}
+
 } // namespace incdaw::app

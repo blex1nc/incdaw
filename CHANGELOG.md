@@ -8,6 +8,20 @@ public version yet.
 
 ## [Unreleased]
 
+### Playlist — a clip can be played backwards — 2026-08-23
+
+- **Per-clip reverse.** `Clip::reversed` was stored and saved and read by
+  nothing. It now has a command and **Reverse** / **Play Forwards** in the
+  clip menu, and only audio clips take it — reversing a note list is a
+  different operation with a different name, so pattern clips in the
+  selection are left alone rather than storing a flag nothing reads.
+- **Reversed over the clip's window, not the file's.** A clip longer than
+  the audio under it plays content-then-silence forwards, so backwards it
+  plays silence-then-content: the gap moves rather than disappearing. The
+  span is built at compile time, after any stretch, which means a reversed
+  clip preloads instead of streaming — the streamer reads forwards, and a
+  second window implementation for one flag is not worth having.
+
 ### Playlist — a clip can be placed in the stereo image — 2026-08-23
 
 - **Per-clip pan.** `Clip::pan` has been written to the project file since

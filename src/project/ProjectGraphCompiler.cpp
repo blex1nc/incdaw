@@ -691,7 +691,13 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 const bool warped =
                     clip.stretchRatio != 1.0 || clip.pitchSemitones != 0.0;
 
-                if (!warped && shouldStream(clip.source)) {
+                // Reversal is the same kind of thing as a warp: the played
+                // span is produced here, at compile time, and the node plays
+                // the result. Streaming it would mean the streamer reading
+                // backwards, which is a second window implementation for one
+                // flag — so a reversed clip preloads, exactly as a warped one
+                // does.
+                if (!warped && !clip.reversed && shouldStream(clip.source)) {
                     placed.stream = openStream(clip.source, clip.sourceOffset);
                     if (placed.stream == nullptr)
                         continue;
@@ -739,6 +745,38 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                     placed.audio        = std::move(rendered);
                     placed.sourceOffset = 0;
                     placed.length       = std::min(clip.length, placed.audio->frameCount);
+                }
+
+                // Reversal, over the clip's window rather than the file's:
+                // what plays forwards as content-then-silence has to play
+                // backwards as silence-then-content, or a clip longer than
+                // its source would lose the gap instead of moving it. Built
+                // after the warp, so a stretched clip reverses what the
+                // stretch produced.
+                if (clip.reversed && placed.audio != nullptr && placed.length > 0) {
+                    auto source = placed.audio;
+
+                    auto flipped          = std::make_shared<engine::AudioFileData>();
+                    flipped->sampleRate   = source->sampleRate;
+                    flipped->channelCount = source->channelCount;
+                    flipped->frameCount   = placed.length;
+                    flipped->channels.assign(
+                        source->channelCount,
+                        std::vector<engine::Sample>(static_cast<std::size_t>(placed.length), 0.0f));
+
+                    for (std::size_t channel = 0; channel < source->channelCount; ++channel) {
+                        for (engine::FrameCount frame = 0; frame < placed.length; ++frame) {
+                            const engine::FrameCount mirrored =
+                                placed.sourceOffset + (placed.length - 1 - frame);
+
+                            if (mirrored < source->frameCount)
+                                flipped->channels[channel][static_cast<std::size_t>(frame)] =
+                                    source->channels[channel][static_cast<std::size_t>(mirrored)];
+                        }
+                    }
+
+                    placed.audio        = std::move(flipped);
+                    placed.sourceOffset = 0;
                 }
 
                 // Clip normalize folds into the placement gain here, at

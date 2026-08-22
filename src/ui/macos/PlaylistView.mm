@@ -1018,6 +1018,16 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
                                keyEquivalent:@""];
     pan.target = self;
 
+    NSMenuItem* reverse = [menu addItemWithTitle:@"Reverse"
+                                          action:@selector(reverseFromMenu:)
+                                   keyEquivalent:@""];
+    reverse.target = self;
+
+    NSMenuItem* unreverse = [menu addItemWithTitle:@"Play Forwards"
+                                            action:@selector(unreverseFromMenu:)
+                                     keyEquivalent:@""];
+    unreverse.target = self;
+
     [menu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* remove = [menu addItemWithTitle:@"Remove"
@@ -1059,6 +1069,18 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     (void)sender;
     [self commit:std::make_unique<app::SetClipMutedCommand>(_model->selection(), false)];
+}
+
+- (void)reverseFromMenu:(id)sender
+{
+    (void)sender;
+    [self commit:std::make_unique<app::SetClipReversedCommand>(_model->selection(), true)];
+}
+
+- (void)unreverseFromMenu:(id)sender
+{
+    (void)sender;
+    [self commit:std::make_unique<app::SetClipReversedCommand>(_model->selection(), false)];
 }
 
 - (void)panFromMenu:(id)sender

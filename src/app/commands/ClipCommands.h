@@ -261,4 +261,35 @@ private:
     std::vector<double> previous_;
 };
 
+/// Plays an audio clip backwards.
+///
+/// Only audio clips carry the flag — a pattern plays notes, and reversing a
+/// note list is a different operation with a different name. Clips of other
+/// types in the selection are left alone rather than silently storing a value
+/// nothing will ever read.
+class SetClipReversedCommand final : public Command {
+public:
+    SetClipReversedCommand(ClipIds clips, bool reversed)
+        : clips_(std::move(clips)), reversed_(reversed) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.setReversed"; }
+    [[nodiscard]] std::string name() const override
+    {
+        return reversed_ ? "Reverse Clips" : "Unreverse Clips";
+    }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    struct Previous {
+        EntityId id;
+        bool     reversed = false;
+    };
+
+    ClipIds               clips_;
+    bool                  reversed_ = false;
+    std::vector<Previous> previous_;
+};
+
 } // namespace incdaw::app

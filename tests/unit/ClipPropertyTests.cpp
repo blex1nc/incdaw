@@ -1,4 +1,4 @@
-// TRACK B (B1) — the clip properties the model stored and nothing could set.
+// TRACK B (B1, B2) — the clip properties the model stored and nothing could set.
 //
 // `Clip::pan` has been serialized and round-tripped since the format's first
 // version, but no command wrote it and no node read it: a project could carry
@@ -6,6 +6,11 @@
 // command and its undo, the pan law resolved at compile time, and the node
 // applying it — and the reference gains are computed here from the definition
 // of constant power rather than by calling the class under test.
+//
+// `Clip::reversed` was in the same position: stored, saved, and inert. The
+// reversal happens at compile time over the clip's *window*, not the file's,
+// so a clip longer than the audio it plays moves its gap to the front instead
+// of losing it — that asymmetry is the case worth pinning.
 
 #include "doctest.h"
 
@@ -357,4 +362,154 @@ TEST_CASE("clip pan survives a save and load")
     const project::Clip* clip = reloaded.findClip(fixture.clip);
     REQUIRE(clip != nullptr);
     CHECK(clip->pan == doctest::Approx(-0.4));
+}
+
+
+// ── Reversal ─────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// Renders a whole project through the compiled graph, both output channels.
+std::vector<std::vector<Sample>> renderProject(const project::Project& projectModel,
+                                               FrameCount blockSize, int blocks)
+{
+    project::GraphCompileOptions options;
+    options.source     = project::PlaybackSource::arrangement;
+    options.masterGain = 1.0f;
+
+    auto compiled = project::compileProjectGraph(projectModel, projectModel.tempoMap(), options);
+    REQUIRE(bool(compiled));
+
+    engine::AudioBufferPool pool;
+    pool.allocate(1, 2, blockSize);
+
+    std::vector<std::vector<Sample>> out(2);
+
+    for (int block = 0; block < blocks; ++block) {
+        pool.buffer(0).clear();
+        compiled.graph->process(pool.buffer(0), blockSize,
+                                static_cast<FramePosition>(block) * blockSize);
+
+        for (std::size_t channel = 0; channel < 2; ++channel) {
+            const Sample* samples = pool.buffer(0).channel(channel);
+            for (FrameCount frame = 0; frame < blockSize; ++frame)
+                out[channel].push_back(samples[frame]);
+        }
+    }
+
+    return out;
+}
+
+/// A saved asset plus a project placing one clip over it.
+struct CompiledFixture {
+    ScratchDirectory  scratch;
+    project::Project  project;
+    project::EntityId clip;
+
+    CompiledFixture(const std::string& name, FrameCount assetFrames, FrameCount clipLength)
+        : scratch(name)
+    {
+        REQUIRE(bool(engine::WavFile::write(scratch.path / "tone.wav",
+                                            *makeAudio(1, assetFrames))));
+
+        project.tempoMap().setSampleRate(48000.0);
+
+        auto& track      = project.addTrack(project::TrackType::audio, "Audio");
+        auto& asset      = project.addAudioAsset((scratch.path / "tone.wav").string());
+        asset.sampleRate = 48000.0;
+        asset.frameCount = assetFrames;
+
+        auto& placed  = project.addClip(project::ClipType::audio, track.id, asset.id);
+        placed.start  = 0;
+        placed.length = clipLength;
+        clip          = placed.id;
+    }
+};
+
+} // namespace
+
+TEST_CASE("a reversed clip plays its window backwards")
+{
+    CompiledFixture fixture{"reverse", 4800, 2400};
+
+    const auto forwards = renderProject(fixture.project, 512, 5);
+
+    fixture.project.findClip(fixture.clip)->reversed = true;
+    const auto backwards = renderProject(fixture.project, 512, 5);
+
+    for (FrameCount frame = 0; frame < 2400; ++frame) {
+        const auto index    = static_cast<std::size_t>(frame);
+        const auto mirrored = static_cast<std::size_t>(2400 - 1 - frame);
+
+        CHECK(static_cast<double>(backwards[0][index])
+              == doctest::Approx(static_cast<double>(forwards[0][mirrored])).epsilon(0.001));
+    }
+}
+
+TEST_CASE("a reversed clip longer than its audio moves the gap to the front")
+{
+    // 1,000 frames of audio under a 2,400-frame clip: forwards it is content
+    // then silence, so backwards it must be silence then content.
+    CompiledFixture fixture{"reverse-short", 1000, 2400};
+
+    fixture.project.findClip(fixture.clip)->reversed = true;
+    const auto backwards = renderProject(fixture.project, 512, 5);
+
+    for (FrameCount frame = 0; frame < 1400; ++frame)
+        CHECK(backwards[0][static_cast<std::size_t>(frame)] == 0.0f);
+
+    bool sawContent = false;
+    for (FrameCount frame = 1400; frame < 2400; ++frame)
+        sawContent = sawContent
+                  || std::abs(static_cast<double>(backwards[0][static_cast<std::size_t>(frame)]))
+                         > 1.0e-4;
+
+    CHECK(sawContent);
+}
+
+TEST_CASE("reversing is undoable and leaves clips that are not audio alone")
+{
+    AudioFixture fixture;
+
+    auto& pattern  = fixture.project.addPattern("P1");
+    pattern.length = engine::ticksPerQuarterNote * 4;
+
+    const project::EntityId patternTrack =
+        fixture.project.addTrack(project::TrackType::instrument, "Inst").id;
+
+    auto& patternClip       = fixture.project.addClip(project::ClipType::pattern,
+                                                      patternTrack, pattern.id);
+    patternClip.lengthTicks = pattern.length;
+
+    app::CommandRegistry registry{fixture.project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetClipReversedCommand>(
+        app::ClipIds{fixture.clip, patternClip.id}, true)));
+
+    CHECK(fixture.at().reversed);
+    CHECK_FALSE(fixture.project.findClip(patternClip.id)->reversed);
+
+    REQUIRE(registry.undo());
+    CHECK_FALSE(fixture.at().reversed);
+
+    // Nothing to change: a pattern clip alone is not an undo entry.
+    CHECK_FALSE(registry.execute(std::make_unique<app::SetClipReversedCommand>(
+        app::ClipIds{patternClip.id}, true)));
+}
+
+TEST_CASE("the reversed flag survives a save and load")
+{
+    ScratchDirectory scratch{"reverse-roundtrip"};
+
+    AudioFixture fixture;
+    fixture.project.findClip(fixture.clip)->reversed = true;
+
+    REQUIRE(bool(project::ProjectFile::save(fixture.project, scratch.path / "p.incdaw")));
+
+    project::Project reloaded;
+    REQUIRE(bool(project::ProjectFile::load(reloaded, scratch.path / "p.incdaw")));
+
+    const project::Clip* clip = reloaded.findClip(fixture.clip);
+    REQUIRE(clip != nullptr);
+    CHECK(clip->reversed);
 }
