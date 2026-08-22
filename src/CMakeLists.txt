@@ -173,6 +173,7 @@ add_library(incdaw_app STATIC
     app/commands/MarkerCommands.cpp
     app/commands/MixerCommands.cpp
     app/commands/PluginCommands.cpp
+    app/commands/PresetCommands.cpp
     app/commands/AutomationCommands.cpp
     app/commands/RecordingCommands.cpp
     app/commands/AudioEditCommands.cpp

@@ -10,11 +10,15 @@
 
 #include "doctest.h"
 
+#include "app/CommandRegistry.h"
+#include "app/commands/PresetCommands.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
+#include "engine/instrument/PianoInstrument.h"
 #include "engine/instrument/BuiltinInstruments.h"
 #include "project/PresetLibrary.h"
 
 #include <filesystem>
+#include <memory>
 #include <fstream>
 #include <set>
 #include <string>
@@ -419,4 +423,117 @@ TEST_CASE("renaming onto a taken name is refused rather than overwriting it")
     CHECK_FALSE(library.rename("incdaw.eq", "One", "Two", error));
     CHECK(library.contains("incdaw.eq", "One"));
     CHECK(library.contains("incdaw.eq", "Two"));
+}
+
+// ── Recalling one, as one undo entry ─────────────────────────────────────────
+
+TEST_CASE("recalling an instrument preset is one undo entry")
+{
+    project::Project project;
+    project::Channel& channel = project.addChannel("Keys");
+    channel.instrument        = plugins::builtinPiano();
+
+    // Something already dialled in, on a parameter the preset does not name.
+    channel.instrumentParameters.push_back(
+        {static_cast<std::uint32_t>(engine::PianoParam::gain), 0.42});
+
+    app::CommandRegistry registry{project};
+
+    const PresetLibrary          library{{}};
+    const std::optional<Preset>  tine = library.resolve("incdaw.piano", "Electric Tine");
+    REQUIRE(tine.has_value());
+
+    REQUIRE(registry.execute(std::make_unique<app::ApplyInstrumentPresetCommand>(
+        channel.id, tine->values, tine->name)));
+    CHECK(registry.undoDepth() == 1);
+
+    const project::Channel* after = project.findChannel(channel.id);
+    REQUIRE(after != nullptr);
+
+    const auto valueOf = [&after](engine::PianoParam which) {
+        for (const project::ChannelInstrumentParameter& stored : after->instrumentParameters)
+            if (stored.parameterId == static_cast<std::uint32_t>(which))
+                return stored.value;
+        return -999.0;
+    };
+
+    CHECK(valueOf(engine::PianoParam::model)
+          == doctest::Approx(static_cast<double>(engine::PianoModel::electric)));
+
+    // Untouched by the preset, so untouched full stop.
+    CHECK(valueOf(engine::PianoParam::gain) == doctest::Approx(0.42));
+
+    REQUIRE(registry.undo());
+    const project::Channel* back = project.findChannel(channel.id);
+    REQUIRE(back != nullptr);
+    REQUIRE(back->instrumentParameters.size() == 1);
+    CHECK(back->instrumentParameters[0].value == doctest::Approx(0.42));
+}
+
+TEST_CASE("recalling the preset that is already loaded is not an undo entry")
+{
+    project::Project project;
+    project::Channel& channel = project.addChannel("Keys");
+    channel.instrument        = plugins::builtinPiano();
+
+    app::CommandRegistry registry{project};
+
+    const PresetLibrary         library{{}};
+    const std::optional<Preset> pop = library.resolve("incdaw.piano", "Pop Bright");
+    REQUIRE(pop.has_value());
+
+    REQUIRE(registry.execute(std::make_unique<app::ApplyInstrumentPresetCommand>(
+        channel.id, pop->values, pop->name)));
+    CHECK_FALSE(registry.execute(std::make_unique<app::ApplyInstrumentPresetCommand>(
+        channel.id, pop->values, pop->name)));
+    CHECK(registry.undoDepth() == 1);
+}
+
+TEST_CASE("recalling an insert preset writes the values, and undo puts them back")
+{
+    project::Project     project;
+    app::CommandRegistry registry{project};
+
+    std::vector<std::pair<std::uint32_t, double>> written;
+    const auto writer = [&written](std::uint32_t id, double value) {
+        written.push_back({id, value});
+    };
+
+    const std::vector<engine::dsp::PresetValue> before = {{0u, 0.8}, {1u, 0.4}, {2u, 0.3}};
+    const std::vector<engine::dsp::PresetValue> after  = {{0u, 1.3}, {1u, 0.4}, {2u, 0.35}};
+
+    REQUIRE(registry.execute(std::make_unique<app::ApplyInsertPresetCommand>(
+        before, after, "Hall", writer)));
+
+    REQUIRE(written.size() == 3);
+    CHECK(written[0].second == doctest::Approx(1.3));
+    CHECK(registry.undoDepth() == 1);
+    CHECK(registry.undoName() == "Recall \"Hall\"");
+
+    written.clear();
+    REQUIRE(registry.undo());
+    REQUIRE(written.size() == 3);
+    CHECK(written[0].second == doctest::Approx(0.8));
+    CHECK(written[2].second == doctest::Approx(0.3));
+}
+
+TEST_CASE("an insert preset that changes nothing is not an undo entry")
+{
+    project::Project     project;
+    app::CommandRegistry registry{project};
+
+    int calls = 0;
+    const auto writer = [&calls](std::uint32_t, double) { ++calls; };
+
+    const std::vector<engine::dsp::PresetValue> same = {{0u, 0.8}, {1u, 0.4}};
+
+    CHECK_FALSE(registry.execute(
+        std::make_unique<app::ApplyInsertPresetCommand>(same, same, "Same", writer)));
+    CHECK(calls == 0);
+    CHECK(registry.undoDepth() == 0);
+
+    // And a command with no writer refuses rather than pretending it applied.
+    CHECK_FALSE(registry.execute(std::make_unique<app::ApplyInsertPresetCommand>(
+        std::vector<engine::dsp::PresetValue>{}, same, "Orphan",
+        app::ApplyInsertPresetCommand::Writer{})));
 }
