@@ -71,7 +71,90 @@ Not new in 2026, but part of the program INCDAW measures against:
   surface beyond the command registry.
 - **Plugin hosting**: no AU, no VST3, no sandboxed in-process crash recovery.
 
-## 3. Closure plan — this branch
+## 3. Re-audit — 2026-08-23 · Baseline INCDAW 0.10.0
+
+The list in §1 and §2 was written against 0.9.0. P1–P10 below and sixteen UI
+increments have closed most of it. What follows is the gap list re-verified
+against the source tree at `5609f0d`, not against the older list — every "have"
+was confirmed in code, every "missing" by its absence.
+
+Functional reference re-checked against Image-Line's own pages (the 2026
+release page, the features page and the online manual sections named below).
+
+### What INCDAW now has that §2 said it lacked
+
+Time stretch/pitch (WSOLA, offline + clip warp) · slicer with onset detection ·
+chorus/flanger/phaser/transient split · sidechain routing · LUFS (BS.1770-4) ·
+stereo separation · pre-fader sends · browser with preview and drag/drop ·
+AU effect hosting · markers and regions on the timeline · clip split · chord
+and note tools · a synthesized piano · **automation touch/latch/write modes**
+(`app::AutomationWriteSession::WriteMode`) · per-step levels · theme files.
+
+### Track A — Sound: instruments and effects
+
+| # | Gap | State |
+|---|---|---|
+| A1 | Wavetable synth | ✗ no wavetable instrument |
+| A2 | FM synth | ✗ (the piano's electric voicing has an FM tine; there is no FM *instrument*) |
+| A3 | Granular synth | ✗ |
+| A4 | Drum machine / pad instrument (FPC, Drumaxx equivalents) | ✗ sampler has zones and layering, nothing pad-oriented |
+| A5 | Instrument preset system — save, load, browse, factory presets | ✗ parameters persist per channel; there is no preset object |
+| A6 | Multiband compressor | ✗ |
+| A7 | De-esser | ✗ |
+| A8 | Stereo imaging / mid-side width tool as an insert | ◐ strip-level stereo separation exists; no insert |
+| A9 | Waveshaper with a drawable curve | ◐ `incdaw.saturator` is tanh only |
+| A10 | Parametric EQ with more than three bands and a draggable curve | ◐ 3 bands; the Tone panel draws a curve but does not let you drag it |
+| A11 | Convolution reverb (impulse response loading) | ✗ |
+| A12 | Vocoder / formant tools | ✗ |
+| A13 | Gross-Beat-style time/volume gating | ✗ |
+
+### Track B — Arrangement: playlist, patterns, automation
+
+| # | Gap | State |
+|---|---|---|
+| B1 | Clip pan | ⚠ **model field exists, no command and no UI** (`Clip::pan`) |
+| B2 | Clip reverse | ⚠ **model field exists, no command and no UI** (`Clip::reversed`) |
+| B3 | Clip lock | ⚠ **model field exists, no command and no UI** (`Clip::locked`) |
+| B4 | Track folders / groups, collapsible | ⚠ **`TrackType::folder` and `Track::parent` exist, nothing creates or draws one** |
+| B5 | Clip grouping (move several as one) | ✗ |
+| B6 | Playlist lanes (several clips deep on one track) | ✗ |
+| B7 | Crossfades between overlapping clips | ◐ per-clip fades exist; no crossfade verb |
+| B8 | Clip consolidation (render a selection to one audio clip) | ✗ |
+| B9 | Automation point editing surface — draw, curve tension, scale, copy/paste | ✗ lanes render and record; there is no editor |
+| B10 | Automation clip verbs — create from a parameter, duplicate, clear | ◐ commands exist; no workflow around them |
+| B11 | Multiple arrangements per project | ✗ one timeline |
+| B12 | Performance Mode — trigger clips live from the performance zone, per-track press/motion/sync options, pad and keyboard mapping | ✗ nothing equivalent (engine-deep: realtime clip triggering) |
+| B13 | Pattern picker workflow: clone, rename, colour, per-pattern length | ◐ list exists; verbs thin |
+
+### Track C — Integration: hardware, hosting, files
+
+| # | Gap | State | Gate |
+|---|---|---|---|
+| C1 | MIDI **output** to hardware | ✗ `platform::MidiDevice` is input only | — |
+| C2 | MIDI clock / transport sync (send and receive) | ✗ | — |
+| C3 | Controller feedback (LEDs, motorised faders) | ✗ mapping is one-way | — |
+| C4 | MPE input handling | ✗ representation is MPE-ready; nothing decodes it | — |
+| C5 | Device hot-plug re-enumeration | ✗ Settings rescans only when asked | — |
+| C6 | Audio editor: cut / copy / paste between selections | ✗ | — |
+| C7 | Audio editor: markers and regions inside the editor | ✗ timeline has them, the editor does not | — |
+| C8 | Comping editor over recorded takes | ✗ takes stack; nothing comps them | — |
+| C9 | Pre-record buffer on the input side | ✗ (the master Audio Logger is not the same thing) | — |
+| C10 | Denoise / noise profile | ✗ | — |
+| C11 | Spectral view and spectral editing | ◐ analyzer draws a spectrum; the editor has no spectral surface | — |
+| C12 | VST3 hosting | ✗ format enum only | **§41 — SDK, dual-licensed. Proposal + approval required** |
+| C13 | FLAC export/import | ✗ | **§41 — libFLAC. Proposal + approval required** |
+| C14 | MP3 export | ✗ | **§41 — LAME (LGPL). AAC/ALAC through AudioToolbox is the zero-dependency alternative and should be proposed alongside** |
+| C15 | Out-of-process plugin sandboxing | ✗ | its own program; sequence last |
+| C16 | AU **instrument** hosting | ✗ AU effects host fine | — |
+
+### Out of scope, unchanged
+
+Cloud storage and backup (FL Cloud), bundled commercial content (Loop Starter),
+AI assistant (Gopher) and ML stem separation, VST2 (D-007).
+
+---
+
+## 4. Closure plan — the 0.9.0 branch (historical)
 
 Ordered by workflow impact × feasibility (no new dependencies, realtime-safe,
 every item tested; CLAUDE.md §44 definition of done):
