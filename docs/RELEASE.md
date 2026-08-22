@@ -36,6 +36,24 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
 The script builds its own Release tree (`build-release/`), signs the bundle
 ad hoc, verifies the signature, and produces `dist/INCDAW-<version>.dmg`.
 
+**`third_party/` is gitignored and vendored, not committed.** A fresh clone or
+a `git worktree` therefore has no `clap/` or `doctest/` and cannot configure —
+copy `third_party/` in from a working checkout before building. Cutting a
+release from a worktree (which is how a release gets built from a clean tree
+while other work is in progress) needs that copy first.
+
+Once the DMG exists, publish it — the in-app update check reads the public
+releases feed and reports "no releases have been published yet" until one is:
+
+```
+gh release create v<version> dist/INCDAW-<version>.dmg \
+   --title "INCDAW <version> — <line>" --notes-file <notes.md>
+```
+
+The tag carries the leading `v`; `app::ReleaseVersion::parse` strips it. A
+draft or a pre-release is never offered as an upgrade (D-038), so a release
+meant to be seen must be neither.
+
 ---
 
 ## 3. Installing (first launch on another Mac)

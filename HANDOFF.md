@@ -1,12 +1,14 @@
 # INCDAW — HANDOFF
 
-Version: 3.8
-Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — the three parallel work lines are
-        merged: UI build-out increments 1-11, the FL2026 feature wave, and
-        the drawn design language. Increment 11 made the machine
-        configurable, connected MIDI hardware, and gave every command a
-        name a keystroke can find.
-Last updated: 2026-08-22
+Version: 3.9
+Status: ALL PHASES 0-20 COMPLETE. **v0.10.0 released 2026-08-23** and
+        published at github.com/blex1nc/incdaw/releases/tag/v0.10.0 — the
+        first release the in-app update check can actually see. 0.9.0
+        finished the engine; 0.10.0 is the shell catching up to it: the
+        Piano Roll's ruler, control strip, ghosts, key and velocity lane;
+        the Channel Rack as a step sequencer with levels and an instrument
+        picker; the command registry; and user-owned themes (D-039).
+Last updated: 2026-08-23
 Project: INCDAW
 Reference DAW: FL Studio 2026
 Primary coding agent: Claude Code
