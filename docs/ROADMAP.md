@@ -503,6 +503,25 @@ eleven cases; the view only draws the list the model produces.
 edit is a single undoable step, and the bar's height and the note's brightness
 agree because both read the same value.
 
+### Increment 13 — the update check — DONE 2026-08-22
+
+Distributed as a .dmg, INCDAW had no way of telling anyone that the version
+they installed had been superseded. It reads its own public release feed at
+launch (at most once a day) and from **Check for Updates…** at any time,
+compares, and reports; "Download" opens the release page. It checks, it does
+not update itself — a full auto-updater is a signature scheme and an attack
+surface, and was rejected rather than deferred (D-038). The decision is pure
+(`app::UpdateCheck`, 26 assertions); the network is one GET in
+`platform::Http`. No dependency was added.
+
+**Exit criterion (met):** a build older than the newest published release is
+told so once a day, with one checkbox to stop it; a build that is current,
+offline, or pointed at a project with no releases says nothing at all.
+
+**Depends on a first release being published.** Until a release exists at the
+feed, every check correctly answers "no releases have been published yet" and
+the feature is invisible.
+
 ### Remaining, by gate
 
 - **Dependency approval required (§41):** AU hosting, then VST3; FLAC and

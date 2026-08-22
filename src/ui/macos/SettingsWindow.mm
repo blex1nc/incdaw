@@ -19,12 +19,17 @@ using incdaw::ui::theme::Ink;
 namespace {
 
 constexpr CGFloat windowWidth  = 540.0;
-constexpr CGFloat windowHeight = 560.0;
+constexpr CGFloat windowHeight = 648.0;
 constexpr CGFloat margin       = 18.0;
 constexpr CGFloat labelWidth   = 110.0;
 constexpr CGFloat rowHeight    = 26.0;
 constexpr CGFloat rowGap       = 10.0;
 constexpr CGFloat midiRow      = 22.0;
+
+/// The UPDATES block at the foot of the window: a heading, the switch, and the
+/// line that says what the switch actually does. Reserved before the MIDI list
+/// is sized, because the list is what takes whatever is left over.
+constexpr CGFloat updatesBand  = 26.0 * 3.0 + 10.0;
 
 /// Block sizes offered. Anything the hardware refuses is corrected by the
 /// device on open, and the status line then reports what was actually granted
@@ -64,6 +69,7 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     NSPopUpButton* _sampleRate;
     NSPopUpButton* _bufferSize;
     NSButton*      _openInputAtLaunch;
+    NSButton*      _checkForUpdates;
     NSButton*      _allMidiSources;
     NSView*        _midiList;
     NSTextField*   _status;
@@ -159,10 +165,11 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     [content addSubview:_allMidiSources];
     y -= rowHeight;
 
-    const CGFloat listHeight = y - (margin + rowHeight + rowGap);
+    const CGFloat listBottom = margin + rowHeight + rowGap + updatesBand;
+    const CGFloat listHeight  = y - listBottom;
 
     NSScrollView* scroll = [[NSScrollView alloc]
-        initWithFrame:NSMakeRect(margin, margin + rowHeight + rowGap,
+        initWithFrame:NSMakeRect(margin, listBottom,
                                  windowWidth - margin * 2, std::max<CGFloat>(listHeight, 60.0))];
     scroll.hasVerticalScroller = YES;
     scroll.borderType          = NSBezelBorder;
@@ -171,6 +178,28 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     _midiList = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, scroll.contentSize.width, 0)];
     scroll.documentView = _midiList;
     [content addSubview:scroll];
+
+    // Updates. Placed where a user looks for it and worded so that what leaves
+    // the machine is stated rather than implied — a launch-time request is a
+    // privacy decision, and one made silently is one made badly.
+    CGFloat updatesY = listBottom - rowHeight;
+    [content addSubview:makeLabel(@"UPDATES", NSMakeRect(margin, updatesY, 200, rowHeight), YES)];
+    updatesY -= rowHeight;
+
+    _checkForUpdates = [[NSButton alloc]
+        initWithFrame:NSMakeRect(margin, updatesY, windowWidth - margin * 2, rowHeight)];
+    _checkForUpdates.buttonType = NSButtonTypeSwitch;
+    _checkForUpdates.title      = @"Check for a newer version at launch";
+    [content addSubview:_checkForUpdates];
+    updatesY -= rowHeight;
+
+    NSTextField* caption = makeLabel(@"Reads INCDAW's public release page, at most once a day. "
+                                     @"No account, nothing uploaded, nothing installed.",
+                                     NSMakeRect(margin, updatesY, windowWidth - margin * 2, rowHeight),
+                                     NO);
+    caption.font      = theme::labelFont(11.0);
+    caption.textColor = theme::ink(Ink::textDim);
+    [content addSubview:caption];
 
     NSButton* refresh = [[NSButton alloc] initWithFrame:NSMakeRect(margin, margin, 130, rowHeight)];
     refresh.title      = @"Rescan Devices";
@@ -235,6 +264,9 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
 
     _openInputAtLaunch.state = _settings->openInputAtLaunch ? NSControlStateValueOn
                                                             : NSControlStateValueOff;
+
+    _checkForUpdates.state = _settings->updates.checkAtLaunch ? NSControlStateValueOn
+                                                              : NSControlStateValueOff;
 }
 
 - (void)rebuildDevicePopups
@@ -494,6 +526,14 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
             static_cast<NSNumber*>(_bufferSize.selectedItem.representedObject).longLongValue;
 
     _settings->openInputAtLaunch = _openInputAtLaunch.state == NSControlStateValueOn;
+
+    // Turning the check back on clears the skip with it: a user who asks to be
+    // told about new versions has stopped declining the one they last passed on.
+    const bool checkForUpdates = _checkForUpdates.state == NSControlStateValueOn;
+    if (checkForUpdates && !_settings->updates.checkAtLaunch)
+        _settings->updates.skippedVersion.clear();
+
+    _settings->updates.checkAtLaunch = checkForUpdates;
 
     // An empty list means "every source" — the same convention the platform
     // layer already uses, so an all-checked list is stored as no list at all

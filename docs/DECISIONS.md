@@ -1309,3 +1309,79 @@ follow-up work, not a drive-by edit: each pane also refreshes itself there.
 
 **Date:** 2026-08-22
 **Status:** ACCEPTED
+
+---
+
+## D-038 — INCDAW checks for updates; it does not update itself
+
+**Context:** INCDAW is distributed as a .dmg. Nothing behind it tells a user
+that the version they installed has been superseded — no package manager, no
+App Store, no receipt. Someone who installed 0.9.0 in March is still running
+0.9.0 in September and has no way of finding out otherwise short of visiting
+the repository. Every DAW that ships outside a store solves this, and the range
+of answers runs from "a menu item that opens a web page" to "a background
+daemon that replaces the application binary".
+
+**Options:**
+
+1. Nothing. The release page is public; users can look.
+2. A manual "Check for Updates…" menu item only.
+3. A check at launch (at most once a day) plus the manual item, reporting a
+   newer version and offering to open its page.
+4. A full auto-updater: download, verify, swap the bundle, relaunch (Sparkle,
+   or the same thing written here).
+
+**Chosen:** option 3.
+
+**Reason:** option 1 does not work — nobody visits a release page for software
+that is running fine. Option 2 is only found by people who already suspect
+there is something to find. Option 4 is a large amount of security-critical
+machinery: a signature scheme, a rollback story, an update server, and an
+attack surface where a compromised feed replaces a binary on the user's disk.
+INCDAW is not carrying that yet, and it is not needed to solve the problem —
+which is that the user does not KNOW. Option 3 solves knowing and leaves
+deciding where it belongs. "Download" opens the release page in a browser; the
+user chooses what to download and when to install it.
+
+**What the request is, exactly:** an HTTPS GET of a public, unauthenticated
+GitHub releases endpoint, with `User-Agent: INCDAW/<version>` (the API refuses
+requests without one) and nothing else. No account, no token, no machine
+identifier, no project data, no usage data, nothing uploaded. The session is
+ephemeral — no cookies, no cache, no credential store — so the check leaves
+nothing on the machine and cannot accumulate state between launches.
+
+**Why it defaults to ON, unlike `openInputAtLaunch`:** the two look like the
+same kind of decision and are not. Opening the input device captures the room
+the user is sitting in; this reads a public web page. A check that defaults to
+off is a check that only the users who least need it will ever turn on. It is
+one clearly-worded checkbox away from off in Settings, and turning it off
+leaves the manual item working.
+
+**The decision, and the network, are separate:** `app::UpdateCheck` is pure —
+it parses a feed, orders two versions, and decides whether a check is due, with
+no I/O in it, which is why the awkward cases are covered by tests instead of by
+hope. `platform::Http` is one GET with a timeout and a callback. Joining them
+is the shell's job.
+
+**No dependency was added (CLAUDE.md §41):** NSURLSession is Foundation, which
+the Cocoa shell already links. Nothing enters `third_party/`, there is no new
+`find_package`, and Sparkle was rejected with option 4 rather than adopted.
+
+**The two ways this can be wrong without anyone noticing:** telling a user they
+are up to date when they are not, and nagging about a version they explicitly
+skipped. Both are covered: a tag that is not a version is declined rather than
+read as 0.0.0, a pre-release never outranks the release it leads to, a build
+ahead of the newest release is up to date rather than told to downgrade, and a
+skip stores the version it applies to so that passing on 0.9.1 says nothing
+about 1.0.0.
+
+**Tradeoffs:** a user who never opens Settings makes one request a day to
+GitHub. A private repository, or one with no releases published, answers with
+nothing and the check stays permanently silent — correct, but it means the
+feature is invisible until the first release is published. And nothing here
+verifies a download, because nothing here performs one; if INCDAW ever installs
+its own updates, that is a new decision with a signature scheme attached, not
+an extension of this one.
+
+**Date:** 2026-08-22
+**Status:** ACCEPTED

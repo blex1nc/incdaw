@@ -22,6 +22,7 @@
 #include "app/CommandRegistry.h"
 #include "app/ProjectSession.h"
 #include "app/StandardActions.h"
+#include "app/UpdateCheck.h"
 #include "app/Version.h"
 #include "app/commands/ChannelCommands.h"
 #include "app/commands/MidiMappingCommands.h"
@@ -30,6 +31,7 @@
 #include "engine/instrument/BuiltinInstruments.h"
 #include "engine/AudioEngine.h"
 #include "platform/AudioUnitHost.h"
+#include "platform/Http.h"
 #include "platform/MidiDevice.h"
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
@@ -284,6 +286,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// interface would be unopenable on a second Mac.
     app::AppSettings      _settings;
     std::filesystem::path _settingsPath;
+
+    /// One update request at a time. Pressing the menu item twice must not
+    /// stack two alerts on top of each other.
+    BOOL _updateCheckInFlight;
 
     /// The MIDI client. Owned by the shell because the settings window decides
     /// which sources are connected, and the engine's input is what they feed.
@@ -717,6 +723,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [NSApp activateIgnoringOtherApps:YES];
 
     [self offerAutosaveRecovery];
+
+    // Last, and deliberately: the answer arrives from the network some time
+    // after this returns, so it can never delay a launch, and it queues behind
+    // the recovery prompt rather than over it.
+    [self checkForUpdatesInBackground];
 }
 
 /// A leftover unsaved-project autosave means the last session ended without a
@@ -1278,6 +1289,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if (item.action == @selector(toggleMetronome:))
         item.state = _metronomeEnabled ? NSControlStateValueOn : NSControlStateValueOff;
 
+    if (item.action == @selector(checkForUpdates:))
+        return !_updateCheckInFlight;
+
     // While a text field is being edited, Cmd+Z belongs to the field editor.
     // Undoing a project command out from under someone renaming a channel is
     // the one thing a global Undo must not do — and a DISABLED item does not
@@ -1679,6 +1693,193 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     }
 
     _lastMidiError = nil;
+}
+
+// ── The update check ─────────────────────────────────────────────────────────
+//
+// INCDAW ships as a .dmg with no package manager behind it, so nothing tells a
+// user that the version they installed has been superseded except INCDAW. It
+// asks its own public release feed, compares, and reports — it never downloads
+// a binary and never installs one. "Download" opens a page; what happens next
+// is the user's decision, which is the whole difference between an update
+// check and an auto-updater (docs/DECISIONS.md D-038).
+//
+// The decision itself is app::UpdateCheck and has no network in it. This is
+// only the wiring: when to ask, and what to say about the answer.
+
+/// The menu's entry. Reports whatever it found, including nothing.
+- (void)checkForUpdates:(id)sender
+{
+    (void)sender;
+    [self runUpdateCheckAnnouncing:YES];
+}
+
+/// The launch path's entry: at most once a day, silent unless there is
+/// something to say.
+- (void)checkForUpdatesInBackground
+{
+    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+
+    if (!app::automaticCheckIsDue(_settings.updates.checkAtLaunch,
+                                  _settings.updates.lastCheckedUnix, now))
+        return;
+
+    [self runUpdateCheckAnnouncing:NO];
+}
+
+- (void)runUpdateCheckAnnouncing:(BOOL)announce
+{
+    if (_updateCheckInFlight)
+        return;
+
+    _updateCheckInFlight = YES;
+
+    // Read here rather than in the callback: by the time the answer arrives the
+    // user may have changed either of them, and the answer is about what was
+    // asked, not about what the settings say a moment later.
+    const std::string running = app::Version::string();
+    const std::string skipped = _settings.updates.skippedVersion;
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+
+    // Twelve seconds: long enough for a slow connection, short enough that a
+    // captive portal cannot leave the check hanging for the whole session.
+    platform::httpGet(app::releaseFeedUrl(), app::updateUserAgent(), 12.0,
+                      [weakSelf, announce, running, skipped](platform::HttpResponse response) {
+        INCDAWAppDelegate* delegate = weakSelf;
+        if (delegate == nil)
+            return;
+
+        app::UpdateResult result;
+
+        if (!response.ok()) {
+            // A transport failure and an HTTP status are different things and
+            // are reported as different things. Neither is an error the user
+            // has to do anything about.
+            result.message = !response.error.empty()
+                                 ? response.error
+                                 : "the release page answered with status "
+                                       + std::to_string(response.statusCode);
+        } else {
+            result = app::evaluateFeed(response.body, running, skipped);
+        }
+
+        [delegate updateCheckFinished:result announcing:announce];
+    });
+}
+
+/// Called on the main thread, exactly once per check (platform/Http.h).
+- (void)updateCheckFinished:(const app::UpdateResult&)result announcing:(BOOL)announce
+{
+    _updateCheckInFlight = NO;
+
+    // Logged the way the device and the MIDI client are, and for the same
+    // reason: the silent path is the common one, and a check that is quietly
+    // failing every launch would otherwise look identical to one that is
+    // quietly succeeding.
+    switch (result.verdict) {
+        case app::UpdateVerdict::available:
+            NSLog(@"INCDAW: update check — %s is available", result.release.version.toString().c_str());
+            break;
+        case app::UpdateVerdict::skipped:
+            NSLog(@"INCDAW: update check — %s is available, skipped by the user",
+                  result.release.version.toString().c_str());
+            break;
+        case app::UpdateVerdict::upToDate:
+            NSLog(@"INCDAW: update check — %s is current", app::Version::string());
+            break;
+        case app::UpdateVerdict::unavailable:
+            NSLog(@"INCDAW: update check — no answer: %s", result.message.c_str());
+            break;
+    }
+
+    // Only a check that got an answer counts as one. Stamping a failed attempt
+    // would let a single offline launch postpone the next try by a day.
+    if (result.verdict != app::UpdateVerdict::unavailable) {
+        _settings.updates.lastCheckedUnix = static_cast<std::int64_t>(std::time(nullptr));
+        [self persistSettings];
+    }
+
+    switch (result.verdict) {
+        case app::UpdateVerdict::available:
+            [self presentUpdate:result];
+            return;
+
+        case app::UpdateVerdict::skipped:
+            // Skipping silences the automatic check, not the question. Someone
+            // who walks into the menu and asks gets the real answer.
+            if (announce)
+                [self presentUpdate:result];
+            return;
+
+        case app::UpdateVerdict::upToDate:
+        case app::UpdateVerdict::unavailable:
+            break;
+    }
+
+    if (!announce)
+        return;
+
+    NSAlert* alert = [[NSAlert alloc] init];
+
+    if (result.verdict == app::UpdateVerdict::upToDate) {
+        alert.messageText     = [NSString stringWithFormat:@"INCDAW %s is up to date",
+                                                           app::Version::string()];
+        alert.informativeText = @"No newer release has been published.";
+    } else {
+        alert.messageText     = @"Could not check for updates";
+        alert.informativeText = @(result.message.c_str());
+    }
+
+    [alert addButtonWithTitle:@"OK"];
+    (void)[alert runModal];
+}
+
+- (void)presentUpdate:(const app::UpdateResult&)result
+{
+    const std::string offered = result.release.version.toString();
+
+    NSAlert* alert    = [[NSAlert alloc] init];
+    alert.messageText = [NSString stringWithFormat:@"INCDAW %s is available", offered.c_str()];
+
+    NSMutableString* body =
+        [NSMutableString stringWithFormat:@"You are running %s.", app::Version::string()];
+
+    if (!result.release.notes.empty()) {
+        // Release notes are written for a page, not for a dialog. Enough to
+        // decide with, and a link for the rest.
+        NSString* notes = @(result.release.notes.c_str());
+        if (notes.length > 600)
+            notes = [[notes substringToIndex:600] stringByAppendingString:@"…"];
+
+        [body appendFormat:@"\n\n%@", notes];
+    }
+
+    alert.informativeText = body;
+
+    [alert addButtonWithTitle:@"Download…"];
+    [alert addButtonWithTitle:@"Skip This Version"];
+    [alert addButtonWithTitle:@"Later"];
+
+    const NSModalResponse choice = [alert runModal];
+
+    if (choice == NSAlertFirstButtonReturn) {
+        // The release PAGE, never a binary. INCDAW does not replace itself, and
+        // what is downloaded and when stays the user's decision.
+        NSURL* page = [NSURL URLWithString:@(result.release.url.c_str())];
+        if (page != nil)
+            [[NSWorkspace sharedWorkspace] openURL:page];
+
+        return;
+    }
+
+    if (choice == NSAlertSecondButtonReturn) {
+        _settings.updates.skippedVersion = offered;
+        [self persistSettings];
+    }
+
+    // "Later" stores nothing: the next day's check asks again, which is what
+    // "later" means.
 }
 
 // ── The workspace, remembered ────────────────────────────────────────────────
@@ -4317,6 +4518,14 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                  action:@selector(showCommandPalette:)
                                           keyEquivalent:@"k"];
     paletteItem.target = self;
+
+    [appMenu addItem:[NSMenuItem separatorItem]];
+
+    // Asking is always available, whatever the launch preference says.
+    NSMenuItem* updateItem = [appMenu addItemWithTitle:@"Check for Updates…"
+                                                action:@selector(checkForUpdates:)
+                                         keyEquivalent:@""];
+    updateItem.target = self;
 
     [appMenu addItem:[NSMenuItem separatorItem]];
     [appMenu addItemWithTitle:@"Quit INCDAW" action:@selector(terminate:) keyEquivalent:@"q"];

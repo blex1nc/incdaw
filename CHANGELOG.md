@@ -8,6 +8,48 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### The update check — 2026-08-22
+
+**Added**
+
+- **INCDAW says when it is out of date.** Shipped as a .dmg it has no
+  package manager behind it, so nothing told a user that the version
+  they installed had been superseded. At launch — at most once a day —
+  and from **INCDAW → Check for Updates…** at any time, it reads its own
+  public release feed, compares, and reports. `app::UpdateCheck`.
+- **It checks; it does not update itself** (D-038). "Download" opens the
+  release page in a browser. No binary is fetched, nothing is replaced,
+  and no signature scheme is being pretended at.
+- **A Settings switch, and what it does said plainly.** *Check for a
+  newer version at launch*, on by default, with the line "Reads INCDAW's
+  public release page, at most once a day. No account, nothing uploaded,
+  nothing installed." underneath it.
+- **Skip This Version** silences one version and nothing above it —
+  passing on 0.9.1 says nothing about 1.0.0 — and the manual check
+  reports it anyway. Turning the launch check back on clears the skip.
+- `platform::Http`: one HTTPS GET, one timeout, one callback delivered on
+  the main thread by every path including the ones that never start a
+  request. Ephemeral session — no cookies, no cache, no credential store.
+  The only socket in INCDAW, and never reachable from the audio thread.
+- `AppSettings::updates`: the launch preference, when the check last ran,
+  and the skipped version. An addition rather than a change of meaning,
+  so the settings format stays at version 1 and an older file reads back
+  as "never asked".
+
+**Notes**
+
+- No dependency was added: NSURLSession is Foundation, already linked.
+  Nothing entered `third_party/`.
+- A check that got no answer — offline, rate-limited, or a repository
+  with no releases published — says nothing on the launch path and does
+  not stamp its clock, so one offline launch cannot postpone the next
+  attempt by a day.
+- 26 assertions cover the two failures nobody would notice: reporting
+  "up to date" when it is not, and nagging about a skipped version. A tag
+  that is not a version is declined rather than read as 0.0.0, a
+  pre-release never outranks its release, and a build ahead of the newest
+  release is current rather than told to downgrade.
+
 ### UI — the Piano Roll gets a velocity lane — 2026-08-22
 
 **Added**

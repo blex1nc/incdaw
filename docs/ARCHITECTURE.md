@@ -50,6 +50,7 @@ know nothing about anything above it.
 │               state · UI bridge · isolation              │
 ├──────────────────────────────────────────────────────────┤
 │  platform/    CoreAudio · CoreMIDI · workgroups · files  │  ONLY macOS code
+│               one HTTPS GET (Http.h) — the only socket    │
 └──────────────────────────────────────────────────────────┘
 ```
 
