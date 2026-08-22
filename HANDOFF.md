@@ -1,6 +1,6 @@
 # INCDAW — HANDOFF
 
-Version: 3.7
+Version: 3.8
 Status: ALL PHASES 0-20 COMPLETE, v0.9.0 — the three parallel work lines are
         merged: UI build-out increments 1-11, the FL2026 feature wave, and
         the drawn design language. Increment 11 made the machine
@@ -1119,6 +1119,63 @@ All systems must share the same underlying transport, timing, project state and 
 ---
 
 # 22. CURRENT HANDOFF MESSAGE
+
+## 2026-08-22 — the repository has a remote, and INCDAW knows when it is old
+
+### The repository is on GitHub
+
+`origin` = `git@github.com:blex1nc/incdaw.git`, over SSH. It is **public**.
+The repository existed and was empty; `main` and all fifteen branches
+(thirteen `claude/*` worktree lines, `phase-21-workspace`,
+`rescue/parallel-session-wip`) were pushed, so no work now lives only on this
+machine. The standing instruction from the user is that **every patch goes to
+GitHub** — commit, then `git push origin main`, every time.
+
+**No release has been published yet.** This matters for the next item: the
+update check is correct, verified, and invisible until a release exists at
+`https://github.com/blex1nc/incdaw/releases`. Publishing 0.9.0 from
+`dist/INCDAW-0.9.0.dmg` is what switches the feature on for everyone.
+
+### The update check (D-038)
+
+INCDAW reads its own public release feed at launch — at most once a day — and
+from **INCDAW → Check for Updates…** at any time. It **checks; it does not
+update itself**: "Download" opens the release page in a browser. A full
+auto-updater was rejected rather than deferred, because it is a signature
+scheme and an attack surface, and the problem to solve is that the user does
+not KNOW.
+
+- `app::UpdateCheck` is pure — feed parsing, version ordering and the cadence
+  decision, with no I/O, so 26 assertions cover the two failures nobody
+  notices: reporting "up to date" when it is not, and nagging about a skipped
+  version.
+- `platform::Http` is the only socket in INCDAW: one HTTPS GET, one timeout,
+  one callback on the main thread. Ephemeral session, no cookies, no cache, no
+  credential store. Never reachable from the audio thread.
+- `AppSettings::updates` carries the launch preference (**on** by default),
+  the last-checked stamp and the skipped version. An addition, so the settings
+  format stays at version 1.
+- **No dependency was added** (CLAUDE.md §41): NSURLSession is Foundation,
+  already linked. Nothing entered `third_party/`.
+
+Verified against the live endpoint, not only in tests: launched against
+INCDAW's own feed ("no answer: no releases have been published yet", no
+dialog, clock unstamped), then with the URL temporarily pointed at a
+repository that has releases ("1.13.2 is available", alert presented), then
+restored.
+
+**The default is ON and that is a decision, not an oversight.** The user asked
+for an automatic check. If they change their mind, it is one checkbox in
+Settings, and D-038 records the reasoning in full.
+
+### Two sessions worked in this checkout at once
+
+This increment and the workspace increment above it were written by two Claude
+sessions in the same working tree, coordinating over cross-session messages
+and committing with explicit paths rather than `git commit -a`. If that
+happens again: agree who holds which files BEFORE editing, and never stage
+with `-a`, or one session's half-written file lands in the other's commit.
+
 
 ## 2026-08-20 — the work lines merged, the hum killed, the design finished
 
