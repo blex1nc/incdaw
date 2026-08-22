@@ -6,8 +6,28 @@ public version yet.
 
 ---
 
-## [Unreleased] — UI build-out
+## [Unreleased]
 
+Nothing yet.
+
+---
+
+## [0.10.0] — 2026-08-23 — the shell becomes a workspace
+
+0.9.0 finished the engine: every phase of the roadmap, a complete audio path,
+and a release process. What it shipped with was the workshop UI — panes that
+proved the engine worked rather than panes anyone would choose to work in.
+
+0.10.0 is that gap closed. The Piano Roll has a ruler, a control strip, ghost
+notes, a key and scale, and a velocity lane. The Channel Rack is a real step
+sequencer with per-step levels and an instrument picker. Every command has a
+name a keystroke can find. The settings window grew tabs, and the palette
+behind every pixel became a file the user owns — four built-in schemes and as
+many of their own as they care to make.
+
+The sections below are the increments as they landed, newest first.
+
+### UI — the Piano Roll gets a control strip — 2026-08-23
 ### UI — the Piano Roll gets a control strip — 2026-08-23
 
 **Added**

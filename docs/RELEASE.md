@@ -1,6 +1,6 @@
 # INCDAW — Release Guide
 
-Status: **Phase 20 — the release process below is live for 0.9.0.**
+Status: **live. 0.10.0 is the current release.**
 
 ---
 
@@ -67,7 +67,36 @@ you must reopen a project saved by a newer format.
 
 ---
 
-## 5. Release notes — 0.9.0 (2026-08-16)
+## 5. Release notes — 0.10.0 (2026-08-23)
+
+0.9.0 finished the engine. 0.10.0 makes the shell somewhere to work.
+
+- **Piano Roll**: a ruler with bars and beats, a control strip carrying snap,
+  key, scale, ghosts and the velocity lane, ghost notes from other patterns,
+  scale highlighting, and a velocity lane that edits rather than displays.
+- **Channel Rack**: a real step sequencer — steps grouped by beat, per-step
+  levels by shift-drag, right-click to clear, and an instrument picker on
+  each channel.
+- **Themes**: Settings has four tabs, and Appearance puts every colour the
+  shell draws with behind a picker. Four built-in schemes (Midnight, Slate,
+  Ember, Daylight); a user theme is a versioned JSON file in
+  `~/Library/Application Support/INCDAW/Themes` that can be copied, edited by
+  hand, or sent to somebody else (D-039).
+- **Commands**: every action has a name, a keystroke and a place in the
+  command palette; the machine's audio, MIDI and window state persist between
+  launches.
+- **Mixing**: a Tone insert whose curve agrees with the filter behind it.
+- **Instruments**: a builtin piano, and a way to hand a channel one.
+- **Update check**: INCDAW asks its public release page at most once a day
+  and offers to open it. It never downloads or installs anything (D-038).
+
+Known limits, unchanged from 0.9.0: no AU/VST3 yet (CLAP first, D-007), no
+FLAC/MP3, no MIDI clock out, and in-process plugin crashes are not
+survivable.
+
+---
+
+## 6. Release notes — 0.9.0 (2026-08-16)
 
 The core is complete: every engineering phase of the roadmap (0–19) plus
 this release process. What a musician can do with 0.9.0:
