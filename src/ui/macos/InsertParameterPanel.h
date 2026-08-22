@@ -38,6 +38,14 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)refreshWindow:(NSWindow*)window
                values:(NSDictionary<NSNumber*, NSNumber*>*)values;
 
+/// Re-reads the palette into the AppKit controls this panel built.
+///
+/// Views that draw themselves are handled by `refreshViewTree`, but a label's
+/// `textColor` is a colour handed over once at build time — a snapshot, not a
+/// binding — so a live theme change reaches it only by being reassigned. A
+/// window that is not a parameter panel is ignored.
++ (void)refreshAppearance:(NSWindow*)window;
+
 @end
 
 NS_ASSUME_NONNULL_END

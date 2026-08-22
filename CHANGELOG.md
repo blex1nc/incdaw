@@ -8,7 +8,20 @@ public version yet.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed — a theme change reaches the panels too — 2026-08-23
+
+- **Open panels follow the palette.** Choosing a theme repainted the main
+  window and the ground under a hosted plugin's editor, and left every
+  other window INCDAW had opened where it was: a parameter panel, the
+  Tone panel, a spectrum window or an instrument panel stayed dark with
+  Daylight selected, down to the scroller AppKit drew for it. They are
+  ours all the way down, so they now follow the palette completely.
+- **A label is a snapshot, not a binding.** The panels that draw
+  themselves needed only invalidating. The generic parameter panel hands
+  its colours to AppKit labels once, at build time, so it hands them over
+  again through a new `+refreshAppearance:` — the same associated-object
+  lookup `+refreshWindow:values:` uses, and the same no-op on a window
+  that is not its own.
 
 ---
 
@@ -20,14 +33,15 @@ proved the engine worked rather than panes anyone would choose to work in.
 
 0.10.0 is that gap closed. The Piano Roll has a ruler, a control strip, ghost
 notes, a key and scale, and a velocity lane. The Channel Rack is a real step
-sequencer with per-step levels and an instrument picker. Every command has a
-name a keystroke can find. The settings window grew tabs, and the palette
-behind every pixel became a file the user owns — four built-in schemes and as
-many of their own as they care to make.
+sequencer with per-step levels and an instrument picker — and something worth
+picking, because the release also ships INCDAW's first serious instrument, a
+synthesized piano in five voicings. The mixer gained a Tone insert with a
+response curve. Every command has a name a keystroke can find. The settings
+window grew tabs, and the palette behind every pixel became a file the user
+owns — four built-in schemes and as many of their own as they care to make.
 
 The sections below are the increments as they landed, newest first.
 
-### UI — the Piano Roll gets a control strip — 2026-08-23
 ### UI — the Piano Roll gets a control strip — 2026-08-23
 
 **Added**
@@ -98,6 +112,59 @@ The sections below are the increments as they landed, newest first.
   the difference between the two catalogue entries is the editor, not
   the processing.
 - A defaulted Tone insert is still bit-exact bypass.
+
+### Instruments — a synthesized piano, and a channel that picks one — 2026-08-23
+
+**Added**
+
+- **INCDAW Piano.** The first instrument built to be played rather than
+  to prove the engine runs. It is synthesis, not sampling — §20 and §43
+  forbid bundling recorded content, so a sample-based piano would ship
+  with nothing to load — and it models a struck string rather than
+  putting an envelope on a sine: inharmonic partials (`n·f0·√(1+Bn²)`,
+  the stretch that is the most recognisable thing about a piano's
+  timbre), the strike-point comb that puts holes in the spectrum, a
+  two-stage per-partial decay where the higher partials fall first, and
+  a damper whose fall time depends on the register. CC 64 lifts it.
+- **Five voicings**, as one stepped parameter: grand, bright grand,
+  upright, mellow, electric. A voicing is not a preset — it changes the
+  physics the voice is built from, and the electric swaps the string for
+  an FM tine. "Different piano sounds" is therefore one channel per
+  voicing, and the Piano Roll's ghost notes already show them together.
+- **Ten automatable parameters** in plain units — tone, hardness, decay,
+  release, octave stretch, hammer noise, pedal tail, stereo spread, gain
+  — with stable ids the project file stores through
+  `ChannelInstrumentParameter`.
+- **A channel can be handed an instrument.** `SetChannelInstrumentCommand`
+  closes the fourth instance of the pattern `SetChannelPanCommand` closed:
+  `Channel::instrument` was serialized and compiled from the beginning,
+  and until now only a dropped sample could write it. The Channel Rack's
+  context menu offers the builtin catalogue as a submenu, ticked at what
+  is actually sounding — a channel with nothing stored plays the
+  reference synth, so that is where the tick sits.
+
+**Notes**
+
+- The realtime contract holds: `prepare()` allocates nothing, every
+  buffer is a fixed member array, and the render path calls no
+  transcendental function per sample — partial frequencies and decay
+  coefficients are computed once, at note-on. 64 voices, because a piano
+  played with the pedal down accumulates them.
+- The honest limits, stated rather than implied: no true sympathetic
+  resonance across strings, no soft-pedal (una corda) timbre change, and
+  a partial budget that truncates the very lowest notes' spectra.
+- Hosted instruments are absent from the picker: the CLAP scan does not
+  record whether a plugin is one. That is a scanner gap, noted rather
+  than papered over.
+
+**Files**
+
+- `src/engine/instrument/PianoInstrument.{h,cpp}` (new),
+  `src/engine/instrument/BuiltinInstruments.cpp`
+- `src/app/commands/ChannelCommands.{h,cpp}`,
+  `src/ui/macos/ChannelRackView.mm`
+- `tests/unit/PianoInstrumentTests.cpp` (new),
+  `tests/unit/InstrumentParameterTests.cpp`
 
 ### UI — the settings window grows tabs, and the palette becomes a file — 2026-08-23
 

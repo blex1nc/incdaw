@@ -49,8 +49,10 @@ NSString* formattedValue(double value, BOOL stepped)
 
 @implementation INCDAWInsertParameterPanel {
     NSArray<NSDictionary*>*     _rows;
+    NSArray<NSTextField*>*      _labels;
     NSArray<NSTextField*>*      _valueFields;
     NSArray<NSSlider*>*         _sliders;
+    NSScrollView*               _scroll;
     void (^_onWrite)(std::uint32_t, double);
 }
 
@@ -67,6 +69,7 @@ NSString* formattedValue(double value, BOOL stepped)
     INCDAWFlippedView* document = [[INCDAWFlippedView alloc]
         initWithFrame:NSMakeRect(0, 0, panelWidth, contentHeight)];
 
+    NSMutableArray<NSTextField*>* labels      = [NSMutableArray array];
     NSMutableArray<NSTextField*>* valueFields = [NSMutableArray array];
     NSMutableArray<NSSlider*>*    sliders     = [NSMutableArray array];
 
@@ -79,6 +82,7 @@ NSString* formattedValue(double value, BOOL stepped)
         label.font          = theme::labelFont(11.0);
         label.textColor     = theme::ink(Ink::textSecondary);
         [document addSubview:label];
+        [labels addObject:label];
 
         const double minValue = [row[@"min"] doubleValue];
         const double maxValue = [row[@"max"] doubleValue];
@@ -114,6 +118,7 @@ NSString* formattedValue(double value, BOOL stepped)
         [valueFields addObject:valueField];
     }];
 
+    panel->_labels      = labels;
     panel->_valueFields = valueFields;
     panel->_sliders     = sliders;
 
@@ -139,6 +144,8 @@ NSString* formattedValue(double value, BOOL stepped)
                                                                   ? NSAppearanceNameAqua
                                                                   : NSAppearanceNameDarkAqua];
     window.backgroundColor    = theme::ink(Ink::windowBackground);
+
+    panel->_scroll = scroll;
 
     objc_setAssociatedObject(window, panelOwnerKey, panel,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -170,6 +177,22 @@ NSString* formattedValue(double value, BOOL stepped)
             panel->_valueFields[index].stringValue = formattedValue(plain, stepped);
         }
     }];
+}
+
++ (void)refreshAppearance:(NSWindow*)window
+{
+    INCDAWInsertParameterPanel* panel =
+        objc_getAssociatedObject(window, panelOwnerKey);
+    if (panel == nil)
+        return;
+
+    for (NSTextField* label in panel->_labels)
+        label.textColor = theme::ink(Ink::textSecondary);
+
+    for (NSTextField* field in panel->_valueFields)
+        field.textColor = theme::ink(Ink::lcdText);
+
+    panel->_scroll.backgroundColor = theme::ink(Ink::panel);
 }
 
 - (void)sliderMoved:(NSSlider*)slider

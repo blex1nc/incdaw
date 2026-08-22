@@ -2030,6 +2030,19 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         window.appearance      = appearance;
         window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
     }
+
+    // Parameter panels, the Tone panel, spectrum windows and instrument panels
+    // are ours all the way down, so they follow the palette completely. The
+    // ones that draw themselves need only invalidating; the generic panel
+    // handed its colours to AppKit controls at build time and has to hand them
+    // over again, which is what refreshAppearance: is for.
+    for (NSWindow* window in _panelWindows.allValues) {
+        window.appearance      = appearance;
+        window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
+
+        [INCDAWInsertParameterPanel refreshAppearance:window];
+        ui::theme::refreshViewTree(window.contentView);
+    }
 }
 
 - (void)persistSettings
