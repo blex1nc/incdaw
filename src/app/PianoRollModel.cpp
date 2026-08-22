@@ -4,6 +4,17 @@
 
 namespace incdaw::app {
 
+namespace {
+
+/// The key range on screen, as a closed interval.
+bool keyIsVisible(const MidiEvent& event, const PianoRollModel::Viewport& viewport) noexcept
+{
+    return event.key >= viewport.lowestKey
+        && event.key <= viewport.lowestKey + viewport.visibleKeys - 1;
+}
+
+} // namespace
+
 void PianoRollModel::collectVisibleNotes(const NoteList& notes, std::vector<VisibleNote>& out) const
 {
     // Cleared, not reassigned: the capacity earned on previous frames is what
@@ -16,8 +27,7 @@ void PianoRollModel::collectVisibleNotes(const NoteList& notes, std::vector<Visi
     if (scale <= 0.0 || height <= 0.0)
         return;
 
-    const Tick lastTick   = viewport_.firstTick + viewport_.visibleTicks;
-    const int  highestKey = viewport_.lowestKey + viewport_.visibleKeys - 1;
+    const Tick lastTick = viewport_.firstTick + viewport_.visibleTicks;
 
     for (std::size_t index = 0; index < notes.size(); ++index) {
         const MidiEvent& event = notes[index];
@@ -25,7 +35,7 @@ void PianoRollModel::collectVisibleNotes(const NoteList& notes, std::vector<Visi
         if (event.type != project::MidiEventType::note)
             continue;
 
-        if (event.key < viewport_.lowestKey || event.key > highestKey)
+        if (!keyIsVisible(event, viewport_))
             continue;
 
         // A note is visible if any part of it is: a long note starting before
@@ -47,6 +57,107 @@ void PianoRollModel::collectVisibleNotes(const NoteList& notes, std::vector<Visi
 
         out.push_back(visible);
     }
+}
+
+// ── Velocity lane ────────────────────────────────────────────────────────────
+
+namespace {
+
+/// Velocity spans 1..127; 0 is note-off and never appears on a note in a
+/// pattern (app/commands/NoteCommands.cpp clamps it for the same reason).
+constexpr int minimumVelocity = 1;
+constexpr int maximumVelocity = 127;
+
+} // namespace
+
+double PianoRollModel::velocityToY(int velocity) const noexcept
+{
+    // max(1) rather than a branch on a degenerate lane: the mapping stays
+    // monotonic and finite at any height, and `hasVelocityLane` is what
+    // decides whether the lane exists at all.
+    const double usable = std::max(1.0, viewport_.velocityLaneHeight - velocityLanePadding);
+    const double scaled = static_cast<double>(std::clamp(velocity, minimumVelocity, maximumVelocity))
+                        / static_cast<double>(maximumVelocity);
+
+    return velocityLaneBottom() - usable * scaled;
+}
+
+int PianoRollModel::yToVelocity(double y) const noexcept
+{
+    const double usable = std::max(1.0, viewport_.velocityLaneHeight - velocityLanePadding);
+    const double filled = (velocityLaneBottom() - y) / usable;
+
+    const auto velocity = static_cast<int>(filled * static_cast<double>(maximumVelocity) + 0.5);
+    return std::clamp(velocity, minimumVelocity, maximumVelocity);
+}
+
+void PianoRollModel::collectVelocityBars(const NoteList& notes, std::vector<VelocityBar>& out) const
+{
+    out.clear();
+
+    if (!hasVelocityLane() || pointsPerTick() <= 0.0)
+        return;
+
+    const Tick   lastTick = viewport_.firstTick + viewport_.visibleTicks;
+    const double floorY   = velocityLaneBottom();
+
+    for (std::size_t index = 0; index < notes.size(); ++index) {
+        const MidiEvent& event = notes[index];
+
+        if (event.type != project::MidiEventType::note)
+            continue;
+
+        if (!keyIsVisible(event, viewport_))
+            continue;
+
+        if (event.tick < viewport_.firstTick || event.tick >= lastTick)
+            continue;
+
+        VelocityBar bar;
+        bar.index    = index;
+        bar.x        = tickToX(event.tick);
+        bar.width    = velocityBarWidth;
+        bar.top      = velocityToY(event.value);
+        bar.height   = floorY - bar.top;
+        bar.velocity = std::clamp(event.value, minimumVelocity, maximumVelocity);
+        bar.selected = isSelected(index);
+
+        out.push_back(bar);
+    }
+}
+
+std::size_t PianoRollModel::barAtPoint(const NoteList& notes, double x, double y) const
+{
+    if (!isInVelocityLane(y) || pointsPerTick() <= 0.0)
+        return noNote;
+
+    const Tick lastTick = viewport_.firstTick + viewport_.visibleTicks;
+
+    // Back to front, like noteAtPoint: two notes starting on the same tick put
+    // their bars in the same column, and the one drawn last is on top.
+    //
+    // The whole column is the target, not just the filled part of it. A bar at
+    // velocity 20 is a few points tall, and requiring the user to hit those few
+    // points would make quiet notes the hardest ones to make louder.
+    for (std::size_t position = notes.size(); position > 0; --position) {
+        const std::size_t index = position - 1;
+        const MidiEvent&  event = notes[index];
+
+        if (event.type != project::MidiEventType::note)
+            continue;
+
+        if (!keyIsVisible(event, viewport_))
+            continue;
+
+        if (event.tick < viewport_.firstTick || event.tick >= lastTick)
+            continue;
+
+        const double left = tickToX(event.tick);
+        if (x >= left && x < left + velocityBarWidth)
+            return index;
+    }
+
+    return noNote;
 }
 
 std::size_t PianoRollModel::noteAtPoint(const NoteList& notes, double x, double y) const

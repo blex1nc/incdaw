@@ -1931,6 +1931,43 @@ UI build-out increment 11 — the workspace (2026-08-22):
       launching, and the settings file round-tripping through a real
       quit — which is what was actually done, not a claim of more.
 
+UI build-out increment 12 — the velocity lane (2026-08-22):
+
+  app::PianoRollModel grew the lane's arithmetic; ui/macos/PianoRollView
+  draws and drives it. Nothing else changed.
+
+    - Viewport::height now means the NOTE GRID's height, not the view's,
+      with velocityLaneHeight beside it. Every existing caller is
+      unaffected because the grid's own geometry is unchanged — but do
+      not "fix" height back into the view's height, or the lane will
+      draw over the lowest key rows.
+    - The lane culls on the note's START tick, deliberately stricter than
+      note culling, which keeps a long note that began off-screen left.
+      That note's bar would sit where it can be seen and not grabbed; a
+      bar is either fully addressable or absent.
+    - barAtPoint targets the whole column, not the filled part of the
+      stem. A velocity-5 bar is three points tall, and requiring a hit on
+      those three points would make the quietest notes the hardest to
+      raise.
+    - The drag snapshots the selection into _velocityTargets.
+      SetVelocityCommand merges only across identical index lists, so a
+      selection that changed mid-drag would silently produce one undo
+      entry per mouse move.
+    - Velocity 0 is unreachable by construction (note-off). The command
+      already clamped; the lane clamps too, so the two cannot disagree.
+
+  Deliberately not in it:
+
+    - No CC or pitch-bend lanes. The lane is hardcoded to velocity; a
+      lane selector is the next step and wants a model change, not a
+      view one.
+    - No menu entry for the toggle — E only. The shell's View menu was
+      owned by another session's work at the time; adding it is a
+      one-line follow-up in main.mm -buildMenu.
+    - INCDAWPianoRollView.statusText is still written and read by nobody.
+      The lane reports through it like every other gesture; the shell
+      builds its own status line and ignores it.
+
 Things to be careful about:
 
   - third_party/ is gitignored: a fresh clone or worktree has neither

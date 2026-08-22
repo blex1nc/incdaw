@@ -490,6 +490,19 @@ one shell path and name what they will do (D-037).
 the status line reports what the hardware granted; a MIDI keyboard's CC
 reaches MIDI learn; every menu action is reachable by typing part of its name.
 
+### Increment 12 — the Piano Roll's velocity lane — DONE 2026-08-22
+
+`SetVelocityCommand` was written and tested in Phase 6 and unreachable ever
+since: the grid's vertical axis is pitch, so velocity had nowhere to live.
+The lane under the grid gives it one — a stem per note start, click or drag
+to set, selection-wide when the stem is part of the selection, one undo entry
+per drag. Geometry and hit testing are in `app::PianoRollModel` and covered by
+eleven cases; the view only draws the list the model produces.
+
+**Exit criterion (met):** a note's velocity is editable with the mouse, the
+edit is a single undoable step, and the bar's height and the note's brightness
+agree because both read the same value.
+
 ### Remaining, by gate
 
 - **Dependency approval required (§41):** AU hosting, then VST3; FLAC and

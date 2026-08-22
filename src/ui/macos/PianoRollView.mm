@@ -25,6 +25,15 @@ namespace {
 /// Width of the keyboard strip down the left edge, in points.
 constexpr double keyboardWidth = 64.0;
 
+/// Height of the velocity lane, in points. Tall enough that the 1..127 range
+/// has resolution a hand can aim at, short enough not to compete with the grid.
+constexpr double velocityLaneExtent = 88.0;
+
+/// The grid never shrinks below this to make room for the lane. In a short
+/// window the lane gives way instead — losing the notes to keep the lane would
+/// be the wrong trade in every case.
+constexpr double minimumGridHeight = 140.0;
+
 /// Which pitch classes are black keys. Used for both the keyboard strip and the
 /// row shading behind the grid, so the two can never disagree.
 bool isBlackKey(int key) noexcept
@@ -79,7 +88,7 @@ ui::Rect makeRect(double x, double y, double width, double height, Rgb colour,
     return makeRect(x, y, width, height, colour.red, colour.green, colour.blue, alpha, radius);
 }
 
-enum class DragMode { none, move, resize, boxSelect };
+enum class DragMode { none, move, resize, boxSelect, velocity };
 
 /// The stamp palette: which chord an Option-click lays down. Cycled with the
 /// number keys; the suffixes address app::music::chordDictionary().
@@ -98,6 +107,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 
     std::vector<ui::Rect>                        _rectangles;
     std::vector<app::PianoRollModel::VisibleNote> _visible;
+    std::vector<app::PianoRollModel::VelocityBar> _bars;
     std::vector<std::size_t>                     _hits;
 
     CAMetalLayer* _metalLayer;
@@ -111,6 +121,16 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     long long  _dragAppliedTicks;
     int        _dragAppliedKeys;
     BOOL       _gestureActive;
+
+    /// The velocity lane, and the drag that edits it.
+    ///
+    /// The targets are snapshotted when the drag starts rather than read from
+    /// the selection each move: SetVelocityCommand merges only across identical
+    /// index lists, and a selection that changed mid-drag would break the merge
+    /// and leave one undo entry per mouse move.
+    BOOL                     _velocityLaneVisible;
+    std::vector<std::size_t> _velocityTargets;
+    int                      _dragAppliedVelocity;
 
     // Chord tools (docs/FL2026_GAP.md P1/P2).
     std::size_t       _stampChordIndex;
@@ -136,6 +156,11 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     _dragAppliedTicks = 0;
     _dragAppliedKeys  = 0;
     _gestureActive    = NO;
+
+    // Shown by default. A velocity lane that has to be discovered is a velocity
+    // lane nobody uses, and the grid is still the larger half of the view.
+    _velocityLaneVisible = YES;
+    _dragAppliedVelocity = -1;
     _playheadTick     = -1;
     _statusText       = @"Ready";
     _stampChordIndex  = 0;
@@ -262,13 +287,43 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 {
     [super setFrameSize:size];
 
-    auto viewport = _model->viewport();
-    viewport.width  = size.width - keyboardWidth;
-    viewport.height = size.height;
-    _model->setViewport(viewport);
+    [self applyViewportGeometry];
 
     _metalLayer.frame = self.bounds;
     [self updateDrawableSize];
+
+    [self setNeedsDisplay:YES];
+}
+
+/// Divides the view's height between the note grid and the velocity lane.
+///
+/// The lane is taken out of the grid's share rather than added to the view's:
+/// opening it must not resize the window, and it must not be able to squeeze
+/// the grid down to nothing in a short one.
+- (void)applyViewportGeometry
+{
+    const NSSize size = self.bounds.size;
+    const double want = _velocityLaneVisible ? velocityLaneExtent : 0.0;
+
+    auto viewport = _model->viewport();
+    viewport.width  = size.width - keyboardWidth;
+    viewport.height = std::max(minimumGridHeight, size.height - want);
+
+    // Whatever is genuinely left over, which is less than `want` in a window
+    // too short to give the grid its minimum.
+    viewport.velocityLaneHeight = std::max(0.0, size.height - viewport.height);
+
+    _model->setViewport(viewport);
+}
+
+- (void)toggleVelocityLane
+{
+    _velocityLaneVisible = !_velocityLaneVisible;
+    [self applyViewportGeometry];
+
+    // Not reportAction: showing a lane is not an edit, and telling the shell
+    // it was one would rebuild the render graph for a view change.
+    _statusText = _velocityLaneVisible ? @"Velocity lane shown" : @"Velocity lane hidden";
 
     [self setNeedsDisplay:YES];
 }
@@ -285,6 +340,12 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     const auto&  viewport = _model->viewport();
     const double rowHeight = _model->keyHeight();
     const double gridWidth = viewport.width;
+
+    // Grid lines and the playhead run through the velocity lane as well: the
+    // lane shares the grid's time axis, and a beat that stops at the boundary
+    // makes the two read as unrelated panes.
+    const double laneHeight  = viewport.velocityLaneHeight;
+    const double totalHeight = viewport.height + laneHeight;
 
     const Rgb whiteRow  = components(theme::mix(theme::ink(Ink::panel),
                                                 theme::ink(Ink::panelRaised), 0.35));
@@ -339,6 +400,25 @@ constexpr std::array<const char*, 8> stampSuffixes = {
                                            std::max(1.0, rowHeight - 3.0), octave, 1.0, 1.5));
     }
 
+    // The velocity lane's ground, laid before the grid lines so they cross it.
+    if (laneHeight > 0.0) {
+        const double top = _model->velocityLaneTop();
+
+        _rectangles.push_back(makeRect(0.0, top, keyboardWidth + gridWidth, laneHeight,
+                                       components(theme::ink(Ink::panelSunken))));
+
+        // A hard separator: without it the lowest key row and the lane merge
+        // into one surface that has mysteriously lost its rows.
+        _rectangles.push_back(makeRect(0.0, top, keyboardWidth + gridWidth, 1.0, barLine, 0.9));
+
+        // The renderer draws rectangles and nothing else, so the scale cannot
+        // be numbered. Three lines at 32, 64 and 96 give it instead.
+        for (const int mark : {32, 64, 96}) {
+            const double y = _model->velocityToY(mark);
+            _rectangles.push_back(makeRect(keyboardWidth, y, gridWidth, 1.0, beatLine, 0.35));
+        }
+    }
+
     // Grid lines: beats faint, bars stronger.
     const Tick beat = ticksPerQuarterNote;
     const Tick bar  = ticksPerQuarterNote * 4;
@@ -352,7 +432,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
             continue;
 
         const bool isBar = (tick % bar) == 0;
-        _rectangles.push_back(makeRect(x, 0.0, isBar ? 1.5 : 1.0, viewport.height,
+        _rectangles.push_back(makeRect(x, 0.0, isBar ? 1.5 : 1.0, totalHeight,
                                        isBar ? barLine : beatLine));
     }
 
@@ -386,6 +466,32 @@ constexpr std::array<const char*, 8> stampSuffixes = {
         }
     }
 
+    // Velocity bars: one stem per note that STARTS in view, in the channel's
+    // colour, carrying the same velocity-to-brightness rule the notes do — so a
+    // bar and its note are recognisably the same object seen twice.
+    if (_model->hasVelocityLane()) {
+        _model->collectVelocityBars([self currentNotes], _bars);
+
+        for (const auto& stem : _bars) {
+            const double intensity = 0.45 + 0.55 * (static_cast<double>(stem.velocity) / 127.0);
+
+            const Rgb    base  = stem.selected ? selectedNote : noteColour;
+            const double scale = stem.selected ? 1.0 : intensity;
+
+            const double x     = keyboardWidth + stem.x;
+            const double width = std::max(2.0, stem.width - 1.0);
+
+            _rectangles.push_back(makeRect(x, stem.top, width, std::max(1.0, stem.height - 1.0),
+                                           {base.red * scale, base.green * scale,
+                                            base.blue * scale}, 1.0, 1.5));
+
+            // The cap at full brightness. It is the grab target the eye looks
+            // for, and it is what makes a quiet note's bar visible at all when
+            // the stem itself is only two or three points tall.
+            _rectangles.push_back(makeRect(x, stem.top, width, 2.0, base, 1.0, 1.0));
+        }
+    }
+
     // Box selection overlay.
     if (_dragMode == DragMode::boxSelect) {
         const double x = std::min(_dragOrigin.x, _dragCurrent.x);
@@ -400,7 +506,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     if (_playheadTick >= 0) {
         const double x = keyboardWidth + _model->tickToX(_playheadTick);
         if (x >= keyboardWidth && x <= keyboardWidth + gridWidth)
-            _rectangles.push_back(makeRect(x, 0.0, 2.0, viewport.height, playhead));
+            _rectangles.push_back(makeRect(x, 0.0, 2.0, totalHeight, playhead));
     }
 }
 
@@ -456,6 +562,14 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     // Clicking the keyboard strip is not an edit.
     if (viewPoint.x < keyboardWidth) {
         _dragMode = DragMode::none;
+        return;
+    }
+
+    // The lane is checked first: its y range is below the grid's, so nothing
+    // here can be a note, and letting the grid's "empty space draws a note"
+    // path see it would add a note every time someone aimed at a bar.
+    if (_model->isInVelocityLane(grid.y)) {
+        [self beginVelocityDragAt:grid];
         return;
     }
 
@@ -518,6 +632,57 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     [self setNeedsDisplay:YES];
 }
 
+/// Starts a velocity edit from a press in the lane.
+- (void)beginVelocityDragAt:(NSPoint)grid
+{
+    const std::size_t hit = _model->barAtPoint([self currentNotes], grid.x, grid.y);
+
+    if (hit == app::PianoRollModel::noNote) {
+        // Missing a bar is not a request to deselect. The lane is a narrow
+        // target, and an aimed click that lands between two stems should cost
+        // the user nothing.
+        _dragMode = DragMode::none;
+        return;
+    }
+
+    // Editing a note that is already selected edits the whole selection — the
+    // rule the grid already follows for move and resize. Editing one that is
+    // not selects it first, so what is about to change is visible before it
+    // changes.
+    if (!_model->isSelected(hit))
+        _model->setSelection({hit});
+
+    _velocityTargets     = _model->selection();
+    _dragAppliedVelocity = -1;
+    _dragMode            = DragMode::velocity;
+
+    [self applyVelocityAtY:grid.y];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)applyVelocityAtY:(double)y
+{
+    if (_velocityTargets.empty())
+        return;
+
+    const int velocity = _model->yToVelocity(y);
+    if (velocity == _dragAppliedVelocity)
+        return;
+
+    // Recorded before the attempt, not after: a command that changes nothing
+    // because every target already sits at this velocity returns false, and
+    // retrying it on every mouse move would be work for no reason.
+    _dragAppliedVelocity = velocity;
+
+    // Merging turns the whole drag into one undo entry, exactly as a move does.
+    if (_registry->executeMerging(std::make_unique<app::SetVelocityCommand>(
+            project::EntityId{_patternIdValue}, project::EntityId{_channelIdValue},
+            _velocityTargets, velocity))) {
+        _gestureActive = YES;
+        [self reportAction:[NSString stringWithFormat:@"Velocity %d", velocity]];
+    }
+}
+
 - (void)mouseDragged:(NSEvent*)event
 {
     if (_dragMode == DragMode::none)
@@ -529,6 +694,15 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     project::Pattern* pattern = [self currentPattern];
     if (pattern == nullptr)
         return;
+
+    // The lane's drag is not clamped to the lane: dragging past its floor or
+    // ceiling pins at 1 and 127 rather than abandoning the gesture, which is
+    // what a hand overshooting an 88-point strip actually wants.
+    if (_dragMode == DragMode::velocity) {
+        [self applyVelocityAtY:[self gridPointFromEvent:event].y];
+        [self setNeedsDisplay:YES];
+        return;
+    }
 
     if (_dragMode == DragMode::boxSelect) {
         _model->notesInRectangle([self currentNotes],
@@ -602,6 +776,10 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 
     _dragMode      = DragMode::none;
     _gestureActive = NO;
+
+    _velocityTargets.clear();
+    _dragAppliedVelocity = -1;
+
     [self setNeedsDisplay:YES];
 }
 
@@ -612,6 +790,13 @@ constexpr std::array<const char*, 8> stampSuffixes = {
         return;
 
     const NSPoint grid = [self gridPointFromEvent:event];
+
+    // A right-click in the lane is not a delete. yToKey would answer with a
+    // key below the lowest visible one and find nothing, but relying on that
+    // would make the lane's safety an accident of the key arithmetic.
+    if (_model->isInVelocityLane(grid.y))
+        return;
+
     const std::size_t hit = _model->noteAtPoint([self currentNotes], grid.x, grid.y);
 
     if (hit == app::PianoRollModel::noNote)
@@ -743,6 +928,12 @@ constexpr std::array<const char*, 8> stampSuffixes = {
 
     if (!command && (character == 'c' || character == 'C')) {
         [self reportChordOfSelection];
+        return;
+    }
+
+    // E for event lane, which is what FL Studio calls the strip this is.
+    if (!command && (character == 'e' || character == 'E')) {
+        [self toggleVelocityLane];
         return;
     }
 

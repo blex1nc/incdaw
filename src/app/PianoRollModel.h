@@ -37,6 +37,17 @@ public:
         bool        selected = false;
     };
 
+    /// One note's bar in the velocity lane.
+    struct VelocityBar {
+        std::size_t index = 0;
+        double x = 0.0;         ///< left edge, aligned to the note's start
+        double width = 0.0;
+        double top = 0.0;       ///< the bar runs from here down to the lane's floor
+        double height = 0.0;
+        int    velocity = 100;
+        bool   selected = false;
+    };
+
     struct Viewport {
         Tick   firstTick   = 0;
         Tick   visibleTicks = incdaw::engine::ticksPerQuarterNote * 4;   ///< one 4/4 bar
@@ -44,7 +55,15 @@ public:
         int    visibleKeys = 36;
 
         double width  = 1000.0;   ///< in points
+
+        /// The NOTE GRID's height, not the view's. The velocity lane is added
+        /// below it, so a view that shows the lane gives a smaller height here
+        /// and everything that draws or hit-tests notes is unaffected.
         double height = 600.0;
+
+        /// Height of the velocity lane below the grid, in points. Zero hides
+        /// it, which is the default: the lane is a mode, not furniture.
+        double velocityLaneHeight = 0.0;
     };
 
     void setViewport(const Viewport& viewport) noexcept { viewport_ = viewport; }
@@ -144,6 +163,66 @@ public:
 
     /// Grab zone at a note's right edge, in points.
     static constexpr double resizeHandleWidth = 6.0;
+
+    // ── Velocity lane ───────────────────────────────────────────────────────
+    //
+    // FL Studio calls this the event lane, and every piano roll has some form
+    // of it for the same reason: velocity is the one note property that changes
+    // how a part FEELS rather than what it plays, and it is unreachable through
+    // the grid because the grid's vertical axis is already pitch.
+    //
+    // Only the arithmetic lives here. The lane is drawn by the view out of the
+    // list `collectVelocityBars` produces, exactly as the grid is.
+
+    /// Width of a velocity bar, in points.
+    ///
+    /// Fixed rather than taken from the note's length: a whole-bar note would
+    /// otherwise get a bar wide enough to bury every shorter note beside it,
+    /// and the lane is meant to read as a row of stems at note starts.
+    static constexpr double velocityBarWidth = 9.0;
+
+    /// Gap above the tallest bar, so a velocity of 127 does not touch the
+    /// lane's top edge and become indistinguishable from a clipped one.
+    static constexpr double velocityLanePadding = 4.0;
+
+    [[nodiscard]] bool hasVelocityLane() const noexcept
+    {
+        return viewport_.velocityLaneHeight > 0.0;
+    }
+
+    [[nodiscard]] double velocityLaneTop() const noexcept { return viewport_.height; }
+
+    [[nodiscard]] double velocityLaneBottom() const noexcept
+    {
+        return viewport_.height + viewport_.velocityLaneHeight;
+    }
+
+    /// False whenever the lane is hidden, so callers need only one test.
+    [[nodiscard]] bool isInVelocityLane(double y) const noexcept
+    {
+        return hasVelocityLane() && y >= velocityLaneTop() && y < velocityLaneBottom();
+    }
+
+    /// The top of the bar drawn for `velocity`. Velocity is clamped to 1..127:
+    /// zero is note-off, and a note in a pattern must never carry it.
+    [[nodiscard]] double velocityToY(int velocity) const noexcept;
+
+    /// The velocity a point in the lane means, clamped to 1..127. Points above
+    /// the lane read as 127 and below it as 1, so a drag that overshoots the
+    /// lane pins rather than jumps.
+    [[nodiscard]] int yToVelocity(double y) const noexcept;
+
+    /// Fills `out` with a bar for every note whose START is in view.
+    ///
+    /// Deliberately stricter than note culling, which keeps a long note that
+    /// began before the viewport: that note's event is at its start, so its bar
+    /// would sit off the left edge where it can be seen and not grabbed. A bar
+    /// is either fully addressable or absent.
+    void collectVelocityBars(const NoteList& notes, std::vector<VelocityBar>& out) const;
+
+    /// The note whose bar is under a point, or `noNote`. Returns `noNote` for
+    /// any point outside the lane, so one call answers "is this a lane edit?".
+    [[nodiscard]] std::size_t barAtPoint(const NoteList& notes, double x, double y) const;
 
 private:
     Viewport                 viewport_;

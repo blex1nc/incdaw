@@ -416,3 +416,217 @@ TEST_CASE("hit testing 10,000 notes is fast enough for mouse tracking")
     MESSAGE("hit test over 10,000 notes: " << perHitMs << " ms");
     CHECK(perHitMs < 2.0);
 }
+
+// ── Velocity lane ────────────────────────────────────────────────────────────
+//
+// The lane is the only way velocity is editable at all: the grid's vertical
+// axis is already pitch, so a note's loudness has nowhere to live in it. What
+// is tested here is the arithmetic the view draws and hit-tests from — where a
+// bar sits for a given velocity, which velocity a click means, and which notes
+// get a bar in the first place.
+
+namespace {
+
+project::MidiEvent noteAt(Tick tick, int key, int velocity, Tick duration = 240)
+{
+    project::MidiEvent event = note(tick, key, duration);
+    event.value = velocity;
+    return event;
+}
+
+/// The editing model with the lane open: 88 points of lane under 720 of grid.
+PianoRollModel makeLaneModel()
+{
+    PianoRollModel model = makeModel();
+
+    PianoRollModel::Viewport viewport = model.viewport();
+    viewport.velocityLaneHeight = 88.0;
+    model.setViewport(viewport);
+
+    return model;
+}
+
+} // namespace
+
+TEST_CASE("without a lane height there is no lane, and nothing pretends otherwise")
+{
+    const PianoRollModel model = makeModel();
+
+    CHECK_FALSE(model.hasVelocityLane());
+
+    // Every entry point agrees, so a caller needs one test and not four.
+    CHECK_FALSE(model.isInVelocityLane(model.viewport().height + 10.0));
+    CHECK_FALSE(model.isInVelocityLane(0.0));
+
+    const NoteList notes{noteAt(0, 60, 100)};
+
+    std::vector<PianoRollModel::VelocityBar> bars;
+    model.collectVelocityBars(notes, bars);
+    CHECK(bars.empty());
+
+    CHECK(model.barAtPoint(notes, 0.0, model.viewport().height + 10.0) == PianoRollModel::noNote);
+}
+
+TEST_CASE("the lane occupies the band below the grid, and nothing above it")
+{
+    const PianoRollModel model = makeLaneModel();
+
+    REQUIRE(model.hasVelocityLane());
+    CHECK(model.velocityLaneTop() == doctest::Approx(720.0));
+    CHECK(model.velocityLaneBottom() == doctest::Approx(808.0));
+
+    CHECK_FALSE(model.isInVelocityLane(719.5));   // the last row of the grid
+    CHECK(model.isInVelocityLane(720.0));         // the lane's first point
+    CHECK(model.isInVelocityLane(807.5));
+    CHECK_FALSE(model.isInVelocityLane(808.0));   // past the floor
+}
+
+TEST_CASE("velocity and lane position round-trip")
+{
+    const PianoRollModel model = makeLaneModel();
+
+    for (const int velocity : {1, 20, 32, 64, 96, 110, 127})
+        CHECK(model.yToVelocity(model.velocityToY(velocity)) == velocity);
+
+    // Louder is higher, and the loudest still clears the lane's top edge so a
+    // full bar cannot be mistaken for a clipped one.
+    CHECK(model.velocityToY(127) < model.velocityToY(64));
+    CHECK(model.velocityToY(127) > model.velocityLaneTop());
+}
+
+TEST_CASE("a drag past the lane pins rather than wraps")
+{
+    const PianoRollModel model = makeLaneModel();
+
+    // Well above the lane, and well below it: a hand overshooting an 88-point
+    // strip must not send the velocity to the other end of the range.
+    CHECK(model.yToVelocity(-500.0) == 127);
+    CHECK(model.yToVelocity(0.0) == 127);
+    CHECK(model.yToVelocity(5000.0) == 1);
+
+    // Zero is note-off and must never be reachable: a note carrying it is
+    // silent with no visible reason.
+    CHECK(model.yToVelocity(model.velocityLaneBottom()) == 1);
+}
+
+TEST_CASE("a bar's height is its velocity")
+{
+    const PianoRollModel model = makeLaneModel();
+
+    const NoteList notes{noteAt(0, 60, 20), noteAt(480, 62, 120)};
+
+    std::vector<PianoRollModel::VelocityBar> bars;
+    model.collectVelocityBars(notes, bars);
+
+    REQUIRE(bars.size() == 2);
+    CHECK(bars[0].velocity == 20);
+    CHECK(bars[1].velocity == 120);
+    CHECK(bars[0].height < bars[1].height);
+
+    // Every bar stands on the same floor, whatever its height.
+    for (const auto& bar : bars)
+        CHECK(bar.top + bar.height == doctest::Approx(model.velocityLaneBottom()));
+}
+
+TEST_CASE("a note that starts before the viewport gets no bar, even though it is drawn")
+{
+    PianoRollModel model = makeLaneModel();
+
+    PianoRollModel::Viewport viewport = model.viewport();
+    viewport.firstTick = ticksPerQuarterNote * 4;      // scrolled one bar in
+    model.setViewport(viewport);
+
+    // Four beats long, started a bar ago: still crossing the screen, but its
+    // event is behind the left edge.
+    const NoteList notes{noteAt(0, 60, 100, ticksPerQuarterNote * 8)};
+
+    std::vector<PianoRollModel::VisibleNote> visible;
+    model.collectVisibleNotes(notes, visible);
+    CHECK(visible.size() == 1);        // the grid still draws it
+
+    std::vector<PianoRollModel::VelocityBar> bars;
+    model.collectVelocityBars(notes, bars);
+    CHECK(bars.empty());               // the lane does not, because it could not be grabbed
+}
+
+TEST_CASE("the lane shows what the grid shows, and nothing else")
+{
+    const PianoRollModel model = makeLaneModel();   // keys 48..83, ticks 0..1920
+
+    project::MidiEvent cc;
+    cc.type = project::MidiEventType::controlChange;
+    cc.tick = 0;
+    cc.key  = 74;
+
+    const NoteList notes{
+        noteAt(0, 60, 100),                              // in view
+        noteAt(240, 24, 100),                            // below the key range
+        noteAt(240, 120, 100),                           // above the key range
+        noteAt(ticksPerQuarterNote * 40, 60, 100),       // past the right edge
+        cc,                                              // not a note at all
+    };
+
+    std::vector<PianoRollModel::VelocityBar> bars;
+    model.collectVelocityBars(notes, bars);
+
+    REQUIRE(bars.size() == 1);
+    CHECK(bars[0].index == 0);
+}
+
+TEST_CASE("selection is carried into the bars, so the lane shows what an edit will hit")
+{
+    PianoRollModel model = makeLaneModel();
+
+    const NoteList notes{noteAt(0, 60, 100), noteAt(480, 62, 100)};
+    model.setSelection({1});
+
+    std::vector<PianoRollModel::VelocityBar> bars;
+    model.collectVelocityBars(notes, bars);
+
+    REQUIRE(bars.size() == 2);
+    CHECK_FALSE(bars[0].selected);
+    CHECK(bars[1].selected);
+}
+
+TEST_CASE("the whole column is a target, not just the filled part of the bar")
+{
+    const PianoRollModel model = makeLaneModel();
+
+    // Velocity 5: a stem barely three points tall. Requiring the user to hit
+    // those three points would make the quietest notes the hardest to raise.
+    const NoteList notes{noteAt(0, 60, 5)};
+
+    const double column = model.tickToX(0) + PianoRollModel::velocityBarWidth * 0.5;
+
+    CHECK(model.barAtPoint(notes, column, model.velocityLaneTop() + 2.0) == 0);
+    CHECK(model.barAtPoint(notes, column, model.velocityLaneBottom() - 2.0) == 0);
+}
+
+TEST_CASE("a click outside a bar's column, or outside the lane, hits nothing")
+{
+    const PianoRollModel model = makeLaneModel();
+
+    const NoteList notes{noteAt(0, 60, 100)};
+    const double   inside = model.tickToX(0) + 1.0;
+
+    CHECK(model.barAtPoint(notes, inside, 760.0) == 0);
+
+    // Just past the stem's right edge.
+    CHECK(model.barAtPoint(notes, model.tickToX(0) + PianoRollModel::velocityBarWidth + 1.0,
+                           760.0) == PianoRollModel::noNote);
+
+    // In the grid, where the same x is squarely inside the note itself.
+    CHECK(model.barAtPoint(notes, inside, 100.0) == PianoRollModel::noNote);
+}
+
+TEST_CASE("where two bars share a column, the one drawn on top is picked")
+{
+    const PianoRollModel model = makeLaneModel();
+
+    // A chord: same tick, different keys, so the stems land on each other.
+    const NoteList notes{noteAt(0, 60, 100), noteAt(0, 64, 100), noteAt(0, 67, 100)};
+
+    const double column = model.tickToX(0) + 1.0;
+
+    CHECK(model.barAtPoint(notes, column, 760.0) == 2);
+}

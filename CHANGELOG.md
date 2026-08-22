@@ -8,6 +8,45 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### UI — the Piano Roll gets a velocity lane — 2026-08-22
+
+**Added**
+
+- **The velocity lane** (FL calls it the event lane), under the grid,
+  shown by default and toggled with `E`. One stem per note that starts
+  in view, in the channel's colour, carrying the same
+  velocity-to-brightness rule the notes do — so a bar and its note are
+  recognisably the same object seen twice. Three faint lines at 32, 64
+  and 96 give the scale, because the Metal renderer draws rectangles and
+  cannot number an axis.
+- **Velocity is editable at last.** `SetVelocityCommand` has existed and
+  been tested since Phase 6; nothing in the UI could reach it, because
+  the grid's vertical axis is already pitch. Click or drag a stem to set
+  it. Dragging a stem that is part of the selection edits the whole
+  selection — the rule move and resize already follow. The drag merges
+  into one undo entry, and overshooting the lane pins at 1 and 127
+  rather than wrapping. Velocity 0 stays unreachable: it is note-off.
+- The whole column is the target, not just the filled part of a bar —
+  otherwise the quietest notes would be the hardest ones to make louder.
+  Where a chord puts several stems in one column, the topmost wins, the
+  same rule `noteAtPoint` uses.
+
+**Changed**
+
+- Grid lines and the playhead now run through the lane: it shares the
+  grid's time axis, and a beat that stopped at the boundary made the two
+  read as unrelated panes.
+- `PianoRollModel::Viewport::height` is now the note grid's height rather
+  than the view's, with `velocityLaneHeight` beside it. The lane is taken
+  out of the grid's share, never added to the view's, and the grid never
+  drops below 140 points — in a short window the lane gives way instead.
+
+**Files**
+
+- `src/app/PianoRollModel.{h,cpp}`, `src/ui/macos/PianoRollView.mm`
+- `tests/unit/PianoRollTests.cpp` — 11 new cases
+
+
 ### UI — the machine is configurable, the keyboard plays, and every command is one keystroke away — 2026-08-22
 
 **Added**
