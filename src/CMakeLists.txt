@@ -18,6 +18,7 @@ add_library(incdaw_platform STATIC
     platform/macos/CoreAudioDevice.cpp
     platform/macos/CoreMidiDevice.cpp
     platform/macos/HostTime.cpp
+    platform/macos/HttpClient.mm
     platform/macos/AudioUnitHost.mm)
 target_include_directories(incdaw_platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_platform PRIVATE incdaw_warnings)
@@ -29,12 +30,15 @@ if(APPLE)
         "-framework AudioToolbox"
         "-framework CoreAudioKit"
         "-framework AppKit"
+        "-framework Foundation"
         "-framework CoreFoundation")
 
-    # ARC for the one Objective-C++ file in this layer: the Audio Unit host
-    # holds an AppKit view for the generic editor. The C++ around it is
-    # unaffected — ARC is per translation unit.
+    # ARC for the Objective-C++ files in this layer: the Audio Unit host holds
+    # an AppKit view for the generic editor, and the HTTP client holds an
+    # NSURLSession and a block. The C++ around them is unaffected — ARC is per
+    # translation unit.
     set_source_files_properties(platform/macos/AudioUnitHost.mm
+                                platform/macos/HttpClient.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 
@@ -139,6 +143,7 @@ target_link_libraries(incdaw_project
 add_library(incdaw_app STATIC
     app/Version.cpp
     app/AppSettings.cpp
+    app/UpdateCheck.cpp
     app/StandardActions.cpp
     app/AutomationWriteSession.cpp
     app/Browser.cpp

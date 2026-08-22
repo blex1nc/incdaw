@@ -196,3 +196,45 @@ TEST_CASE("saving to an unwritable path reports failure instead of throwing")
     CHECK_FALSE(settings.save({}));
     CHECK_FALSE(settings.save("/this/directory/does/not/exist/settings.json"));
 }
+
+TEST_CASE("the update preference round trips, and an older file keeps the default")
+{
+    const std::filesystem::path file = scratchFile("updates.json");
+
+    app::AppSettings settings;
+    CHECK(settings.updates.checkAtLaunch);              // on unless turned off
+    CHECK(settings.updates.lastCheckedUnix == 0);
+    CHECK(settings.updates.skippedVersion.empty());
+
+    settings.updates.checkAtLaunch   = false;
+    settings.updates.lastCheckedUnix = 1'800'000'000;
+    settings.updates.skippedVersion  = "0.9.1";
+
+    REQUIRE(settings.save(file));
+
+    const app::AppSettings reloaded = app::AppSettings::load(file);
+    CHECK_FALSE(reloaded.updates.checkAtLaunch);
+    CHECK(reloaded.updates.lastCheckedUnix == 1'800'000'000);
+    CHECK(reloaded.updates.skippedVersion == "0.9.1");
+
+    // A settings file written before the block existed. The field is an
+    // addition, not a change of meaning, so the version does not move and the
+    // old file simply reads as "never asked" — which is the default, on.
+    writeText(file, R"({"format":"incdaw-settings","version":1,"audio":{"bufferSize":256}})");
+
+    const app::AppSettings older = app::AppSettings::load(file);
+    CHECK(older.audio.bufferSize == 256);
+    CHECK(older.updates.checkAtLaunch);
+    CHECK(older.updates.lastCheckedUnix == 0);
+}
+
+TEST_CASE("a nonsense last-checked stamp leaves the check due rather than locked out")
+{
+    const std::filesystem::path file = scratchFile("updates-clock.json");
+
+    // Hand-edited, or written by a machine whose clock was wrong. Treating it
+    // as a real stamp would postpone the next check by however far it is out.
+    writeText(file, R"({"updates":{"lastChecked":-9000000000}})");
+
+    CHECK(app::AppSettings::load(file).updates.lastCheckedUnix == 0);
+}

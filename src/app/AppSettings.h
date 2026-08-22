@@ -3,6 +3,7 @@
 #include "platform/AudioDevice.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -74,6 +75,32 @@ struct AppSettings {
         int  activeEditor = 0;
         bool songMode     = false;
     } workspace;
+
+    /// The update check (app/UpdateCheck.h).
+    struct Updates {
+        /// Whether INCDAW asks its release feed for a newer version at launch.
+        ///
+        /// On, unlike `openInputAtLaunch` above, and the difference is not an
+        /// inconsistency: opening the microphone captures the room, while this
+        /// sends a plain GET to a public page and reads the answer. No account,
+        /// no token, no identifier beyond "INCDAW/<version>", nothing uploaded,
+        /// nothing installed — the most a positive answer does is offer to open
+        /// a web page (docs/DECISIONS.md D-038).
+        ///
+        /// It is one checkbox away from off in Settings, and turning it off
+        /// leaves the manual "Check for Updates…" working.
+        bool checkAtLaunch = true;
+
+        /// When the automatic check last ran, in Unix seconds. It runs at most
+        /// once a day, so a user who opens INCDAW forty times a day is not
+        /// forty requests.
+        std::int64_t lastCheckedUnix = 0;
+
+        /// A version the user asked not to be reminded about. It silences that
+        /// version and nothing above it — skipping 0.9.1 says nothing about
+        /// 1.0.0 — and the manual check reports it regardless.
+        std::string skippedVersion;
+    } updates;
 
     [[nodiscard]] std::string toJson() const;
 

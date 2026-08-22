@@ -70,6 +70,7 @@ add_executable(incdaw_tests
     unit/PluginEditorTests.cpp
     unit/InsertCommandTests.cpp
     unit/AppSettingsTests.cpp
+    unit/UpdateCheckTests.cpp
     unit/StandardActionsTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again

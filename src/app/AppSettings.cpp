@@ -65,6 +65,12 @@ std::string AppSettings::toJson() const
     workspaceObject.set("songMode", workspace.songMode);
     root.set("workspace", std::move(workspaceObject));
 
+    Json updatesObject = Json::object();
+    updatesObject.set("checkAtLaunch", updates.checkAtLaunch);
+    updatesObject.set("lastChecked", updates.lastCheckedUnix);
+    updatesObject.set("skippedVersion", updates.skippedVersion);
+    root.set("updates", std::move(updatesObject));
+
     return root.dump();
 }
 
@@ -108,6 +114,18 @@ AppSettings AppSettings::fromJson(const std::string& text)
         settings.workspace.windowHeight = workspaceObject["windowHeight"].asDouble(0.0);
         settings.workspace.activeEditor = static_cast<int>(workspaceObject["activeEditor"].asInt(0));
         settings.workspace.songMode     = workspaceObject["songMode"].asBool(false);
+    }
+
+    const Json& updatesObject = root["updates"];
+    if (updatesObject.isObject()) {
+        settings.updates.checkAtLaunch = updatesObject["checkAtLaunch"].asBool(true);
+
+        // A stamp is a fact about the past. A negative one is not, and neither
+        // is a file written by hand; either way the check is simply due.
+        settings.updates.lastCheckedUnix =
+            std::max<std::int64_t>(0, updatesObject["lastChecked"].asInt(0));
+
+        settings.updates.skippedVersion = updatesObject["skippedVersion"].asString();
     }
 
     return settings;
