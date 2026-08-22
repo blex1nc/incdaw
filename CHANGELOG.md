@@ -8,6 +8,22 @@ public version yet.
 
 ## [Unreleased]
 
+### Playlist — a clip can be pinned in place — 2026-08-23
+
+- **Per-clip lock.** `Clip::locked` was the third field the model stored,
+  saved and never used. A locked clip now refuses to move, resize, stretch,
+  split or be deleted, while its pan, mute and reverse stay editable — a
+  lock protects an arrangement decision, not the mix.
+- **The rule is in the commands, not the view.** A drag, a menu item, a
+  shortcut and an eventual script all reach the same commands; a rule
+  enforced in one route only is not a rule. A mixed selection still moves:
+  the locked clips drop out and the rest go, and a gesture that has nothing
+  left to do is not an undo entry.
+- **It says so.** A refused drag, split or delete puts a sentence over the
+  timeline for a couple of seconds instead of swallowing the gesture, and
+  locked clips carry a padlock in the corner so the state is visible before
+  the gesture rather than after it.
+
 ### Playlist — a clip can be played backwards — 2026-08-23
 
 - **Per-clip reverse.** `Clip::reversed` was stored and saved and read by

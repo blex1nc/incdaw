@@ -1,4 +1,4 @@
-// TRACK B (B1, B2) — the clip properties the model stored and nothing could set.
+// TRACK B (B1–B3) — the clip properties the model stored and nothing could set.
 //
 // `Clip::pan` has been serialized and round-tripped since the format's first
 // version, but no command wrote it and no node read it: a project could carry
@@ -11,6 +11,10 @@
 // reversal happens at compile time over the clip's *window*, not the file's,
 // so a clip longer than the audio it plays moves its gap to the front instead
 // of losing it — that asymmetry is the case worth pinning.
+//
+// `Clip::locked` is the third. The rule lives in the commands rather than in
+// the playlist, because a menu item, a shortcut, a drag and an eventual script
+// all arrive at the same commands — so that is where these tests look for it.
 
 #include "doctest.h"
 
@@ -512,4 +516,158 @@ TEST_CASE("the reversed flag survives a save and load")
     const project::Clip* clip = reloaded.findClip(fixture.clip);
     REQUIRE(clip != nullptr);
     CHECK(clip->reversed);
+}
+
+
+// ── Locking ──────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// Two pattern clips a bar apart, one of which the tests lock.
+struct LockFixture {
+    project::Project  project;
+    project::EntityId track;
+    project::EntityId pinned;
+    project::EntityId loose;
+
+    LockFixture()
+    {
+        project.tempoMap().setSampleRate(48000.0);
+
+        track = project.addTrack(project::TrackType::instrument, "Inst").id;
+
+        auto& pattern  = project.addPattern("P1");
+        pattern.length = engine::ticksPerQuarterNote * 4;
+
+        auto& first        = project.addClip(project::ClipType::pattern, track, pattern.id);
+        first.startTick    = engine::ticksPerQuarterNote * 4;
+        first.lengthTicks  = pattern.length;
+        first.locked       = true;
+        pinned             = first.id;
+
+        auto& second       = project.addClip(project::ClipType::pattern, track, pattern.id);
+        second.startTick   = engine::ticksPerQuarterNote * 8;
+        second.lengthTicks = pattern.length;
+        loose              = second.id;
+    }
+
+    [[nodiscard]] const project::Clip& at(project::EntityId id) const
+    {
+        return *project.findClip(id);
+    }
+};
+
+} // namespace
+
+TEST_CASE("a locked clip refuses to move, and the rest of the selection still does")
+{
+    LockFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    const engine::Tick before = fixture.at(fixture.pinned).startTick;
+
+    REQUIRE(registry.execute(std::make_unique<app::MoveClipsCommand>(
+        app::ClipIds{fixture.pinned, fixture.loose}, engine::ticksPerQuarterNote, 0)));
+
+    CHECK(fixture.at(fixture.pinned).startTick == before);
+    CHECK(fixture.at(fixture.loose).startTick
+          == engine::ticksPerQuarterNote * 8 + engine::ticksPerQuarterNote);
+
+    REQUIRE(registry.undo());
+    CHECK(fixture.at(fixture.loose).startTick == engine::ticksPerQuarterNote * 8);
+}
+
+TEST_CASE("a locked clip alone makes a move, resize and remove into no command at all")
+{
+    LockFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    const app::ClipIds only{fixture.pinned};
+
+    CHECK_FALSE(registry.execute(std::make_unique<app::MoveClipsCommand>(
+        only, engine::ticksPerQuarterNote, 0)));
+    CHECK_FALSE(registry.execute(std::make_unique<app::ResizeClipsCommand>(
+        only, engine::ticksPerQuarterNote)));
+    CHECK_FALSE(registry.execute(std::make_unique<app::RemoveClipsCommand>(only)));
+
+    CHECK(fixture.at(fixture.pinned).startTick == engine::ticksPerQuarterNote * 4);
+    CHECK(fixture.at(fixture.pinned).lengthTicks == engine::ticksPerQuarterNote * 4);
+    CHECK(fixture.project.clips().size() == 2);
+}
+
+TEST_CASE("a locked clip refuses to be split")
+{
+    LockFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    CHECK_FALSE(registry.execute(std::make_unique<app::SplitClipCommand>(
+        fixture.pinned, engine::ticksPerQuarterNote * 6)));
+    CHECK(fixture.project.clips().size() == 2);
+
+    // Unlocking is all it takes: the same cut then lands.
+    REQUIRE(registry.execute(std::make_unique<app::SetClipLockedCommand>(
+        app::ClipIds{fixture.pinned}, false)));
+    REQUIRE(registry.execute(std::make_unique<app::SplitClipCommand>(
+        fixture.pinned, engine::ticksPerQuarterNote * 6)));
+    CHECK(fixture.project.clips().size() == 3);
+}
+
+TEST_CASE("a locked audio clip refuses to be stretched")
+{
+    AudioFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetClipLockedCommand>(
+        app::ClipIds{fixture.clip}, true)));
+
+    CHECK_FALSE(registry.execute(std::make_unique<app::StretchClipsCommand>(
+        app::ClipIds{fixture.clip}, engine::ticksPerQuarterNote)));
+
+    CHECK(fixture.at().length == 2400);
+    CHECK(fixture.at().stretchRatio == doctest::Approx(1.0));
+}
+
+TEST_CASE("a lock protects the arrangement, not the mix")
+{
+    AudioFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetClipLockedCommand>(
+        app::ClipIds{fixture.clip}, true)));
+
+    REQUIRE(registry.execute(std::make_unique<app::SetClipPanCommand>(
+        app::ClipIds{fixture.clip}, 0.5)));
+    REQUIRE(registry.execute(std::make_unique<app::SetClipMutedCommand>(
+        app::ClipIds{fixture.clip}, true)));
+    REQUIRE(registry.execute(std::make_unique<app::SetClipReversedCommand>(
+        app::ClipIds{fixture.clip}, true)));
+
+    CHECK(fixture.at().pan == doctest::Approx(0.5));
+    CHECK(fixture.at().muted);
+    CHECK(fixture.at().reversed);
+}
+
+TEST_CASE("locking is one undoable command, and the flag survives a save and load")
+{
+    ScratchDirectory scratch{"lock-roundtrip"};
+
+    LockFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetClipLockedCommand>(
+        app::ClipIds{fixture.pinned, fixture.loose}, true)));
+
+    // Only one of the two changed; undo must not unlock the one that was
+    // already locked before the command ran.
+    REQUIRE(registry.undo());
+    CHECK(fixture.at(fixture.pinned).locked);
+    CHECK_FALSE(fixture.at(fixture.loose).locked);
+
+    REQUIRE(bool(project::ProjectFile::save(fixture.project, scratch.path / "p.incdaw")));
+
+    project::Project reloaded;
+    REQUIRE(bool(project::ProjectFile::load(reloaded, scratch.path / "p.incdaw")));
+
+    CHECK(reloaded.findClip(fixture.pinned)->locked);
+    CHECK_FALSE(reloaded.findClip(fixture.loose)->locked);
 }

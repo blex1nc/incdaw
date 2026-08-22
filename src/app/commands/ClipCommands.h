@@ -261,6 +261,36 @@ private:
     std::vector<double> previous_;
 };
 
+/// Pins a clip in place.
+///
+/// A locked clip refuses every verb that would change where it is or how long
+/// it is — move, resize, stretch, split and remove — while its properties stay
+/// editable: a lock protects an arrangement decision, not the mix.
+class SetClipLockedCommand final : public Command {
+public:
+    SetClipLockedCommand(ClipIds clips, bool locked)
+        : clips_(std::move(clips)), locked_(locked) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.setLocked"; }
+    [[nodiscard]] std::string name() const override
+    {
+        return locked_ ? "Lock Clips" : "Unlock Clips";
+    }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    struct Previous {
+        EntityId id;
+        bool     locked = false;
+    };
+
+    ClipIds               clips_;
+    bool                  locked_ = false;
+    std::vector<Previous> previous_;
+};
+
 /// Plays an audio clip backwards.
 ///
 /// Only audio clips carry the flag — a pattern plays notes, and reversing a

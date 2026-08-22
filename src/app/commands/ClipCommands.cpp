@@ -10,6 +10,23 @@ namespace {
 /// which reads to the user as a clip that vanished.
 constexpr Tick minimumClipLength = 1;
 
+/// Drops locked clips from an edit's target list.
+///
+/// A lock refuses the verb rather than being checked in the UI: the playlist,
+/// a menu item, a keyboard shortcut and an eventual script all reach the same
+/// commands, and a rule enforced in only one of those routes is not a rule.
+/// The filter runs on every execute, so redo after locking a clip drops it too
+/// — the redone gesture is the one the lock now allows.
+void dropLocked(const Project& project, ClipIds& clips)
+{
+    clips.erase(std::remove_if(clips.begin(), clips.end(),
+                               [&project](const EntityId id) {
+                                   const Clip* clip = project.findClip(id);
+                                   return clip != nullptr && clip->locked;
+                               }),
+                clips.end());
+}
+
 /// The track a row offset lands on, or an invalid id when it falls off either
 /// end of the list.
 EntityId trackAtOffset(const Project& project, EntityId from, int delta)
@@ -68,6 +85,7 @@ std::string RemoveClipsCommand::name() const
 bool RemoveClipsCommand::execute(Project& project)
 {
     removed_.clear();
+    dropLocked(project, clips_);
 
     // Collect first, then erase back to front, so the recorded positions stay
     // valid for undo however the ids were ordered.
@@ -102,6 +120,8 @@ void RemoveClipsCommand::undo(Project& project)
 
 bool MoveClipsCommand::execute(Project& project)
 {
+    dropLocked(project, clips_);
+
     if (clips_.empty() || (tickDelta_ == 0 && trackDelta_ == 0))
         return false;
 
@@ -211,6 +231,8 @@ void MoveClipsCommand::mergeWith(const Command& next)
 
 bool ResizeClipsCommand::execute(Project& project)
 {
+    dropLocked(project, clips_);
+
     if (clips_.empty() || lengthDelta_ == 0)
         return false;
 
@@ -348,6 +370,8 @@ void DuplicateClipsCommand::undo(Project& project)
 
 bool StretchClipsCommand::execute(Project& project)
 {
+    dropLocked(project, clips_);
+
     if (lengthDelta_ == 0)
         return false;
 
@@ -413,7 +437,7 @@ void StretchClipsCommand::mergeWith(const Command& next)
 bool SplitClipCommand::execute(Project& project)
 {
     Clip* clip = project.findClip(clip_);
-    if (clip == nullptr)
+    if (clip == nullptr || clip->locked)
         return false;
 
     const engine::TempoMap& tempoMap = project.tempoMap();
@@ -553,6 +577,32 @@ void SetClipPanCommand::mergeWith(const Command& next)
 {
     if (const auto* other = dynamic_cast<const SetClipPanCommand*>(&next))
         pan_ = other->pan_;
+}
+
+// ── SetClipLockedCommand ──────────────────────────────────────────────────────
+
+bool SetClipLockedCommand::execute(Project& project)
+{
+    previous_.clear();
+
+    for (const EntityId id : clips_) {
+        Clip* clip = project.findClip(id);
+        if (clip == nullptr || clip->locked == locked_)
+            continue;
+
+        previous_.push_back({id, clip->locked});
+        clip->locked = locked_;
+    }
+
+    return !previous_.empty();
+}
+
+void SetClipLockedCommand::undo(Project& project)
+{
+    for (const Previous& entry : previous_) {
+        if (Clip* clip = project.findClip(entry.id))
+            clip->locked = entry.locked;
+    }
 }
 
 // ── SetClipReversedCommand ────────────────────────────────────────────────────

@@ -72,6 +72,13 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     int          _dragAppliedTracks;
     Tick         _dragAppliedLength;
     BOOL         _stretchResize;   ///< Option at the handle: stretch, not trim
+
+    /// What the last refused gesture was refused for, shown over the timeline
+    /// until the timer clears it. A lock that silently swallows a drag reads
+    /// as a broken playlist; the notice is the difference between "it will
+    /// not" and "it does not work".
+    NSString* _refusal;
+    NSTimer*  _refusalTimer;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -145,6 +152,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     [self drawTracks];
     [self drawClips];
     [self drawPlayhead];
+    [self drawRefusal];
 
     // Where a dragged sample would land: the lane, and the exact tick.
     if (_dropTrack != app::PlaylistModel::noTrack && _dropTrack < _project->tracks().size()) {
@@ -334,7 +342,97 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
             [self drawAutomationCurveFor:model inBody:body];
         else
             [self drawPatternPreviewFor:model inBody:body];
+
+        if (model.locked)
+            [self drawLockMarkIn:body];
     }
+}
+
+/// A bar-and-shackle glyph in the region's bottom-right corner. Drawn rather
+/// than set as text so it stays legible at the two or three pixels a clip has
+/// to spare, and placed opposite the name so it never covers one.
+- (void)drawLockMarkIn:(NSRect)body
+{
+    constexpr CGFloat size = 7.0;
+    if (body.size.width < size + 6.0 || body.size.height < size + 4.0)
+        return;
+
+    const NSRect shackle = NSMakeRect(NSMaxX(body) - size - 3.0,
+                                      NSMinY(body) + 2.0 + size * 0.45,
+                                      size, size * 0.55);
+    const NSRect bar     = NSMakeRect(NSMaxX(body) - size - 3.0,
+                                      NSMinY(body) + 2.0,
+                                      size, size * 0.5);
+
+    NSBezierPath* hoop = [NSBezierPath bezierPath];
+    [hoop appendBezierPathWithArcWithCenter:NSMakePoint(NSMidX(shackle), NSMinY(shackle))
+                                     radius:shackle.size.width * 0.32
+                                 startAngle:0.0
+                                   endAngle:180.0];
+    hoop.lineWidth = 1.0;
+
+    [theme::withAlpha(theme::ink(Ink::textPrimary), 0.85) setStroke];
+    [hoop stroke];
+
+    [theme::withAlpha(theme::ink(Ink::textPrimary), 0.85) setFill];
+    NSRectFillUsingOperation(bar, NSCompositingOperationSourceOver);
+}
+
+/// Puts a sentence over the timeline for a moment. Replacing an unexpired
+/// notice restarts the clock rather than queueing, so hammering a locked clip
+/// keeps one message on screen instead of a backlog.
+/// How many of `clips` a lock is protecting. The commands enforce the rule; a
+/// UI that has to explain the refusal still has to be able to see it.
+- (std::size_t)lockedCountIn:(const app::ClipIds&)clips
+{
+    std::size_t locked = 0;
+    for (const project::EntityId id : clips)
+        if (const project::Clip* clip = _project->findClip(id); clip != nullptr && clip->locked)
+            ++locked;
+
+    return locked;
+}
+
+- (void)refuse:(NSString*)reason
+{
+    _refusal = [reason copy];
+
+    [_refusalTimer invalidate];
+    _refusalTimer = [NSTimer scheduledTimerWithTimeInterval:2.0
+                                                    repeats:NO
+                                                      block:^(NSTimer* timer) {
+        (void)timer;
+        self->_refusal = nil;
+        [self setNeedsDisplay:YES];
+    }];
+
+    [self setNeedsDisplay:YES];
+}
+
+- (void)drawRefusal
+{
+    if (_refusal == nil)
+        return;
+
+    NSDictionary* attributes = @{
+        NSFontAttributeName            : [NSFont systemFontOfSize:11.0
+                                                           weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName : theme::ink(Ink::textPrimary),
+    };
+
+    const NSSize text = [_refusal sizeWithAttributes:attributes];
+    const NSRect box  = NSMakeRect(headerWidth + 12.0,
+                                   NSMaxY(self.bounds) - rulerHeight - text.height - 18.0,
+                                   text.width + 16.0, text.height + 8.0);
+
+    NSBezierPath* plate = [NSBezierPath bezierPathWithRoundedRect:box xRadius:4.0 yRadius:4.0];
+    [theme::withAlpha(theme::ink(Ink::panelRaised), 0.94) setFill];
+    [plate fill];
+    [theme::withAlpha(theme::ink(Ink::accent), 0.55) setStroke];
+    [plate stroke];
+
+    [_refusal drawAtPoint:NSMakePoint(NSMinX(box) + 8.0, NSMinY(box) + 4.0)
+           withAttributes:attributes];
 }
 
 - (const engine::WaveformOverview*)overviewForAsset:(unsigned long long)assetId
@@ -690,6 +788,11 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
     // Option-click cuts the clip where the mouse is — the slice gesture.
     if ((event.modifierFlags & NSEventModifierFlagOption) != 0) {
+        if (clicked.locked) {
+            [self refuse:@"This clip is locked \u2014 unlock it to split it."];
+            return;
+        }
+
         const Tick cut = _model->snapTick(_model->xToTick(grid.x));
         if (_registry->execute(std::make_unique<app::SplitClipCommand>(clipId, cut)))
             _model->setSelection({clipId});
@@ -710,6 +813,15 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
         _model->toggleSelection(clipId);
     else if (!_model->isSelected(clipId))
         _model->setSelection({clipId});
+
+    // A locked clip refuses the whole gesture rather than letting the drag
+    // begin and quietly moving everything else in the selection: the clip
+    // under the pointer is the one the user is holding.
+    if (clicked.locked) {
+        [self refuse:@"This clip is locked \u2014 unlock it to move or resize it."];
+        [self setNeedsDisplay:YES];
+        return;
+    }
 
     _drag = _model->isOverResizeHandle(*_project, index, grid.x, grid.y) ? PlaylistDrag::resize
                                                                         : PlaylistDrag::move;
@@ -849,11 +961,20 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
     if (character == NSDeleteCharacter || character == NSBackspaceCharacter
         || character == NSDeleteFunctionKey) {
+        const std::size_t locked = [self lockedCountIn:_model->selection()];
+
         if (!_model->selection().empty()
             && _registry->execute(std::make_unique<app::RemoveClipsCommand>(_model->selection()))) {
             _model->clearSelection();
             [self changed];
         }
+
+        if (locked > 0)
+            [self refuse:locked == 1
+                             ? @"A locked clip was kept \u2014 unlock it to delete it."
+                             : [NSString stringWithFormat:
+                                   @"%lu locked clips were kept \u2014 unlock them to delete them.",
+                                   static_cast<unsigned long>(locked)]];
 
         return;
     }
@@ -1030,6 +1151,18 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
     [menu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem* lock = [menu addItemWithTitle:@"Lock"
+                                       action:@selector(lockFromMenu:)
+                                keyEquivalent:@""];
+    lock.target = self;
+
+    NSMenuItem* unlock = [menu addItemWithTitle:@"Unlock"
+                                         action:@selector(unlockFromMenu:)
+                                  keyEquivalent:@""];
+    unlock.target = self;
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem* remove = [menu addItemWithTitle:@"Remove"
                                          action:@selector(removeFromMenu:)
                                   keyEquivalent:@""];
@@ -1069,6 +1202,18 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     (void)sender;
     [self commit:std::make_unique<app::SetClipMutedCommand>(_model->selection(), false)];
+}
+
+- (void)lockFromMenu:(id)sender
+{
+    (void)sender;
+    [self commit:std::make_unique<app::SetClipLockedCommand>(_model->selection(), true)];
+}
+
+- (void)unlockFromMenu:(id)sender
+{
+    (void)sender;
+    [self commit:std::make_unique<app::SetClipLockedCommand>(_model->selection(), false)];
 }
 
 - (void)reverseFromMenu:(id)sender
@@ -1132,10 +1277,15 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     (void)sender;
 
+    const std::size_t locked = [self lockedCountIn:_model->selection()];
+
     if (_registry->execute(std::make_unique<app::RemoveClipsCommand>(_model->selection()))) {
         _model->clearSelection();
         [self changed];
     }
+
+    if (locked > 0)
+        [self refuse:@"A locked clip was kept \u2014 unlock it to delete it."];
 }
 
 - (void)renameTrackFromMenu:(NSMenuItem*)item
