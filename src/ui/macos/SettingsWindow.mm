@@ -5,9 +5,11 @@
 #include "app/AppSettings.h"
 #include "platform/AudioDevice.h"
 #include "platform/MidiDevice.h"
+#include "ui/ThemeLibrary.h"
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,18 +20,24 @@ using incdaw::ui::theme::Ink;
 
 namespace {
 
-constexpr CGFloat windowWidth  = 540.0;
-constexpr CGFloat windowHeight = 648.0;
+constexpr CGFloat windowWidth  = 560.0;
+constexpr CGFloat windowHeight = 620.0;
 constexpr CGFloat margin       = 18.0;
 constexpr CGFloat labelWidth   = 110.0;
 constexpr CGFloat rowHeight    = 26.0;
 constexpr CGFloat rowGap       = 10.0;
 constexpr CGFloat midiRow      = 22.0;
+constexpr CGFloat pageInset    = 14.0;
 
-/// The UPDATES block at the foot of the window: a heading, the switch, and the
-/// line that says what the switch actually does. Reserved before the MIDI list
-/// is sized, because the list is what takes whatever is left over.
-constexpr CGFloat updatesBand  = 26.0 * 3.0 + 10.0;
+/// The Appearance tab's colour list: one row per role, grouped under headings.
+constexpr CGFloat swatchRow    = 26.0;
+constexpr CGFloat swatchHeader = 24.0;
+
+/// Text fields carry the role they are tinted with in their tag, offset past
+/// anything else that uses a tag, so that a palette change can find them again.
+/// A colour is a snapshot the moment it is handed to an AppKit control, and
+/// this window is full of controls that took one.
+constexpr NSInteger tintTagBase = 9000;
 
 /// Block sizes offered. Anything the hardware refuses is corrected by the
 /// device on open, and the status line then reports what was actually granted
@@ -42,6 +50,15 @@ constexpr double fallbackSampleRates[] = {44100.0, 48000.0, 88200.0, 96000.0};
 /// Labels through the shell's design language rather than AppKit's defaults:
 /// this window sits beside panes that draw every pixel themselves, and a
 /// system-grey label next to them reads as a different application.
+/// Remembers the role so that `retintLabels` can reapply it after a theme
+/// change. Returns the field for chaining.
+NSTextField* tint(NSTextField* field, Ink which)
+{
+    field.textColor = theme::ink(which);
+    field.tag       = tintTagBase + static_cast<NSInteger>(which);
+    return field;
+}
+
 NSTextField* makeLabel(NSString* text, NSRect frame, BOOL heading)
 {
     NSTextField* field = [[NSTextField alloc] initWithFrame:frame];
@@ -52,8 +69,48 @@ NSTextField* makeLabel(NSString* text, NSRect frame, BOOL heading)
     field.drawsBackground = NO;
     field.font          = heading ? theme::labelFont(11.0, NSFontWeightSemibold)
                                   : theme::labelFont(12.0);
-    field.textColor     = theme::ink(heading ? Ink::textSecondary : Ink::textPrimary);
-    return field;
+    return tint(field, heading ? Ink::textSecondary : Ink::textPrimary);
+}
+
+/// Walks a view tree reapplying every tinted label. Cheaper than rebuilding
+/// the window, and it keeps the settings window honest about the theme the
+/// rest of the shell just switched to.
+void retintLabels(NSView* root)
+{
+    if (root == nil)
+        return;
+
+    if (NSTextField* field = [root isKindOfClass:NSTextField.class] ? static_cast<NSTextField*>(root) : nil;
+        field != nil && !field.editable) {
+        const NSInteger role = field.tag - tintTagBase;
+        if (role >= 0 && role < static_cast<NSInteger>(theme::inkCount))
+            field.textColor = theme::ink(static_cast<Ink>(role));
+    }
+
+    for (NSView* child in root.subviews)
+        retintLabels(child);
+}
+
+std::uint32_t argbFromColour(NSColor* colour)
+{
+    NSColor* converted = [colour colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+    if (converted == nil)
+        return 0xFF000000u;
+
+    const auto channel = [](CGFloat value) -> std::uint32_t {
+        return static_cast<std::uint32_t>(std::lround(std::clamp(value, CGFloat{0.0}, CGFloat{1.0}) * 255.0));
+    };
+
+    return (channel(converted.alphaComponent) << 24) | (channel(converted.redComponent) << 16)
+           | (channel(converted.greenComponent) << 8) | channel(converted.blueComponent);
+}
+
+NSColor* colourFromArgbValue(std::uint32_t argb)
+{
+    return [NSColor colorWithSRGBRed:static_cast<CGFloat>((argb >> 16) & 0xFFu) / 255.0
+                               green:static_cast<CGFloat>((argb >> 8) & 0xFFu) / 255.0
+                                blue:static_cast<CGFloat>(argb & 0xFFu) / 255.0
+                               alpha:static_cast<CGFloat>((argb >> 24) & 0xFFu) / 255.0];
 }
 
 NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
@@ -76,19 +133,45 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
 
     NSMutableArray<NSButton*>* _midiChecks;
 
+    NSPopUpButton*                _themePicker;
+    NSButton*                     _deleteTheme;
+    NSView*                       _colourList;
+    NSTextField*                  _themeNote;
+    NSMutableArray<NSColorWell*>* _colourWells;
+    NSMutableArray<NSTextField*>* _hexFields;
+
     std::vector<platform::AudioDeviceInfo> _devices;
     std::vector<platform::MidiDeviceInfo>  _midiInputs;
+
+    std::filesystem::path _themesDirectory;
+
+    /// The scheme being edited. Held rather than re-read from the palette so
+    /// that its name survives a switch to a theme that fails to load.
+    theme::ThemePalette _editing;
 }
 
 - (instancetype)initWithSettings:(app::AppSettings*)settings
+                 themesDirectory:(NSString*)themesDirectory
 {
     self = [super init];
     if (self == nil)
         return nil;
 
-    _settings   = settings;
-    _midiChecks = [NSMutableArray array];
+    _settings    = settings;
+    _midiChecks  = [NSMutableArray array];
+    _colourWells = [NSMutableArray array];
+    _hexFields   = [NSMutableArray array];
+
+    if (themesDirectory.length > 0)
+        _themesDirectory = std::filesystem::path(themesDirectory.UTF8String);
+
+    _editing = [self library].resolve(settings->appearance.themeName);
     return self;
+}
+
+- (theme::ThemeLibrary)library
+{
+    return theme::ThemeLibrary(_themesDirectory);
 }
 
 // ── Window ───────────────────────────────────────────────────────────────────
@@ -99,6 +182,18 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
         [self buildWindow];
 
     [self reloadDevices];
+
+    // The Themes folder is the user's, and it can change while INCDAW is not
+    // looking — a file dropped in from another machine, one deleted in Finder.
+    // Both menus are therefore rebuilt from the folder every time the window
+    // opens rather than once at construction.
+    [self rebuildThemePicker];
+    [self rebuildColourList];
+
+    // Two of the roles are hairlines that exist only as a partial alpha, so
+    // the picker must be able to express one.
+    NSColorPanel.sharedColorPanel.showsAlpha = YES;
+
     [self refreshStatus];
 
     [_window center];
@@ -123,83 +218,22 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
 
     NSView* content = _window.contentView;
 
-    CGFloat y = windowHeight - margin - rowHeight;
+    // Four tabs rather than one column. The window held audio, MIDI and
+    // updates in a single scroll and was already full when it did; Appearance
+    // adds thirty-seven colours, and thirty-seven colours below a device list
+    // is a settings window nobody finds the bottom of.
+    const CGFloat buttonBand = margin + rowHeight + rowGap;
 
-    [content addSubview:makeLabel(@"AUDIO", NSMakeRect(margin, y, 200, rowHeight), YES)];
-    y -= rowHeight;
+    NSTabView* tabs = [[NSTabView alloc]
+        initWithFrame:NSMakeRect(10, buttonBand, windowWidth - 20, windowHeight - buttonBand - 10)];
+    [content addSubview:tabs];
 
-    _outputDevice = [self addRow:@"Output" toContent:content atY:&y width:windowWidth - margin * 2 - labelWidth];
-    _outputDevice.target = self;
-    _outputDevice.action = @selector(outputDeviceChanged:);
+    const NSSize page = tabs.contentRect.size;
 
-    _inputDevice = [self addRow:@"Input" toContent:content atY:&y width:windowWidth - margin * 2 - labelWidth];
-
-    _sampleRate = [self addRow:@"Sample rate" toContent:content atY:&y width:180.0];
-    _sampleRate.target = self;
-    _sampleRate.action = @selector(sampleRateChanged:);
-
-    _bufferSize = [self addRow:@"Buffer size" toContent:content atY:&y width:180.0];
-
-    _openInputAtLaunch = [[NSButton alloc]
-        initWithFrame:NSMakeRect(margin + labelWidth, y, 320, rowHeight)];
-    _openInputAtLaunch.buttonType = NSButtonTypeSwitch;
-    _openInputAtLaunch.title      = @"Open the input device at launch";
-    [content addSubview:_openInputAtLaunch];
-    y -= rowHeight + rowGap;
-
-    _status = makeLabel(@"", NSMakeRect(margin, y - rowHeight, windowWidth - margin * 2, rowHeight * 2), NO);
-    _status.textColor = theme::ink(Ink::textDim);
-    _status.font      = theme::numericFont(11.0, NSFontWeightRegular);
-    _status.maximumNumberOfLines = 2;
-    [content addSubview:_status];
-    y -= rowHeight * 2 + rowGap;
-
-    [content addSubview:makeLabel(@"MIDI INPUT", NSMakeRect(margin, y, 200, rowHeight), YES)];
-    y -= rowHeight;
-
-    _allMidiSources = [[NSButton alloc] initWithFrame:NSMakeRect(margin, y, 320, rowHeight)];
-    _allMidiSources.buttonType = NSButtonTypeSwitch;
-    _allMidiSources.title      = @"Connect every available source";
-    _allMidiSources.target     = self;
-    _allMidiSources.action     = @selector(allSourcesToggled:);
-    [content addSubview:_allMidiSources];
-    y -= rowHeight;
-
-    const CGFloat listBottom = margin + rowHeight + rowGap + updatesBand;
-    const CGFloat listHeight  = y - listBottom;
-
-    NSScrollView* scroll = [[NSScrollView alloc]
-        initWithFrame:NSMakeRect(margin, listBottom,
-                                 windowWidth - margin * 2, std::max<CGFloat>(listHeight, 60.0))];
-    scroll.hasVerticalScroller = YES;
-    scroll.borderType          = NSBezelBorder;
-    scroll.drawsBackground     = NO;
-
-    _midiList = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, scroll.contentSize.width, 0)];
-    scroll.documentView = _midiList;
-    [content addSubview:scroll];
-
-    // Updates. Placed where a user looks for it and worded so that what leaves
-    // the machine is stated rather than implied — a launch-time request is a
-    // privacy decision, and one made silently is one made badly.
-    CGFloat updatesY = listBottom - rowHeight;
-    [content addSubview:makeLabel(@"UPDATES", NSMakeRect(margin, updatesY, 200, rowHeight), YES)];
-    updatesY -= rowHeight;
-
-    _checkForUpdates = [[NSButton alloc]
-        initWithFrame:NSMakeRect(margin, updatesY, windowWidth - margin * 2, rowHeight)];
-    _checkForUpdates.buttonType = NSButtonTypeSwitch;
-    _checkForUpdates.title      = @"Check for a newer version at launch";
-    [content addSubview:_checkForUpdates];
-    updatesY -= rowHeight;
-
-    NSTextField* caption = makeLabel(@"Reads INCDAW's public release page, at most once a day. "
-                                     @"No account, nothing uploaded, nothing installed.",
-                                     NSMakeRect(margin, updatesY, windowWidth - margin * 2, rowHeight),
-                                     NO);
-    caption.font      = theme::labelFont(11.0);
-    caption.textColor = theme::ink(Ink::textDim);
-    [content addSubview:caption];
+    [tabs addTabViewItem:[self tabNamed:@"Audio" view:[self buildAudioPage:page]]];
+    [tabs addTabViewItem:[self tabNamed:@"MIDI" view:[self buildMidiPage:page]]];
+    [tabs addTabViewItem:[self tabNamed:@"Appearance" view:[self buildAppearancePage:page]]];
+    [tabs addTabViewItem:[self tabNamed:@"Updates" view:[self buildUpdatesPage:page]]];
 
     NSButton* refresh = [[NSButton alloc] initWithFrame:NSMakeRect(margin, margin, 130, rowHeight)];
     refresh.title      = @"Rescan Devices";
@@ -227,16 +261,567 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     [content addSubview:close];
 }
 
+- (NSTabViewItem*)tabNamed:(NSString*)title view:(NSView*)view
+{
+    NSTabViewItem* item = [[NSTabViewItem alloc] initWithIdentifier:title];
+    item.label = title;
+    item.view  = view;
+    return item;
+}
+
+// ── Audio ────────────────────────────────────────────────────────────────────
+
+- (NSView*)buildAudioPage:(NSSize)size
+{
+    NSView* page = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+
+    CGFloat y = size.height - rowHeight - 6.0;
+
+    [page addSubview:makeLabel(@"DEVICE", NSMakeRect(pageInset, y, 200, rowHeight), YES)];
+    y -= rowHeight;
+
+    const CGFloat wide = size.width - pageInset * 2 - labelWidth;
+
+    _outputDevice = [self addRow:@"Output" toContent:page atY:&y width:wide];
+    _outputDevice.target = self;
+    _outputDevice.action = @selector(outputDeviceChanged:);
+
+    _inputDevice = [self addRow:@"Input" toContent:page atY:&y width:wide];
+
+    _sampleRate = [self addRow:@"Sample rate" toContent:page atY:&y width:180.0];
+    _sampleRate.target = self;
+    _sampleRate.action = @selector(sampleRateChanged:);
+
+    _bufferSize = [self addRow:@"Buffer size" toContent:page atY:&y width:180.0];
+
+    _openInputAtLaunch = [[NSButton alloc]
+        initWithFrame:NSMakeRect(pageInset + labelWidth, y, 320, rowHeight)];
+    _openInputAtLaunch.buttonType = NSButtonTypeSwitch;
+    _openInputAtLaunch.title      = @"Open the input device at launch";
+    [page addSubview:_openInputAtLaunch];
+    y -= rowHeight + rowGap;
+
+    _status = makeLabel(@"", NSMakeRect(pageInset, y - rowHeight * 2,
+                                        size.width - pageInset * 2, rowHeight * 3), NO);
+    _status.font                 = theme::numericFont(11.0, NSFontWeightRegular);
+    _status.maximumNumberOfLines = 3;
+    tint(_status, Ink::textDim);
+    [page addSubview:_status];
+
+    return page;
+}
+
+// ── MIDI ─────────────────────────────────────────────────────────────────────
+
+- (NSView*)buildMidiPage:(NSSize)size
+{
+    NSView* page = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+
+    CGFloat y = size.height - rowHeight - 6.0;
+
+    [page addSubview:makeLabel(@"MIDI INPUT", NSMakeRect(pageInset, y, 200, rowHeight), YES)];
+    y -= rowHeight;
+
+    _allMidiSources = [[NSButton alloc] initWithFrame:NSMakeRect(pageInset, y, 320, rowHeight)];
+    _allMidiSources.buttonType = NSButtonTypeSwitch;
+    _allMidiSources.title      = @"Connect every available source";
+    _allMidiSources.target     = self;
+    _allMidiSources.action     = @selector(allSourcesToggled:);
+    [page addSubview:_allMidiSources];
+    y -= rowHeight + 4.0;
+
+    NSScrollView* scroll = [[NSScrollView alloc]
+        initWithFrame:NSMakeRect(pageInset, pageInset,
+                                 size.width - pageInset * 2, y - pageInset)];
+    scroll.hasVerticalScroller = YES;
+    scroll.borderType          = NSBezelBorder;
+    scroll.drawsBackground     = NO;
+
+    _midiList = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, scroll.contentSize.width, 0)];
+    scroll.documentView = _midiList;
+    [page addSubview:scroll];
+
+    return page;
+}
+
+// ── Updates ──────────────────────────────────────────────────────────────────
+
+- (NSView*)buildUpdatesPage:(NSSize)size
+{
+    NSView* page = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+
+    CGFloat y = size.height - rowHeight - 6.0;
+
+    [page addSubview:makeLabel(@"UPDATES", NSMakeRect(pageInset, y, 200, rowHeight), YES)];
+    y -= rowHeight;
+
+    _checkForUpdates = [[NSButton alloc]
+        initWithFrame:NSMakeRect(pageInset, y, size.width - pageInset * 2, rowHeight)];
+    _checkForUpdates.buttonType = NSButtonTypeSwitch;
+    _checkForUpdates.title      = @"Check for a newer version at launch";
+    [page addSubview:_checkForUpdates];
+    y -= rowHeight;
+
+    // Worded so that what leaves the machine is stated rather than implied: a
+    // launch-time request is a privacy decision, and one made silently is one
+    // made badly.
+    NSTextField* caption = makeLabel(@"Reads INCDAW's public release page, at most once a day. "
+                                     @"No account, nothing uploaded, nothing installed.",
+                                     NSMakeRect(pageInset, y - rowHeight,
+                                                size.width - pageInset * 2, rowHeight * 2),
+                                     NO);
+    caption.font                 = theme::labelFont(11.0);
+    caption.maximumNumberOfLines = 2;
+    tint(caption, Ink::textDim);
+    [page addSubview:caption];
+
+    return page;
+}
+
+// ── Appearance ───────────────────────────────────────────────────────────────
+//
+// A theme is a file, and this tab is a folder browser with a colour picker
+// attached (ui/ThemeLibrary.h). The built-in schemes are read-only: the first
+// edit to one copies it to a theme of the user's own and continues there, so
+// that the ground INCDAW ships with is always one selection away.
+//
+// Every change is live. There is no preview strip because the application is
+// the preview — a colour moved here is drawn by every open pane before the
+// picker is released, which is the only honest way to judge a palette that has
+// to survive a running transport.
+
+- (NSView*)buildAppearancePage:(NSSize)size
+{
+    NSView* page = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+
+    CGFloat y = size.height - rowHeight - 6.0;
+
+    [page addSubview:makeLabel(@"THEME", NSMakeRect(pageInset, y, 200, rowHeight), YES)];
+    y -= rowHeight;
+
+    [page addSubview:makeLabel(@"Theme", NSMakeRect(pageInset, y, labelWidth, rowHeight), NO)];
+
+    const CGFloat pickerX = pageInset + labelWidth;
+    const CGFloat pickerW = size.width - pickerX - pageInset - 184.0;
+
+    _themePicker = [[NSPopUpButton alloc]
+        initWithFrame:NSMakeRect(pickerX, y, std::max<CGFloat>(pickerW, 120.0), rowHeight)
+            pullsDown:NO];
+    _themePicker.target = self;
+    _themePicker.action = @selector(themeChanged:);
+    [page addSubview:_themePicker];
+
+    NSButton* duplicate = [[NSButton alloc]
+        initWithFrame:NSMakeRect(NSMaxX(_themePicker.frame) + 8.0, y, 92, rowHeight)];
+    duplicate.title      = @"Duplicate";
+    duplicate.bezelStyle = NSBezelStyleRounded;
+    duplicate.target     = self;
+    duplicate.action     = @selector(duplicateTheme:);
+    [page addSubview:duplicate];
+
+    _deleteTheme = [[NSButton alloc]
+        initWithFrame:NSMakeRect(NSMaxX(duplicate.frame) + 6.0, y, 78, rowHeight)];
+    _deleteTheme.title      = @"Delete";
+    _deleteTheme.bezelStyle = NSBezelStyleRounded;
+    _deleteTheme.target     = self;
+    _deleteTheme.action     = @selector(deleteTheme:);
+    [page addSubview:_deleteTheme];
+    y -= rowHeight;
+
+    _themeNote = makeLabel(@"", NSMakeRect(pageInset, y - rowHeight,
+                                           size.width - pageInset * 2, rowHeight * 2), NO);
+    _themeNote.font                 = theme::labelFont(11.0);
+    _themeNote.maximumNumberOfLines = 2;
+    tint(_themeNote, Ink::textDim);
+    [page addSubview:_themeNote];
+    y -= rowHeight * 2 + 4.0;
+
+    const CGFloat footer = pageInset + rowHeight + 8.0;
+
+    NSScrollView* scroll = [[NSScrollView alloc]
+        initWithFrame:NSMakeRect(pageInset, footer,
+                                 size.width - pageInset * 2, std::max<CGFloat>(y - footer, 80.0))];
+    scroll.hasVerticalScroller = YES;
+    scroll.borderType          = NSBezelBorder;
+    scroll.drawsBackground     = NO;
+
+    _colourList = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, scroll.contentSize.width, 0)];
+    scroll.documentView = _colourList;
+    [page addSubview:scroll];
+
+    NSButton* reveal = [[NSButton alloc] initWithFrame:NSMakeRect(pageInset, pageInset, 170, rowHeight)];
+    reveal.title      = @"Reveal Themes Folder";
+    reveal.bezelStyle = NSBezelStyleRounded;
+    reveal.target     = self;
+    reveal.action     = @selector(revealThemes:);
+    [page addSubview:reveal];
+
+    NSButton* reset = [[NSButton alloc]
+        initWithFrame:NSMakeRect(size.width - pageInset - 150, pageInset, 150, rowHeight)];
+    reset.title      = @"Reset This Theme";
+    reset.bezelStyle = NSBezelStyleRounded;
+    reset.target     = self;
+    reset.action     = @selector(resetColours:);
+    [page addSubview:reset];
+
+    return page;
+}
+
+/// Refills the theme menu from the folder and reselects what is being edited.
+- (void)rebuildThemePicker
+{
+    [_themePicker removeAllItems];
+
+    const theme::ThemeLibrary library = [self library];
+    NSMenuItem*               chosen  = nil;
+
+    bool separated = false;
+    for (const theme::ThemeLibrary::Entry& entry : library.entries()) {
+        if (!entry.builtin && !separated) {
+            [_themePicker.menu addItem:NSMenuItem.separatorItem];
+            separated = true;
+        }
+
+        [_themePicker addItemWithTitle:fromUtf8(entry.name)];
+        _themePicker.lastItem.representedObject = fromUtf8(entry.name);
+
+        if (theme::namesMatch(entry.name, _editing.name))
+            chosen = _themePicker.lastItem;
+    }
+
+    if (chosen != nil)
+        [_themePicker selectItem:chosen];
+    else if (_themePicker.numberOfItems > 0)
+        [_themePicker selectItemAtIndex:0];
+
+    const bool builtin = theme::isBuiltinName(_editing.name);
+    _deleteTheme.enabled = !builtin && !_themesDirectory.empty();
+
+    if (_themesDirectory.empty())
+        _themeNote.stringValue = @"No writable support folder was found, so themes cannot be "
+                                  "saved here. The built-in schemes still apply.";
+    else if (builtin)
+        _themeNote.stringValue = @"Built-in themes are read-only. Editing a colour makes a copy "
+                                  "you own and continues there.";
+    else
+        _themeNote.stringValue = [NSString stringWithFormat:@"Saved as %s.json — a file you can "
+                                                             "copy, edit or send to somebody else.",
+                                                            _editing.name.c_str()];
+}
+
+/// One row per role, grouped under the headings the palette declares.
+- (void)rebuildColourList
+{
+    for (NSView* row in [_colourList.subviews copy])
+        [row removeFromSuperview];
+
+    [_colourWells removeAllObjects];
+    [_hexFields removeAllObjects];
+
+    const CGFloat width = _colourList.superview != nil ? _colourList.superview.frame.size.width : 400.0;
+
+    // Measured before anything is placed, because the list is laid out from
+    // its own top edge downwards and needs to know where that is.
+    std::string previousGroup;
+    CGFloat     height = 8.0;
+    for (const Ink which : theme::allInks()) {
+        if (const std::string group = theme::inkGroup(which); group != previousGroup) {
+            previousGroup = group;
+            height += swatchHeader;
+        }
+
+        height += swatchRow;
+    }
+
+    _colourList.frame = NSMakeRect(0, 0, width, height);
+
+    const CGFloat swatchX = std::min<CGFloat>(196.0, width * 0.45);
+
+    previousGroup.clear();
+    CGFloat y = height - 4.0;
+
+    for (const Ink which : theme::allInks()) {
+        if (const std::string group = theme::inkGroup(which); group != previousGroup) {
+            previousGroup = group;
+            y -= swatchHeader;
+
+            NSTextField* heading = makeLabel(fromUtf8(group),
+                                             NSMakeRect(8, y, width - 16, swatchHeader - 4.0), YES);
+            [_colourList addSubview:heading];
+        }
+
+        y -= swatchRow;
+
+        NSTextField* label = makeLabel(fromUtf8(theme::inkLabel(which)),
+                                       NSMakeRect(8, y + 3.0, swatchX - 16.0, rowHeight - 6.0), NO);
+        label.font = theme::labelFont(11.5);
+        [_colourList addSubview:label];
+
+        NSColorWell* well = [[NSColorWell alloc]
+            initWithFrame:NSMakeRect(swatchX, y + 2.0, 56, swatchRow - 6.0)];
+        well.tag    = static_cast<NSInteger>(which);
+        well.target = self;
+        well.action = @selector(colourWellChanged:);
+        [_colourList addSubview:well];
+        [_colourWells addObject:well];
+
+        NSTextField* hex = [[NSTextField alloc]
+            initWithFrame:NSMakeRect(swatchX + 64.0, y + 2.0, 96, swatchRow - 6.0)];
+        hex.font                   = theme::numericFont(11.0, NSFontWeightRegular);
+        hex.alignment              = NSTextAlignmentCenter;
+        hex.tag                    = static_cast<NSInteger>(which);
+        hex.target                 = self;
+        hex.action                 = @selector(hexFieldChanged:);
+        hex.placeholderString      = @"#AARRGGBB";
+        [_colourList addSubview:hex];
+        [_hexFields addObject:hex];
+    }
+
+    [self refreshSwatches];
+}
+
+/// Pushes `_editing` into the wells and the hex fields, without touching the
+/// palette. Called after a theme switch, a reset, or a hand-typed colour.
+- (void)refreshSwatches
+{
+    for (NSColorWell* well in _colourWells)
+        well.color = colourFromArgbValue(_editing.colours[static_cast<std::size_t>(well.tag)]);
+
+    for (NSTextField* hex in _hexFields)
+        hex.stringValue = fromUtf8(theme::toHex(_editing.colours[static_cast<std::size_t>(hex.tag)]));
+}
+
+// ── Appearance actions ───────────────────────────────────────────────────────
+
+/// Makes `_editing` a theme that may be written to, copying a built-in first.
+/// Returns false only when there is nowhere to write, in which case the change
+/// still applies for the session but is not saved.
+- (BOOL)ensureEditableTheme
+{
+    if (!theme::isBuiltinName(_editing.name))
+        return YES;
+
+    if (_themesDirectory.empty())
+        return NO;
+
+    const std::string preferred = _editing.name + " Custom";
+
+    std::string       error;
+    const std::string created = [self library].duplicate(_editing, preferred, error);
+    if (created.empty()) {
+        NSLog(@"INCDAW: the theme could not be copied: %s", error.c_str());
+        return NO;
+    }
+
+    _editing.name                     = created;
+    _settings->appearance.themeName   = created;
+
+    [self rebuildThemePicker];
+    return YES;
+}
+
+/// Hands `_editing` to the shell and redraws everything that draws with it.
+- (void)applyEditedPalette
+{
+    theme::setPalette(_editing);
+
+    _window.backgroundColor = theme::ink(Ink::windowBackground);
+    retintLabels(_window.contentView);
+    theme::refreshViewTree(_window.contentView);
+
+    // Coalesced: a colour well sends its action continuously while the picker
+    // is dragged, and a theme file written sixty times a second is a file
+    // written sixty times a second.
+    [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                             selector:@selector(persistTheme)
+                                               object:nil];
+    [self performSelector:@selector(persistTheme) withObject:nil afterDelay:0.4];
+}
+
+- (void)persistTheme
+{
+    if (!theme::isBuiltinName(_editing.name) && !_themesDirectory.empty()) {
+        std::string error;
+        if (![self library].store(_editing, error))
+            NSLog(@"INCDAW: the theme could not be saved: %s", error.c_str());
+    }
+
+    if (self.onAppearanceChanged != nil)
+        self.onAppearanceChanged();
+}
+
+- (void)themeChanged:(id)sender
+{
+    (void)sender;
+
+    NSString* chosen = _themePicker.selectedItem.representedObject;
+    if (chosen.length == 0)
+        return;
+
+    _editing                        = [self library].resolve(chosen.UTF8String);
+    _settings->appearance.themeName = _editing.name;
+
+    [self rebuildThemePicker];
+    [self refreshSwatches];
+    [self applyEditedPalette];
+}
+
+- (void)duplicateTheme:(id)sender
+{
+    (void)sender;
+
+    if (_themesDirectory.empty()) {
+        NSBeep();
+        return;
+    }
+
+    std::string       error;
+    const std::string created = [self library].duplicate(_editing, _editing.name + " Copy", error);
+    if (created.empty()) {
+        NSLog(@"INCDAW: the theme could not be copied: %s", error.c_str());
+        NSBeep();
+        return;
+    }
+
+    _editing.name                   = created;
+    _settings->appearance.themeName = created;
+
+    [self rebuildThemePicker];
+    [self persistTheme];
+}
+
+- (void)deleteTheme:(id)sender
+{
+    (void)sender;
+
+    if (theme::isBuiltinName(_editing.name))
+        return;
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = [NSString stringWithFormat:@"Delete the theme “%s”?", _editing.name.c_str()];
+    alert.informativeText = @"Its file is removed from the Themes folder. This cannot be undone.";
+    [alert addButtonWithTitle:@"Delete"];
+    [alert addButtonWithTitle:@"Cancel"];
+    alert.alertStyle = NSAlertStyleWarning;
+
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return;
+
+    std::string error;
+    if (![self library].remove(_editing.name, error)) {
+        NSLog(@"INCDAW: the theme could not be deleted: %s", error.c_str());
+        return;
+    }
+
+    _editing                        = theme::defaultPalette();
+    _settings->appearance.themeName = _editing.name;
+
+    [self rebuildThemePicker];
+    [self refreshSwatches];
+    [self applyEditedPalette];
+}
+
+- (void)colourWellChanged:(id)sender
+{
+    NSColorWell* well = sender;
+    if (well == nil)
+        return;
+
+    if (![self ensureEditableTheme]) {
+        // Nowhere to save it. The change still applies, because refusing to
+        // draw what the user just chose would be stranger than not keeping it.
+        NSLog(@"INCDAW: the theme change applies for this session only");
+    }
+
+    const auto which = static_cast<Ink>(well.tag);
+    _editing.setColour(which, argbFromColour(well.color));
+
+    for (NSTextField* hex in _hexFields)
+        if (hex.tag == well.tag)
+            hex.stringValue = fromUtf8(theme::toHex(_editing.colour(which)));
+
+    [self applyEditedPalette];
+}
+
+- (void)hexFieldChanged:(id)sender
+{
+    NSTextField* hex = sender;
+    if (hex == nil)
+        return;
+
+    const auto which = static_cast<Ink>(hex.tag);
+
+    std::uint32_t value = 0;
+    if (!theme::fromHex(hex.stringValue.UTF8String, value)) {
+        // A typo puts the field back to what is actually being drawn, rather
+        // than leaving a colour on screen that the text disagrees with.
+        hex.stringValue = fromUtf8(theme::toHex(_editing.colour(which)));
+        NSBeep();
+        return;
+    }
+
+    (void)[self ensureEditableTheme];
+
+    _editing.setColour(which, value);
+    hex.stringValue = fromUtf8(theme::toHex(value));
+
+    for (NSColorWell* well in _colourWells)
+        if (well.tag == hex.tag)
+            well.color = colourFromArgbValue(value);
+
+    [self applyEditedPalette];
+}
+
+- (void)resetColours:(id)sender
+{
+    (void)sender;
+
+    // Back to the scheme this one came from where that is knowable, and to the
+    // default otherwise. The name is kept: resetting a theme is not deleting it.
+    const std::string kept = _editing.name;
+
+    theme::ThemePalette source = theme::defaultPalette();
+    for (std::size_t slot = 0; slot < theme::builtinCount(); ++slot) {
+        const std::string builtin = theme::builtinName(slot);
+        if (kept.rfind(builtin, 0) == 0) {
+            source = theme::builtinPalette(slot);
+            break;
+        }
+    }
+
+    _editing.colours = source.colours;
+    _editing.name    = kept;
+
+    [self refreshSwatches];
+    [self applyEditedPalette];
+}
+
+- (void)revealThemes:(id)sender
+{
+    (void)sender;
+
+    if (_themesDirectory.empty()) {
+        NSBeep();
+        return;
+    }
+
+    std::error_code failed;
+    std::filesystem::create_directories(_themesDirectory, failed);
+
+    NSURL* url = [NSURL fileURLWithPath:@(_themesDirectory.c_str()) isDirectory:YES];
+    [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[url]];
+}
+
 /// Adds a labelled pop-up row and moves `y` down past it.
 - (NSPopUpButton*)addRow:(NSString*)title
                toContent:(NSView*)content
                      atY:(CGFloat*)y
                    width:(CGFloat)width
 {
-    [content addSubview:makeLabel(title, NSMakeRect(margin, *y, labelWidth, rowHeight), NO)];
+    [content addSubview:makeLabel(title, NSMakeRect(pageInset, *y, labelWidth, rowHeight), NO)];
 
     NSPopUpButton* popup = [[NSPopUpButton alloc]
-        initWithFrame:NSMakeRect(margin + labelWidth, *y, width, rowHeight)
+        initWithFrame:NSMakeRect(pageInset + labelWidth, *y, width, rowHeight)
             pullsDown:NO];
     [content addSubview:popup];
 

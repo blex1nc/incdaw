@@ -102,6 +102,15 @@ struct AppSettings {
         std::string skippedVersion;
     } updates;
 
+    /// How the shell looks (ui/ThemePalette.h).
+    struct Appearance {
+        /// A built-in scheme's name, or the file name of a theme in
+        /// "<Application Support>/INCDAW/Themes". A name nothing answers to —
+        /// a theme deleted in Finder, a file from another machine — falls back
+        /// to the built-in default rather than to an unpainted window.
+        std::string themeName = "Midnight";
+    } appearance;
+
     [[nodiscard]] std::string toJson() const;
 
     /// Never fails. Anything unparseable or unexpected yields defaults for the

@@ -52,49 +52,87 @@ void drawBevel(NSRect rect, CGFloat radius, bool flipped)
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 
+namespace {
+
+/// The active scheme, and the NSColor objects made from it.
+///
+/// The cache is not an optimisation of last resort: `ink` is called dozens of
+/// times per drawn row, and building an NSColor each time would allocate inside
+/// every draw loop in the shell. It is rebuilt whole on a palette change, which
+/// happens when a human moves a colour picker — never in a draw.
+ThemePalette          g_palette = defaultPalette();
+NSArray<NSColor*>*    g_cache   = nil;
+
+/// Palette entries carry meaningful alpha: two of the roles exist only as a
+/// low-alpha white and a low-alpha black hairline. `fromArgb` deliberately
+/// does not, because project colours are opaque material colours.
+NSColor* colourFromArgb(std::uint32_t argb)
+{
+    return [NSColor colorWithSRGBRed:static_cast<CGFloat>((argb >> 16) & 0xFFu) / 255.0
+                               green:static_cast<CGFloat>((argb >> 8) & 0xFFu) / 255.0
+                                blue:static_cast<CGFloat>(argb & 0xFFu) / 255.0
+                               alpha:static_cast<CGFloat>((argb >> 24) & 0xFFu) / 255.0];
+}
+
+void rebuildCache()
+{
+    NSMutableArray<NSColor*>* cache = [NSMutableArray arrayWithCapacity:inkCount];
+    for (std::size_t slot = 0; slot < inkCount; ++slot)
+        [cache addObject:colourFromArgb(g_palette.colours[slot])];
+
+    g_cache = cache;
+}
+
+} // namespace
+
+NSString* const kPaletteChangedNotification = @"INCDAWPaletteChanged";
+
+void setPalette(const ThemePalette& palette)
+{
+    g_palette = palette;
+    rebuildCache();
+
+    [NSNotificationCenter.defaultCenter postNotificationName:kPaletteChangedNotification
+                                                      object:nil];
+}
+
+const ThemePalette& palette() { return g_palette; }
+
+void refreshViewTree(NSView* root)
+{
+    if (root == nil)
+        return;
+
+    [root setNeedsDisplay:YES];
+
+    for (NSView* child in root.subviews)
+        refreshViewTree(child);
+}
+
+BOOL paletteIsLight()
+{
+    const std::uint32_t ground =
+        g_palette.colours[static_cast<std::size_t>(Ink::windowBackground)];
+
+    // Rec. 601 luma, which is what "does this read as light" means to an eye
+    // rather than to an average of three channels.
+    const double red   = static_cast<double>((ground >> 16) & 0xFFu);
+    const double green = static_cast<double>((ground >> 8) & 0xFFu);
+    const double blue  = static_cast<double>(ground & 0xFFu);
+
+    return (0.299 * red + 0.587 * green + 0.114 * blue) > 128.0 ? YES : NO;
+}
+
 NSColor* ink(Ink which)
 {
-    switch (which) {
-        case Ink::windowBackground: return rgb(0x0F, 0x11, 0x15);
-        case Ink::chromeTop:        return rgb(0x2C, 0x31, 0x3A);
-        case Ink::chromeBottom:     return rgb(0x1B, 0x1F, 0x26);
-        case Ink::panel:            return rgb(0x18, 0x1B, 0x21);
-        case Ink::panelRaised:      return rgb(0x24, 0x29, 0x31);
-        case Ink::panelRaisedTop:   return rgb(0x2E, 0x34, 0x3E);
-        case Ink::panelSunken:      return rgb(0x0B, 0x0D, 0x11);
-        case Ink::rowEven:          return rgb(0x1C, 0x20, 0x27);
-        case Ink::rowOdd:           return rgb(0x18, 0x1C, 0x22);
-        case Ink::rowSelected:      return rgb(0x2A, 0x31, 0x3C);
-        case Ink::gridLine:         return rgb(0x22, 0x26, 0x2E);
-        case Ink::gridLineStrong:   return rgb(0x33, 0x39, 0x44);
-        case Ink::separator:        return rgb(0x07, 0x08, 0x0B);
-        case Ink::highlight:        return [NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.07];
-        case Ink::shadow:           return [NSColor colorWithSRGBRed:0 green:0 blue:0 alpha:0.45];
-        case Ink::textPrimary:      return rgb(0xE9, 0xEC, 0xF1);
-        case Ink::textSecondary:    return rgb(0x99, 0xA2, 0xB0);
-        case Ink::textDim:          return rgb(0x63, 0x6C, 0x7A);
-        case Ink::textOnAccent:     return rgb(0x0B, 0x0D, 0x11);
-        case Ink::accent:           return rgb(0x2E, 0x8F, 0xFF);
-        case Ink::accentDim:        return rgb(0x1C, 0x53, 0x92);
-        case Ink::record:           return rgb(0xFF, 0x45, 0x3A);
-        case Ink::solo:             return rgb(0xFF, 0xD4, 0x26);
-        case Ink::mute:             return rgb(0xFF, 0x6B, 0x5E);
-        case Ink::midi:             return rgb(0x46, 0xD9, 0x7F);
-        case Ink::audio:            return rgb(0x3A, 0xA9, 0xFF);
-        case Ink::automation:       return rgb(0xC0, 0x7B, 0xFF);
-        case Ink::playhead:         return rgb(0xFF, 0xC2, 0x4A);
-        case Ink::lcdBackground:    return rgb(0x0A, 0x0E, 0x12);
-        case Ink::lcdBezel:         return rgb(0x3A, 0x41, 0x4C);
-        case Ink::lcdText:          return rgb(0xFF, 0xC9, 0x6B);
-        case Ink::lcdTextDim:       return rgb(0x6D, 0x78, 0x86);
-        case Ink::meterLow:         return rgb(0x35, 0xD0, 0x6E);
-        case Ink::meterMid:         return rgb(0xFF, 0xD4, 0x26);
-        case Ink::meterHigh:        return rgb(0xFF, 0x45, 0x3A);
-        case Ink::selectionFill:    return [NSColor colorWithSRGBRed:0.18 green:0.56 blue:1.0 alpha:0.22];
-        case Ink::selectionStroke:  return [NSColor colorWithSRGBRed:0.35 green:0.68 blue:1.0 alpha:0.85];
-    }
+    if (g_cache == nil)
+        rebuildCache();
 
-    return rgb(0xFF, 0x00, 0xFF);   // unreachable; loud if it ever is not
+    const NSUInteger slot = static_cast<NSUInteger>(which);
+    if (slot >= g_cache.count)
+        return rgb(0xFF, 0x00, 0xFF);   // unreachable; loud if it ever is not
+
+    return g_cache[slot];
 }
 
 NSColor* fromArgb(std::uint32_t argb, CGFloat brightness)

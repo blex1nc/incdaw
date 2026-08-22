@@ -355,7 +355,69 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     // it was one would rebuild the render graph for a view change.
     _statusText = _velocityLaneVisible ? @"Velocity lane shown" : @"Velocity lane hidden";
 
+    [self editorStateChanged];
     [self setNeedsDisplay:YES];
+}
+
+/// Tells whoever is showing these settings that one of them moved.
+///
+/// Only for changes the editor makes to itself — a keystroke. The setters below
+/// do not call it: whoever set the value already knows.
+- (void)editorStateChanged
+{
+    if (self.onEditorStateChanged != nil)
+        self.onEditorStateChanged();
+}
+
+// ── Settings the control strip shows ─────────────────────────────────────────
+//
+// Each reads and writes the state the editor already had. There is deliberately
+// no second copy: the strip is a view of the editor's settings, not a place
+// they live, or the two would drift the first time a keystroke changed one.
+
+- (long long)snapTicks { return static_cast<long long>(_model->snap()); }
+
+- (void)setSnapTicks:(long long)ticks
+{
+    _model->setSnap(static_cast<Tick>(ticks > 0 ? ticks : 0));
+    [self setNeedsDisplay:YES];
+}
+
+- (int)keyRootPitchClass { return _keyRootPc; }
+
+- (void)setKeyRootPitchClass:(int)pitchClass
+{
+    _keyRootPc = ((pitchClass % 12) + 12) % 12;
+    [self setNeedsDisplay:YES];
+}
+
+- (int)scaleIndex { return static_cast<int>(_scale); }
+
+- (void)setScaleIndex:(int)index
+{
+    _scale = index >= 0 && index <= static_cast<int>(app::music::Scale::harmonicMinor)
+                 ? static_cast<app::music::Scale>(index)
+                 : app::music::Scale::major;
+
+    [self setNeedsDisplay:YES];
+}
+
+- (BOOL)ghostNotesVisible { return _ghostsVisible; }
+
+- (void)setGhostNotesVisible:(BOOL)visible
+{
+    _ghostsVisible = visible;
+    [self setNeedsDisplay:YES];
+}
+
+- (BOOL)velocityLaneVisible { return _velocityLaneVisible; }
+
+- (void)setVelocityLaneVisible:(BOOL)visible
+{
+    if (_velocityLaneVisible == visible)
+        return;
+
+    [self toggleVelocityLane];
 }
 
 // ── Drawing ──────────────────────────────────────────────────────────────────
@@ -1157,6 +1219,7 @@ constexpr std::array<const char*, 8> stampSuffixes = {
     if (!command && (character == 'g' || character == 'G')) {
         _ghostsVisible = !_ghostsVisible;
         _statusText    = _ghostsVisible ? @"Ghost notes shown" : @"Ghost notes hidden";
+        [self editorStateChanged];
         [self setNeedsDisplay:YES];
         return;
     }

@@ -15,12 +15,15 @@
 #include "engine/audio/WavFile.h"
 #include "engine/core/AudioBufferPool.h"
 #include "engine/instrument/BuiltinInstruments.h"
+#include "engine/instrument/PianoInstrument.h"
 #include "engine/instrument/SimpleSynth.h"
 #include "engine/transport/TempoMap.h"
 #include "project/Model.h"
 #include "project/ProjectFile.h"
 #include "project/ProjectGraphCompiler.h"
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <vector>
 
@@ -287,4 +290,111 @@ TEST_CASE("AddSamplerZoneCommand appends a layer and undoes cleanly")
     CHECK(project.audioAssets().size() == 1);
 
     fs::remove_all(scratch);
+}
+
+// ── Assigning the instrument (SetChannelInstrumentCommand) ────────────────────
+//
+// Until this command existed, `Channel::instrument` could only be written as a
+// side effect of dropping a sample: a channel could be given the sampler and
+// nothing else. These are the claims that closes.
+
+TEST_CASE("assigning an instrument is undoable and discards the outgoing values")
+{
+    project::EntityId channelId;
+    project::Project  project = synthProject(channelId);
+
+    project.findChannel(channelId)->instrumentParameters.push_back({gainParam, 0.9});
+    project.findChannel(channelId)->instrumentStateFile = "plugins/synth.state";
+
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetChannelInstrumentCommand>(
+        channelId, plugins::builtinPiano())));
+
+    CHECK(project.findChannel(channelId)->instrument == plugins::builtinPiano());
+
+    // The old instrument's parameter ids mean something else to the new one,
+    // so they are dropped rather than reinterpreted.
+    CHECK(project.findChannel(channelId)->instrumentParameters.empty());
+    CHECK(project.findChannel(channelId)->instrumentStateFile.empty());
+
+    registry.undo();
+
+    CHECK(project.findChannel(channelId)->instrument == plugins::builtinSimpleSynth());
+    REQUIRE(project.findChannel(channelId)->instrumentParameters.size() == 1);
+    CHECK(project.findChannel(channelId)->instrumentParameters[0].value == 0.9);
+    CHECK(project.findChannel(channelId)->instrumentStateFile == "plugins/synth.state");
+
+    registry.redo();
+    CHECK(project.findChannel(channelId)->instrument == plugins::builtinPiano());
+
+    // Assigning what is already there is not an edit and must not enter undo.
+    CHECK_FALSE(registry.execute(std::make_unique<app::SetChannelInstrumentCommand>(
+        channelId, plugins::builtinPiano())));
+}
+
+TEST_CASE("sampler zones survive a round trip through another instrument")
+{
+    project::EntityId channelId;
+    project::Project  project = synthProject(channelId);
+
+    project::Channel* channel = project.findChannel(channelId);
+    channel->instrument = plugins::builtinSampler();
+    channel->samplerZones.push_back(project::ChannelSamplerZone{});
+
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetChannelInstrumentCommand>(
+        channelId, plugins::builtinPiano())));
+
+    // Zones are read only when the instrument IS the sampler, so keeping them
+    // costs nothing and means the program is still there on the way back.
+    CHECK(project.findChannel(channelId)->samplerZones.size() == 1);
+
+    REQUIRE(registry.execute(std::make_unique<app::SetChannelInstrumentCommand>(
+        channelId, plugins::builtinSampler())));
+    CHECK(project.findChannel(channelId)->samplerZones.size() == 1);
+}
+
+TEST_CASE("a channel assigned the piano compiles to the piano and plays")
+{
+    const engine::TempoMap map{120.0, 48000.0};
+
+    project::EntityId channelId;
+    project::Project  project = synthProject(channelId);
+
+    app::CommandRegistry registry{project};
+    REQUIRE(registry.execute(std::make_unique<app::SetChannelInstrumentCommand>(
+        channelId, plugins::builtinPiano())));
+
+    const auto compiled = project::compileProjectGraph(project, map,
+                                                       project::GraphCompileOptions{});
+    REQUIRE(compiled);
+
+    engine::InstrumentNode* node = compiled.instrumentFor(channelId);
+    REQUIRE(node != nullptr);
+
+    std::vector<engine::Sample> rendered;
+    drive(compiled, 8, rendered);
+
+    double peak = 0.0;
+    for (const engine::Sample sample : rendered)
+        peak = std::max(peak, std::abs(static_cast<double>(sample)));
+
+    CHECK(peak > 0.001);
+
+    // And the stored-parameter path reaches it: the model is a stepped
+    // parameter, and selecting the electric must change what is rendered.
+    project::Project electric = project;
+    electric.findChannel(channelId)->instrumentParameters.push_back(
+        {static_cast<std::uint32_t>(engine::PianoParam::model), 4.0});
+
+    const auto compiledElectric =
+        project::compileProjectGraph(electric, map, project::GraphCompileOptions{});
+    REQUIRE(compiledElectric);
+
+    std::vector<engine::Sample> renderedElectric;
+    drive(compiledElectric, 8, renderedElectric);
+
+    CHECK(rendered != renderedElectric);
 }

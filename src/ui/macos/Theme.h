@@ -25,53 +25,41 @@
 
 #import <Cocoa/Cocoa.h>
 
+// The roles themselves, the values behind them, and the file they are read
+// from live in a header with no AppKit in it, so that a theme can be parsed,
+// edited and tested without a window server (ui/ThemePalette.h).
+#include "ui/ThemePalette.h"
+
 #include <cstdint>
 
 namespace incdaw::ui::theme {
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 
-/// Named roles rather than named colours: views ask for "the ground under a
-/// grid", not "0.06 grey", so the scheme can move without touching them.
-enum class Ink {
-    windowBackground,   ///< behind everything
-    chromeTop,          ///< control bar gradient, top stop
-    chromeBottom,       ///< control bar gradient, bottom stop
-    panel,              ///< a pane's own ground
-    panelRaised,        ///< a header, strip or button sitting on the panel
-    panelRaisedTop,     ///< raised gradient, top stop
-    panelSunken,        ///< a well: grid, timeline, meter housing
-    rowEven,            ///< list/rack rows
-    rowOdd,
-    rowSelected,
-    gridLine,           ///< beat lines, row separators
-    gridLineStrong,     ///< bar lines
-    separator,          ///< hard division between panes
-    highlight,          ///< the 1px bevel light (white, low alpha)
-    shadow,             ///< the 1px bevel dark (black, low alpha)
-    textPrimary,
-    textSecondary,
-    textDim,
-    textOnAccent,
-    accent,             ///< selection, focus, active tab
-    accentDim,
-    record,
-    solo,
-    mute,
-    midi,               ///< pattern / MIDI material
-    audio,              ///< audio material
-    automation,         ///< automation material
-    playhead,
-    lcdBackground,
-    lcdBezel,
-    lcdText,
-    lcdTextDim,
-    meterLow,
-    meterMid,
-    meterHigh,
-    selectionFill,      ///< marquee / range selection wash
-    selectionStroke,
-};
+/// The scheme every drawing call below reads from. Set once at launch from the
+/// user's preference, and again whenever the Appearance tab changes a colour.
+///
+/// Main thread only, and that is not a restriction so much as a description:
+/// AppKit draws on the main thread and nothing else ever asks for a colour, so
+/// the palette needs no lock and takes none.
+void setPalette(const ThemePalette& palette);
+
+[[nodiscard]] const ThemePalette& palette();
+
+/// Posted after `setPalette`. Views that draw themselves need no observer —
+/// they are invalidated by `refreshViewTree` — but anything that handed a
+/// colour to an AppKit control holds a snapshot, and snapshots must be
+/// reassigned by whoever made them.
+extern NSString* const kPaletteChangedNotification;
+
+/// Recursively marks `root` and every view under it as needing display.
+void refreshViewTree(NSView* root);
+
+/// True when the scheme's ground is brighter than its text — which is what the
+/// shell needs in order to hand AppKit the matching NSAppearance. INCDAW draws
+/// its own surfaces, but scrollers, sheets, menus and text fields are AppKit's,
+/// and a dark scroller over a light pane is the one thing a theme cannot fix.
+[[nodiscard]] BOOL paletteIsLight();
 
 [[nodiscard]] NSColor* ink(Ink which);
 

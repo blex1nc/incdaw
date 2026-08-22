@@ -30,6 +30,23 @@ namespace incdaw::app     { class CommandRegistry; }
 /// Text describing the last action, for the status line.
 @property (nonatomic, copy, readonly) NSString* statusText;
 
+/// Grid resolution in ticks; zero snaps to nothing. The same value the editor's
+/// own quantize, note-length and drag arithmetic read, so a control strip that
+/// sets it cannot disagree with the grid the notes land on.
+@property (nonatomic, assign) long long snapTicks;
+
+/// The key signature the scale highlighting and the note-nudge tool both work
+/// in: root pitch class (0 = C) and an app::music::Scale as its index.
+@property (nonatomic, assign) int keyRootPitchClass;
+@property (nonatomic, assign) int scaleIndex;
+
+@property (nonatomic, assign) BOOL ghostNotesVisible;
+@property (nonatomic, assign) BOOL velocityLaneVisible;
+
+/// Called when one of the settings above is changed from inside the editor —
+/// by a keystroke, not by a setter — so a control strip showing them follows.
+@property (nonatomic, copy) void (^onEditorStateChanged)(void);
+
 /// Called after any edit, so the host can refresh its status line and rebuild
 /// the playback graph.
 @property (nonatomic, copy) void (^onChange)(void);

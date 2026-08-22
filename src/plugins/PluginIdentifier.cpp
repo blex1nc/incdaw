@@ -48,4 +48,9 @@ PluginIdentifier builtinSimpleSynth()
     return {Format::builtin, "incdaw.simplesynth"};
 }
 
+PluginIdentifier builtinPiano()
+{
+    return {Format::builtin, "incdaw.piano"};
+}
+
 } // namespace incdaw::plugins

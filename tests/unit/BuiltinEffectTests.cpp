@@ -145,6 +145,7 @@ TEST_CASE("every effect at its transparent settings passes the signal bit-exact"
     SUBCASE("utility")  { nullThrough(makeBuiltinEffect("incdaw.utility", 48000.0)); }
     SUBCASE("filter")   { nullThrough(makeBuiltinEffect("incdaw.filter", 48000.0)); }
     SUBCASE("eq")       { nullThrough(makeBuiltinEffect("incdaw.eq", 48000.0)); }
+    SUBCASE("tone")     { nullThrough(makeBuiltinEffect("incdaw.tone", 48000.0)); }
     SUBCASE("saturator"){ nullThrough(makeBuiltinEffect("incdaw.saturator", 48000.0)); }
     SUBCASE("gate")     { nullThrough(makeBuiltinEffect("incdaw.gate", 48000.0)); }
     SUBCASE("analyzer") { nullThrough(makeBuiltinEffect("incdaw.analyzer", 48000.0)); }
@@ -648,4 +649,83 @@ TEST_CASE("the analyzer publishes a spectrum whose peak sits at the tone's bin")
     CHECK(bins[toneBin] > -1.0f);
     CHECK(bins[toneBin] < 1.0f);
     CHECK(bins[toneBin + 40] < -40.0f);
+}
+
+// ── Tone: the same EQ, and a curve that agrees with it ───────────────────────
+
+TEST_CASE("the Tone entry is the EQ, parameter table and all")
+{
+    const BuiltinEffectInfo* eq   = findBuiltinEffect("incdaw.eq");
+    const BuiltinEffectInfo* tone = findBuiltinEffect("incdaw.tone");
+
+    REQUIRE(eq != nullptr);
+    REQUIRE(tone != nullptr);
+
+    // Not merely the same shape: literally the same static table, which is
+    // what makes a Tone panel and an EQ panel edit one set of parameters.
+    CHECK(tone->parameterCount == EqEffect::paramCount);
+    CHECK(tone->parameters == eq->parameters);
+    CHECK(tone->parameterCount == eq->parameterCount);
+
+    // A slot saved as Tone loads as Tone: the uid resolves to a real node.
+    CHECK(makeBuiltinEffect("incdaw.tone", sampleRate) != nullptr);
+}
+
+TEST_CASE("the plotted response is the response the EQ actually applies")
+{
+    // The Tone panel draws eqMagnitudeDb. If that ever stops being the filter
+    // the audio thread runs, the picture lies about the sound — so measure the
+    // effect and compare it to its own curve.
+    const auto measureDb = [](const double parameters[EqEffect::paramCount],
+                              double frequency) {
+        constexpr std::size_t frames  = 16384;
+        constexpr std::size_t settled = 8192;   ///< past the filter's transient
+
+        std::vector<std::vector<Sample>> input(1);
+        input[0].resize(frames);
+
+        for (std::size_t frame = 0; frame < frames; ++frame)
+            input[0][frame] = static_cast<Sample>(
+                0.25 * std::sin(2.0 * 3.14159265358979323846 * frequency
+                                * static_cast<double>(frame) / sampleRate));
+
+        auto node = makeBuiltinEffect("incdaw.tone", sampleRate);
+        for (std::uint32_t id = 0; id < EqEffect::paramCount; ++id)
+            node->parameterSink()->setParameter(id, parameters[id]);
+
+        const auto output = processThrough(*node, input);
+
+        const auto rms = [&](const std::vector<Sample>& samples) {
+            double sum = 0.0;
+            for (std::size_t frame = settled; frame < frames; ++frame)
+                sum += static_cast<double>(samples[frame])
+                     * static_cast<double>(samples[frame]);
+
+            return std::sqrt(sum / static_cast<double>(frames - settled));
+        };
+
+        return 20.0 * std::log10(rms(output[0]) / rms(input[0]));
+    };
+
+    SUBCASE("flat is flat at every plotted frequency")
+    {
+        const double flat[EqEffect::paramCount] = {120.0, 0.0, 1000.0, 0.0, 1.0, 8000.0, 0.0};
+
+        for (double frequency : {30.0, 120.0, 440.0, 1000.0, 5000.0, 12000.0})
+            CHECK(eqMagnitudeDb(flat, sampleRate, frequency) == 0.0);
+    }
+
+    SUBCASE("a boosted band measures what the curve promises")
+    {
+        // Bass +9, mid -6, treble +6 — a shape with all three bands in play,
+        // so the check covers their sum and not one band at a time.
+        const double shaped[EqEffect::paramCount] = {120.0, 9.0, 1000.0, -6.0, 1.0, 8000.0, 6.0};
+
+        // Absolute, not relative: a dB reading near zero has no scale for a
+        // relative tolerance to be measured against.
+        for (double frequency : {60.0, 120.0, 1000.0, 4000.0, 12000.0})
+            CHECK(std::abs(measureDb(shaped, frequency)
+                           - eqMagnitudeDb(shaped, sampleRate, frequency))
+                  < 0.15);
+    }
 }

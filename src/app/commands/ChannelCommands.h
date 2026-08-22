@@ -205,6 +205,40 @@ private:
     double previousValue_ = 0.0;
 };
 
+/// Assigns the channel's instrument.
+///
+/// `Channel::instrument` has been serialized since Phase 4 and built by the
+/// graph compiler since Phase 7, and until now nothing could set it: the field
+/// was written only as a side effect of dropping a sample (SamplerCommands,
+/// ImportCommands, SlicerCommands), so a channel could never be given a synth.
+/// This is that command — the same gap SetChannelPanCommand closed for pan.
+///
+/// Switching instruments DISCARDS the stored parameter values and the opaque
+/// state file, because parameter ids are the outgoing instrument's own
+/// numbering and mean something different (or nothing) to the incoming one.
+/// Undo puts both back. Sampler zones are left alone: they are read only when
+/// the instrument IS the builtin sampler, so keeping them lets a round trip
+/// through another instrument return to the same program.
+class SetChannelInstrumentCommand final : public Command {
+public:
+    SetChannelInstrumentCommand(EntityId channel, plugins::PluginIdentifier instrument)
+        : channelId_(channel), instrument_(std::move(instrument)) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "channel.setInstrument"; }
+    [[nodiscard]] std::string name() const override { return "Set Channel Instrument"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    EntityId                  channelId_;
+    plugins::PluginIdentifier instrument_;
+
+    plugins::PluginIdentifier previousInstrument_;
+    std::string               previousStateFile_;
+    std::vector<project::ChannelInstrumentParameter> previousParameters_;
+};
+
 /// The pitch this channel's steps are written at.
 class SetChannelStepKeyCommand final : public Command {
 public:

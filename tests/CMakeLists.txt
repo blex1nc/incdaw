@@ -25,6 +25,7 @@ add_executable(incdaw_tests
     unit/NoteToolTests.cpp
     unit/PianoRollTests.cpp
     unit/InstrumentTests.cpp
+    unit/PianoInstrumentTests.cpp
     unit/InstrumentParameterTests.cpp
     unit/BuiltinEffectTests.cpp
     unit/BuiltinInsertTests.cpp
@@ -71,7 +72,9 @@ add_executable(incdaw_tests
     unit/InsertCommandTests.cpp
     unit/AppSettingsTests.cpp
     unit/UpdateCheckTests.cpp
-    unit/StandardActionsTests.cpp)
+    unit/StandardActionsTests.cpp
+    unit/ThemePaletteTests.cpp
+    unit/ThemeLibraryTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.
@@ -81,6 +84,7 @@ target_link_libraries(incdaw_tests
     PRIVATE doctest
             incdaw_app
             incdaw_plugins
+            incdaw_theme
             incdaw_warnings)
 
 target_compile_definitions(incdaw_tests PRIVATE

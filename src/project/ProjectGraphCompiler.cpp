@@ -9,6 +9,7 @@
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/graph/ParameterSink.h"
+#include "engine/instrument/PianoInstrument.h"
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
 #include "engine/automation/AutomationNode.h"
@@ -454,6 +455,9 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         [&](const Channel& channel) -> std::unique_ptr<engine::Instrument> {
         if (channel.instrument.uid == plugins::builtinSimpleSynth().uid)
             return std::make_unique<engine::SimpleSynth>();
+
+        if (channel.instrument.uid == plugins::builtinPiano().uid)
+            return std::make_unique<engine::PianoInstrument>();
 
         if (channel.instrument.uid == plugins::builtinSampler().uid) {
             auto sampler = std::make_unique<engine::Sampler>();

@@ -1,5 +1,6 @@
 #include "doctest.h"
 
+#include "app/PianoRollHeaderModel.h"
 #include "app/PianoRollModel.h"
 #include "engine/core/RealtimeGuard.h"
 
@@ -751,4 +752,112 @@ TEST_CASE("a ghost carries the index it had in its own channel, not in the merge
     CHECK(out[0].index == 0);
     CHECK(out[1].index == 0);     // the second channel's first note
     CHECK(out[2].index == 1);
+}
+
+// ── The header strip ──────────────────────────────────────────────────────────
+//
+// The strip shows three settings the editor already had and one of them — the
+// grid — was reachable from nowhere at all. These cases hold the two halves
+// together: what a division means in ticks, and that a click lands on the
+// control it looks like it lands on.
+
+TEST_CASE("the snap picker speaks the editor's own units")
+{
+    using Header = PianoRollHeaderModel;
+
+    CHECK(Header::ticksFor(Header::Snap::bar) == ticksPerQuarterNote * 4);
+    CHECK(Header::ticksFor(Header::Snap::quarter) == ticksPerQuarterNote);
+    CHECK(Header::ticksFor(Header::Snap::sixteenth) == ticksPerQuarterNote / 4);
+
+    // Zero is what PianoRollModel::setSnap already means by "do not snap", so
+    // the picker hands its value straight over rather than translating.
+    CHECK(Header::ticksFor(Header::Snap::off) == 0);
+
+    // Every division round-trips, which is what lets the strip show what the
+    // editor is set to instead of what was last picked in a menu.
+    for (std::size_t index = 0; index < Header::snapCount; ++index) {
+        const Header::Snap snap = Header::snapAt(index);
+        CHECK(Header::snapForTicks(Header::ticksFor(snap)) == snap);
+    }
+
+    // The editor's default is a sixteenth, and the strip must say so before
+    // anything has been picked in it.
+    CHECK(Header::snapForTicks(ticksPerQuarterNote / 4) == Header::Snap::sixteenth);
+
+    // A value that is not one of the offered divisions reads as the nearest one
+    // at or below it — a grid finer than it claims is a grid that lies.
+    CHECK(Header::snapForTicks(ticksPerQuarterNote / 4 - 1) == Header::Snap::thirtySecond);
+    CHECK(Header::snapForTicks(0) == Header::Snap::off);
+    CHECK(Header::snapForTicks(-5) == Header::Snap::off);
+}
+
+TEST_CASE("every scale the nudge tool knows has a name in the picker")
+{
+    using Header = PianoRollHeaderModel;
+
+    for (std::size_t index = 0; index < Header::scaleCount; ++index) {
+        const music::Scale scale = Header::scaleAt(index);
+        CHECK(static_cast<std::size_t>(scale) == index);
+        CHECK(Header::scaleName(scale)[0] != '\0');
+    }
+}
+
+TEST_CASE("the strip's controls do not overlap and the toggles stay at its edge")
+{
+    PianoRollHeaderModel header;
+    const auto layout = header.layout();
+
+    constexpr double width = 900.0;
+
+    const auto snap  = header.snapRect();
+    const auto key   = header.keyRect();
+    const auto scale = header.scaleRect();
+
+    // Read left to right: what the grid is, then what key it is in.
+    CHECK(snap.x >= layout.padding);
+    CHECK(key.x >= snap.x + snap.width);
+    CHECK(scale.x >= key.x + key.width);
+
+    const auto ghosts   = header.ghostsRect(width);
+    const auto velocity = header.velocityLaneRect(width);
+
+    // Measured from the trailing edge, so a resize does not move them out from
+    // under the cursor that was about to click one.
+    CHECK(velocity.x + velocity.width <= width - layout.padding + 0.001);
+    CHECK(ghosts.x + ghosts.width <= velocity.x);
+    CHECK(ghosts.x > scale.x + scale.width);
+
+    // Everything sits inside the band, with room above and below.
+    for (const auto& rect : {snap, key, scale, ghosts, velocity}) {
+        CHECK(rect.y > 0.0);
+        CHECK(rect.y + rect.height < layout.height);
+    }
+}
+
+TEST_CASE("a click on the strip hits the control it looks like it hits")
+{
+    using Zone = PianoRollHeaderModel::Zone;
+
+    PianoRollHeaderModel header;
+    constexpr double width = 900.0;
+
+    const auto centre = [&](const PianoRollHeaderModel::Rect& rect) {
+        return header.hitTest(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0, width);
+    };
+
+    CHECK(centre(header.snapRect()) == Zone::snap);
+    CHECK(centre(header.keyRect()) == Zone::key);
+    CHECK(centre(header.scaleRect()) == Zone::scale);
+    CHECK(centre(header.ghostsRect(width)) == Zone::ghosts);
+    CHECK(centre(header.velocityLaneRect(width)) == Zone::velocityLane);
+
+    // The gaps between controls are not controls, and neither is the band's
+    // own ground.
+    const auto snap = header.snapRect();
+    CHECK(header.hitTest(snap.x + snap.width + 2.0, snap.y + 2.0, width) == Zone::none);
+    CHECK(header.hitTest(width / 2.0, header.layout().height / 2.0, width) == Zone::none);
+
+    // Below the strip is the editor, and a click there is the editor's.
+    CHECK(header.hitTest(snap.x + 2.0, header.layout().height + 1.0, width) == Zone::none);
+    CHECK(header.hitTest(snap.x + 2.0, -1.0, width) == Zone::none);
 }

@@ -4,7 +4,7 @@
 
 namespace incdaw::app { struct AppSettings; }
 
-/// Audio and MIDI settings.
+/// Audio, MIDI, Appearance and Updates settings.
 ///
 /// Every DAW has this window and every DAW needs it: the device that plays a
 /// project is a property of the machine, not of the music, and until it can be
@@ -18,11 +18,23 @@ namespace incdaw::app { struct AppSettings; }
 /// engine directly.
 @interface INCDAWSettingsWindow : NSObject <NSWindowDelegate>
 
-- (instancetype)initWithSettings:(incdaw::app::AppSettings*)settings;
+/// `themesDirectory` is "<Application Support>/INCDAW/Themes", or nil on a
+/// machine with no writable support directory — in which case the Appearance
+/// tab offers the built-in schemes and says why it offers nothing else.
+- (instancetype)initWithSettings:(incdaw::app::AppSettings*)settings
+                 themesDirectory:(NSString*)themesDirectory;
 
 /// Called after the user applies a change, on the main thread. The settings
 /// struct already carries the new values.
 @property (nonatomic, copy) void (^onApply)(void);
+
+/// Called after the theme changes, on the main thread. The palette is already
+/// live and every window has been told to redraw; what remains is persisting
+/// `appearance.themeName`, which belongs to whoever owns the settings file.
+///
+/// Deliberately not `onApply`: that restarts the audio device, and changing a
+/// colour must never interrupt playback.
+@property (nonatomic, copy) void (^onAppearanceChanged)(void);
 
 /// Supplies the line describing what the device actually granted — which is
 /// not always what was asked for, and is the only honest latency figure.

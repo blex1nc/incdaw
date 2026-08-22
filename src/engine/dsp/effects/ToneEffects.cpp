@@ -92,14 +92,15 @@ void EqEffect::prepare(SampleRate sampleRate, FrameCount maxBlockSize)
     cached_[0] = -1.0;   // force a coefficient rebuild
 }
 
-void EqEffect::updateCoefficients() noexcept
+void designEqBands(const double parameters[EqEffect::paramCount], SampleRate sampleRate,
+                   BiquadCoefficients out[EqEffect::bandCount]) noexcept
 {
     // RBJ Audio EQ Cookbook forms. Coefficients are divided through by a0.
     const auto shelf = [&](double frequency, double gainDb, bool high) {
-        Coefficients out;
+        BiquadCoefficients result;
         const double a     = std::pow(10.0, gainDb / 40.0);
-        const double omega = 2.0 * pi * std::clamp(frequency, 10.0, sampleRate_ * 0.45)
-                           / sampleRate_;
+        const double omega = 2.0 * pi * std::clamp(frequency, 10.0, sampleRate * 0.45)
+                           / sampleRate;
         const double cosw  = std::cos(omega);
         const double sinw  = std::sin(omega);
         const double slope = 1.0;
@@ -116,35 +117,77 @@ void EqEffect::updateCoefficients() noexcept
         const double a1 = 2.0 * sign * ((a - 1.0) - sign * (a + 1.0) * cosw);
         const double a2 = (a + 1.0) - sign * (a - 1.0) * cosw - twoRootAAlpha;
 
-        out.b0 = b0 / a0;
-        out.b1 = b1 / a0;
-        out.b2 = b2 / a0;
-        out.a1 = a1 / a0;
-        out.a2 = a2 / a0;
-        return out;
+        result.b0 = b0 / a0;
+        result.b1 = b1 / a0;
+        result.b2 = b2 / a0;
+        result.a1 = a1 / a0;
+        result.a2 = a2 / a0;
+        return result;
     };
 
     const auto peaking = [&](double frequency, double gainDb, double qValue) {
-        Coefficients out;
+        BiquadCoefficients result;
         const double a     = std::pow(10.0, gainDb / 40.0);
-        const double omega = 2.0 * pi * std::clamp(frequency, 10.0, sampleRate_ * 0.45)
-                           / sampleRate_;
+        const double omega = 2.0 * pi * std::clamp(frequency, 10.0, sampleRate * 0.45)
+                           / sampleRate;
         const double alpha = std::sin(omega) / (2.0 * std::max(0.1, qValue));
         const double cosw  = std::cos(omega);
 
         const double a0 = 1.0 + alpha / a;
 
-        out.b0 = (1.0 + alpha * a) / a0;
-        out.b1 = (-2.0 * cosw) / a0;
-        out.b2 = (1.0 - alpha * a) / a0;
-        out.a1 = (-2.0 * cosw) / a0;
-        out.a2 = (1.0 - alpha / a) / a0;
-        return out;
+        result.b0 = (1.0 + alpha * a) / a0;
+        result.b1 = (-2.0 * cosw) / a0;
+        result.b2 = (1.0 - alpha * a) / a0;
+        result.a1 = (-2.0 * cosw) / a0;
+        result.a2 = (1.0 - alpha / a) / a0;
+        return result;
     };
 
-    coefficients_[0] = shelf(cached_[0], cached_[1], false);
-    coefficients_[1] = peaking(cached_[2], cached_[3], cached_[4]);
-    coefficients_[2] = shelf(cached_[5], cached_[6], true);
+    out[0] = shelf(parameters[EqEffect::lowFreq], parameters[EqEffect::lowGainDb], false);
+    out[1] = peaking(parameters[EqEffect::midFreq], parameters[EqEffect::midGainDb],
+                     parameters[EqEffect::midQ]);
+    out[2] = shelf(parameters[EqEffect::highFreq], parameters[EqEffect::highGainDb], true);
+}
+
+double eqMagnitudeDb(const double parameters[EqEffect::paramCount], SampleRate sampleRate,
+                     double frequency) noexcept
+{
+    BiquadCoefficients bands[EqEffect::bandCount];
+    designEqBands(parameters, sampleRate, bands);
+
+    const double omega = 2.0 * pi * std::clamp(frequency, 1.0, sampleRate * 0.49) / sampleRate;
+    const double cos1 = std::cos(omega),      sin1 = std::sin(omega);
+    const double cos2 = std::cos(2.0 * omega), sin2 = std::sin(2.0 * omega);
+
+    double total = 0.0;
+
+    for (std::size_t band = 0; band < EqEffect::bandCount; ++band) {
+        // The same skip `process` makes: a band at exactly 0 dB is identity.
+        const double gainDb = band == 0   ? parameters[EqEffect::lowGainDb]
+                              : band == 1 ? parameters[EqEffect::midGainDb]
+                                          : parameters[EqEffect::highGainDb];
+        if (gainDb == 0.0)
+            continue;
+
+        const BiquadCoefficients& c = bands[band];
+
+        const double numeratorReal   = c.b0 + c.b1 * cos1 + c.b2 * cos2;
+        const double numeratorImag   = -(c.b1 * sin1 + c.b2 * sin2);
+        const double denominatorReal = 1.0 + c.a1 * cos1 + c.a2 * cos2;
+        const double denominatorImag = -(c.a1 * sin1 + c.a2 * sin2);
+
+        const double numerator   = numeratorReal * numeratorReal
+                                 + numeratorImag * numeratorImag;
+        const double denominator = denominatorReal * denominatorReal
+                                 + denominatorImag * denominatorImag;
+
+        if (denominator <= 0.0 || numerator <= 0.0)
+            continue;
+
+        total += 10.0 * std::log10(numerator / denominator);
+    }
+
+    return total;
 }
 
 void EqEffect::process(const ProcessContext& context) noexcept
@@ -152,14 +195,14 @@ void EqEffect::process(const ProcessContext& context) noexcept
     sumInputsInto(context);
 
     bool dirty = false;
-    for (std::size_t param = 0; param < 7; ++param) {
+    for (std::size_t param = 0; param < paramCount; ++param) {
         const double current = valueAt(param);
         dirty          = dirty || current != cached_[param];
         cached_[param] = current;
     }
 
     if (dirty)
-        updateCoefficients();
+        designEqBands(cached_, sampleRate_, coefficients_);
 
     // A band at exactly 0 dB is coefficient-identity; skip it entirely so
     // the defaulted EQ is bit-exact, not merely close.
@@ -171,7 +214,7 @@ void EqEffect::process(const ProcessContext& context) noexcept
         if (gainDb == 0.0)
             continue;
 
-        const Coefficients& c = coefficients_[band];
+        const BiquadCoefficients& c = coefficients_[band];
 
         for (std::size_t channel = 0; channel < channels; ++channel) {
             Sample* samples = context.output.channel(channel);

@@ -30,6 +30,11 @@ private:
     SampleRate sampleRate_ = 48000.0;
 };
 
+/// One biquad's coefficients, already divided through by a0.
+struct BiquadCoefficients {
+    double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
+};
+
 /// Three-band parametric EQ: low shelf, peak, high shelf — RBJ cookbook
 /// biquads. Every band at 0 dB is coefficient-identity, so the defaulted EQ
 /// nulls against its input.
@@ -55,22 +60,36 @@ public:
 
     [[nodiscard]] const char* name() const noexcept override { return "EQ"; }
 
-private:
-    struct Coefficients {
-        double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
-    };
+    /// Parameter count as a compile-time value. Deliberately not named
+    /// `parameterCount`: that is the base's accessor, and a same-named member
+    /// here would hide it for anyone holding an EqEffect by its concrete type.
+    static constexpr std::size_t paramCount = 7;
 
+private:
     struct State {
         double z1 = 0.0, z2 = 0.0;   ///< transposed direct form II
     };
 
-    void updateCoefficients() noexcept;
-
-    Coefficients coefficients_[bandCount];
-    State        states_[bandCount][maxChannels]{};
-    double       cached_[7] = {-1, -1, -1, -1, -1, -1, -1};
-    SampleRate   sampleRate_ = 48000.0;
+    BiquadCoefficients coefficients_[bandCount];
+    State              states_[bandCount][maxChannels]{};
+    double             cached_[paramCount] = {-1, -1, -1, -1, -1, -1, -1};
+    SampleRate         sampleRate_ = 48000.0;
 };
+
+/// Designs the EQ's three bands from `parameters` (indexed by EqEffect::Param)
+/// into `out`, in band order: low shelf, peak, high shelf.
+///
+/// Free rather than private because the curve a panel plots and the filter the
+/// audio thread runs must be the same design — two spellings of the RBJ
+/// cookbook would drift apart the first time either is touched.
+void designEqBands(const double parameters[EqEffect::paramCount], SampleRate sampleRate,
+                   BiquadCoefficients out[EqEffect::bandCount]) noexcept;
+
+/// Combined magnitude response of those three bands at `frequency`, in dB —
+/// what the Tone panel draws. A band at exactly 0 dB contributes nothing, the
+/// same skip `process` makes.
+[[nodiscard]] double eqMagnitudeDb(const double parameters[EqEffect::paramCount],
+                                   SampleRate sampleRate, double frequency) noexcept;
 
 /// tanh waveshaper with a dry/wet mix. Drive 0 dB is an explicit bypass —
 /// the effect's transparency claim is structural, not numeric.

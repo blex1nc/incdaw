@@ -75,6 +75,7 @@ add_library(incdaw_engine STATIC
     engine/instrument/Sampler.cpp
     engine/instrument/SamplerStream.cpp
     engine/instrument/SimpleSynth.cpp
+    engine/instrument/PianoInstrument.cpp
     engine/instrument/InstrumentNode.cpp
     engine/audio/AiffFile.cpp
     engine/audio/SampleCache.cpp
@@ -178,6 +179,18 @@ target_link_libraries(incdaw_app
     PUBLIC  incdaw_project
     PRIVATE incdaw_warnings)
 
+# ── ui/ theme data : the palette and the themes folder, without any OS API ────
+# Separate from the shell below because a theme is a file format and a set of
+# rules about naming files, and both must be testable on any platform and
+# without a window server. ui/macos/Theme.mm draws with it; nothing else does.
+add_library(incdaw_theme STATIC
+    ui/ThemePalette.cpp
+    ui/ThemeLibrary.cpp)
+target_include_directories(incdaw_theme PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(incdaw_theme
+    PUBLIC  incdaw_project
+    PRIVATE incdaw_warnings)
+
 # ── ui/ : native shell. May use OS APIs; nothing depends on it ────────────────
 if(APPLE)
     add_executable(INCDAW MACOSX_BUNDLE
@@ -186,6 +199,7 @@ if(APPLE)
         ui/macos/ControlBarView.mm
         ui/macos/PianoRollView.mm
         ui/macos/PianoRollRenderer.mm
+        ui/macos/PianoRollHeaderView.mm
         ui/macos/ChannelRackView.mm
         ui/macos/PatternListView.mm
         ui/macos/PlaylistView.mm
@@ -193,6 +207,7 @@ if(APPLE)
         ui/macos/AudioEditorView.mm
         ui/macos/InsertParameterPanel.mm
         ui/macos/SpectrumView.mm
+        ui/macos/TonePanel.mm
         ui/macos/BrowserView.mm
         ui/macos/SettingsWindow.mm
         ui/macos/CommandPalette.mm)
@@ -201,7 +216,7 @@ if(APPLE)
     # compiler (docs/DECISIONS.md D-028). project/ deliberately does not link
     # it — the factory is how a hosted plugin reaches the graph.
     target_link_libraries(INCDAW
-        PRIVATE incdaw_app incdaw_plugins incdaw_warnings
+        PRIVATE incdaw_app incdaw_plugins incdaw_theme incdaw_warnings
                 "-framework Cocoa"
                 "-framework Metal"
                 "-framework QuartzCore"

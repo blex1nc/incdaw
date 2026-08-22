@@ -259,6 +259,42 @@ void SetInstrumentParameterCommand::mergeWith(const Command& next)
         value_ = other->value_;
 }
 
+// ── SetChannelInstrumentCommand ───────────────────────────────────────────────
+
+bool SetChannelInstrumentCommand::execute(Project& project)
+{
+    Channel* channel = project.findChannel(channelId_);
+    if (channel == nullptr)
+        return false;
+
+    if (channel->instrument == instrument_)
+        return false;
+
+    previousInstrument_ = channel->instrument;
+    previousStateFile_  = channel->instrumentStateFile;
+    previousParameters_ = channel->instrumentParameters;
+
+    channel->instrument = instrument_;
+
+    // The incoming instrument's parameter ids are its own. Carrying the old
+    // values across would silently write, say, the sampler's cutoff onto the
+    // piano's release — the compiler applies stored values blind (D-034).
+    channel->instrumentParameters.clear();
+    channel->instrumentStateFile.clear();
+    return true;
+}
+
+void SetChannelInstrumentCommand::undo(Project& project)
+{
+    Channel* channel = project.findChannel(channelId_);
+    if (channel == nullptr)
+        return;
+
+    channel->instrument           = previousInstrument_;
+    channel->instrumentStateFile  = previousStateFile_;
+    channel->instrumentParameters = previousParameters_;
+}
+
 // ── SetChannelStepKeyCommand ──────────────────────────────────────────────────
 
 bool SetChannelStepKeyCommand::execute(Project& project)

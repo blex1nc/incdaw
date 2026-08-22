@@ -57,9 +57,12 @@
 #include "ui/macos/ControlBarView.h"
 #include "ui/macos/InsertParameterPanel.h"
 #include "ui/macos/SpectrumView.h"
+#include "ui/macos/TonePanel.h"
 #include "ui/macos/Theme.h"
+#include "ui/ThemeLibrary.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
+#include "ui/macos/PianoRollHeaderView.h"
 #include "ui/macos/MixerView.h"
 #include "ui/macos/PlaylistView.h"
 #include "ui/macos/CommandPalette.h"
@@ -119,6 +122,19 @@ std::filesystem::path incdawSupportDirectory()
     return failed ? std::filesystem::path{} : directory;
 }
 
+/// Where the user's own colour schemes live. A folder rather than a key inside
+/// settings.json, because a theme somebody spends an evening on should be a
+/// file they can copy to another machine or send to somebody else
+/// (ui/ThemeLibrary.h, docs/DECISIONS.md D-039).
+std::filesystem::path incdawThemesDirectory()
+{
+    const std::filesystem::path support = incdawSupportDirectory();
+    if (support.empty())
+        return {};
+
+    return support / "Themes";
+}
+
 } // namespace
 
 /// One export destination and the options that render it.
@@ -137,6 +153,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 @interface INCDAWAppDelegate : NSObject <NSApplicationDelegate>
 @property (strong) NSWindow*                window;
 @property (strong) INCDAWPianoRollView*     pianoRoll;
+@property (strong) INCDAWPianoRollHeaderView* pianoRollHeader;
 @property (strong) INCDAWPlaylistView*      playlist;
 @property (strong) INCDAWMixerView*         mixer;
 @property (strong) INCDAWAudioEditorView*   audioEditor;
@@ -321,6 +338,16 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         _settings     = app::AppSettings::load(_settingsPath);
     }
 
+    // Before any view exists. A palette applied after the window is built is a
+    // window that flashes the default scheme on every launch, and the settings
+    // file has already said which scheme the user meant (ui/ThemePalette.h).
+    ui::theme::setPalette(
+        ui::theme::ThemeLibrary(incdawThemesDirectory()).resolve(_settings.appearance.themeName));
+
+    // AppKit's own controls follow the palette rather than the other way round:
+    // a light theme with dark scrollers over it is a theme that only half took.
+    [self observePaletteChanges];
+
     // The registry's action table was empty in the running application until
     // this existed: every edit arrived as a command, but none of them had a
     // name the palette, a shortcut or a script could look up (CLAUDE.md §26).
@@ -415,7 +442,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     // The shell paints its own dark surfaces; telling AppKit the same thing is
     // what keeps scrollers, menus, sheets and text fields from arriving in the
     // light scheme on top of them.
-    self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    self.window.appearance = [NSAppearance appearanceNamed:ui::theme::paletteIsLight()
+                                                              ? NSAppearanceNameAqua
+                                                              : NSAppearanceNameDarkAqua];
     self.window.titlebarAppearsTransparent = YES;
 
     [self restoreWindowFrame];
@@ -446,6 +475,19 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     self.pianoRoll.patternIdValue = patternId.value();
     self.pianoRoll.channelIdValue = channelId.value();
+
+    // The Piano Roll's control strip is a sibling, not a band inside the
+    // editor: the editor draws through Metal, where text costs a layer each and
+    // the budget is spent on ten thousand notes (D-006). Chrome is drawn with
+    // CoreGraphics through the theme, like every other control surface here.
+    const CGFloat pianoRollHeaderHeight = [INCDAWPianoRollHeaderView preferredHeight];
+
+    self.pianoRollHeader = [[INCDAWPianoRollHeaderView alloc]
+        initWithFrame:NSMakeRect(0, editorFrame.size.height - pianoRollHeaderHeight,
+                                 editorFrame.size.width, pianoRollHeaderHeight)];
+
+    self.pianoRoll.frame = NSMakeRect(0, 0, editorFrame.size.width,
+                                      editorFrame.size.height - pianoRollHeaderHeight);
 
     self.channelRack = [[INCDAWChannelRackView alloc]
         initWithFrame:NSMakeRect(0, 0, body.size.width - listWidth, rackHeight)
@@ -531,10 +573,15 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     // a playlist shows neither.
     NSView* editorContainer = [[NSView alloc] initWithFrame:editorFrame];
     self.pianoRoll.autoresizingMask   = NSViewWidthSizable | NSViewHeightSizable;
+
+    // Width with the pane, but pinned to its top edge: a strip that grew with
+    // the window would eat the grid.
+    self.pianoRollHeader.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
     self.playlist.autoresizingMask    = NSViewWidthSizable | NSViewHeightSizable;
     self.mixer.autoresizingMask       = NSViewWidthSizable | NSViewHeightSizable;
     self.audioEditor.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [editorContainer addSubview:self.pianoRoll];
+    [editorContainer addSubview:self.pianoRollHeader];
     [editorContainer addSubview:self.playlist];
     [editorContainer addSubview:self.mixer];
     [editorContainer addSubview:self.audioEditor];
@@ -642,6 +689,44 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         [weakSelf.channelRack setNeedsDisplay:YES];
         [weakSelf.pianoRoll requestRedraw];
     };
+
+    // The control strip: it owns none of these settings, so every pick is
+    // handed to the editor and the strip is then told what the editor says.
+    // One direction of truth, or the two drift the first time a keystroke
+    // changes one of them.
+    self.pianoRollHeader.onSnapPicked = ^(long long ticks) {
+        weakSelf.pianoRoll.snapTicks = ticks;
+        [weakSelf syncPianoRollHeader];
+    };
+
+    self.pianoRollHeader.onKeyPicked = ^(int rootPitchClass) {
+        weakSelf.pianoRoll.keyRootPitchClass = rootPitchClass;
+        [weakSelf syncPianoRollHeader];
+    };
+
+    self.pianoRollHeader.onScalePicked = ^(int scaleIndex) {
+        weakSelf.pianoRoll.scaleIndex = scaleIndex;
+        [weakSelf syncPianoRollHeader];
+    };
+
+    self.pianoRollHeader.onToggleGhosts = ^{
+        weakSelf.pianoRoll.ghostNotesVisible = !weakSelf.pianoRoll.ghostNotesVisible;
+        [weakSelf syncPianoRollHeader];
+    };
+
+    self.pianoRollHeader.onToggleVelocityLane = ^{
+        weakSelf.pianoRoll.velocityLaneVisible = !weakSelf.pianoRoll.velocityLaneVisible;
+        [weakSelf syncPianoRollHeader];
+    };
+
+    // The same settings have keystrokes (E, G). When one of those moves, the
+    // strip is told rather than left showing what used to be true.
+    self.pianoRoll.onEditorStateChanged = ^{
+        [weakSelf syncPianoRollHeader];
+        [weakSelf refreshStatus];
+    };
+
+    [self syncPianoRollHeader];
 
     self.pianoRoll.onChange   = changed;
     self.channelRack.onChange = changed;
@@ -878,11 +963,24 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self setSongMode:YES];
 }
 
+/// Copies the editor's settings onto the strip that shows them.
+- (void)syncPianoRollHeader
+{
+    self.pianoRollHeader.snapTicks           = self.pianoRoll.snapTicks;
+    self.pianoRollHeader.keyRootPitchClass   = self.pianoRoll.keyRootPitchClass;
+    self.pianoRollHeader.scaleIndex          = self.pianoRoll.scaleIndex;
+    self.pianoRollHeader.ghostsVisible       = self.pianoRoll.ghostNotesVisible;
+    self.pianoRollHeader.velocityLaneVisible = self.pianoRoll.velocityLaneVisible;
+
+    [self.pianoRoll requestRedraw];
+}
+
 - (void)showEditorAtSegment:(NSInteger)segment
 {
     self.controlBar.editorIndex = segment;
 
-    self.pianoRoll.hidden   = segment != 0;
+    self.pianoRoll.hidden       = segment != 0;
+    self.pianoRollHeader.hidden = segment != 0;
     self.playlist.hidden    = segment != 1;
     self.mixer.hidden       = segment != 2;
     self.audioEditor.hidden = segment != 3;
@@ -1545,10 +1643,18 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     (void)sender;
 
     if (self.settingsWindow == nil) {
-        self.settingsWindow = [[INCDAWSettingsWindow alloc] initWithSettings:&_settings];
+        const std::filesystem::path themes = incdawThemesDirectory();
+
+        self.settingsWindow = [[INCDAWSettingsWindow alloc]
+            initWithSettings:&_settings
+             themesDirectory:themes.empty() ? nil : @(themes.c_str())];
 
         __weak INCDAWAppDelegate* weakSelf = self;
         self.settingsWindow.onApply        = ^{ [weakSelf applySettings]; };
+
+        // A colour is not a device: changing one must not restart the engine,
+        // so it takes its own route out of the window and only writes the file.
+        self.settingsWindow.onAppearanceChanged = ^{ [weakSelf persistSettings]; };
         self.settingsWindow.statusProvider = ^NSString*(void) {
             return [weakSelf deviceStatusLine];
         };
@@ -1884,6 +1990,48 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
 // ── The workspace, remembered ────────────────────────────────────────────────
 
+/// Keeps the shell's own AppKit surfaces in step with the palette.
+///
+/// Views that draw themselves need nothing: they are invalidated wholesale.
+/// What needs this is everything that was handed a colour once — a window's
+/// background, the NSAppearance that decides what a scroller looks like — since
+/// those are snapshots taken at build time, not bindings.
+- (void)observePaletteChanges
+{
+    __weak INCDAWAppDelegate* weakSelf = self;
+
+    [NSNotificationCenter.defaultCenter
+        addObserverForName:ui::theme::kPaletteChangedNotification
+                    object:nil
+                     queue:NSOperationQueue.mainQueue
+                usingBlock:^(NSNotification* note) {
+                    (void)note;
+                    [weakSelf paletteDidChange];
+                }];
+}
+
+- (void)paletteDidChange
+{
+    if (self.window == nil)
+        return;
+
+    NSAppearance* appearance = [NSAppearance appearanceNamed:ui::theme::paletteIsLight()
+                                                                 ? NSAppearanceNameAqua
+                                                                 : NSAppearanceNameDarkAqua];
+
+    self.window.appearance      = appearance;
+    self.window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
+    ui::theme::refreshViewTree(self.window.contentView);
+
+    // Hosted plugin editors are INCDAW's windows too, but their content is the
+    // plugin's: the ground under it follows the theme, the editor itself is
+    // left alone because it is not ours to repaint.
+    for (NSWindow* window in _editorWindows.allValues) {
+        window.appearance      = appearance;
+        window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
+    }
+}
+
 - (void)persistSettings
 {
     if (!_settingsPath.empty())
@@ -2195,7 +2343,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     // A plugin's own window is INCDAW's window: same ground, same scheme, so a
     // hosted editor does not arrive as a light rectangle over a dark session.
     window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
-    window.appearance      = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    window.appearance      = [NSAppearance appearanceNamed:ui::theme::paletteIsLight()
+                                                              ? NSAppearanceNameAqua
+                                                              : NSAppearanceNameDarkAqua];
 
     [window center];
     [window makeKeyAndOrderFront:nil];
@@ -2384,14 +2534,30 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     __weak INCDAWAppDelegate* weakSelf = self;
 
-    NSWindow* window = [INCDAWInsertParameterPanel
-        makePanelWithTitle:[self displayNameForSlotKey:slotKey]
-                      rows:rows
-                   onWrite:^(std::uint32_t parameterId, double plainValue) {
-                       [weakSelf writeInsertParameter:slotKey
-                                          parameterId:parameterId
-                                           plainValue:plainValue];
-                   }];
+    void (^write)(std::uint32_t, double) = ^(std::uint32_t parameterId, double plainValue) {
+        [weakSelf writeInsertParameter:slotKey
+                           parameterId:parameterId
+                            plainValue:plainValue];
+    };
+
+    NSWindow* window = nil;
+
+    // Tone is the three-band EQ wearing a mixing desk's face: knobs over a
+    // response curve rather than seven sliders. `incdaw.eq` keeps the generic
+    // panel, which is the difference between the two catalogue entries.
+    if (slot->plugin.format == plugins::Format::builtin
+        && slot->plugin.uid == "incdaw.tone")
+        window = [INCDAWTonePanel makePanelWithTitle:[self displayNameForSlotKey:slotKey]
+                                                rows:rows
+                                          sampleRate:_audio != nullptr
+                                                         ? _audio->sampleRate() : 48000.0
+                                             onWrite:write];
+
+    if (window == nil)
+        window = [INCDAWInsertParameterPanel
+            makePanelWithTitle:[self displayNameForSlotKey:slotKey]
+                          rows:rows
+                       onWrite:write];
 
     [window center];
     [window makeKeyAndOrderFront:nil];
@@ -2525,8 +2691,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
             }
         }
 
-        if (values.count > 0)
+        if (values.count > 0) {
             [INCDAWInsertParameterPanel refreshWindow:_panelWindows[key] values:values];
+            [INCDAWTonePanel refreshWindow:_panelWindows[key] values:values];
+        }
     }
 }
 

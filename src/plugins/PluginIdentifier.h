@@ -47,5 +47,6 @@ struct PluginIdentifier {
 /// synth — these names are for a channel that has *chosen* a builtin.
 [[nodiscard]] PluginIdentifier builtinSampler();
 [[nodiscard]] PluginIdentifier builtinSimpleSynth();
+[[nodiscard]] PluginIdentifier builtinPiano();
 
 } // namespace incdaw::plugins

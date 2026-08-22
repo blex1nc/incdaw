@@ -71,6 +71,10 @@ std::string AppSettings::toJson() const
     updatesObject.set("skippedVersion", updates.skippedVersion);
     root.set("updates", std::move(updatesObject));
 
+    Json appearanceObject = Json::object();
+    appearanceObject.set("theme", appearance.themeName);
+    root.set("appearance", std::move(appearanceObject));
+
     return root.dump();
 }
 
@@ -126,6 +130,14 @@ AppSettings AppSettings::fromJson(const std::string& text)
             std::max<std::int64_t>(0, updatesObject["lastChecked"].asInt(0));
 
         settings.updates.skippedVersion = updatesObject["skippedVersion"].asString();
+    }
+
+    const Json& appearanceObject = root["appearance"];
+    if (appearanceObject.isObject()) {
+        // An empty name is a file written by hand with the key blanked out. It
+        // means the default, which is what the field already holds.
+        if (const std::string named = appearanceObject["theme"].asString(); !named.empty())
+            settings.appearance.themeName = named;
     }
 
     return settings;

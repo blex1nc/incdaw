@@ -41,6 +41,13 @@ const std::vector<CatalogueEntry>& catalogue()
         add("incdaw.utility",    "Utility",    [](SampleRate) { return std::make_unique<UtilityEffect>(); });
         add("incdaw.filter",     "Filter",     [](SampleRate) { return std::make_unique<FilterEffect>(); });
         add("incdaw.eq",         "EQ 3-Band",  [](SampleRate) { return std::make_unique<EqEffect>(); });
+
+        // The same three-band EQ under a mixing-desk face: the shell gives
+        // this uid a Bass/Mid/Treble panel with a response curve instead of
+        // seven sliders. One uid, one DSP class — a second tone stack would
+        // be the same filter written twice (CLAUDE.md §34).
+        add("incdaw.tone",       "Tone (Bass/Mid/Treble)",
+            [](SampleRate) { return std::make_unique<EqEffect>(); });
         add("incdaw.saturator",  "Saturator",  [](SampleRate) { return std::make_unique<SaturatorEffect>(); });
         add("incdaw.compressor", "Compressor", [](SampleRate) { return std::make_unique<CompressorEffect>(); });
         add("incdaw.limiter",    "Limiter",    [](SampleRate) { return std::make_unique<LimiterEffect>(); });
