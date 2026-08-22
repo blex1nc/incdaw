@@ -19,6 +19,10 @@ struct BuiltinInstrumentInfo {
 
     const dsp::EffectParameter* parameters;
     std::size_t                 parameterCount;
+
+    /// The presets INCDAW ships for this instrument (A5), in the same
+    /// borrowed-static-storage terms the effect catalogue uses.
+    dsp::FactoryPresetTable presets;
 };
 
 [[nodiscard]] const std::vector<BuiltinInstrumentInfo>& builtinInstruments();

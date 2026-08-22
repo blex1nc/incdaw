@@ -18,6 +18,10 @@ struct BuiltinEffectInfo {
 
     const EffectParameter* parameters;
     std::size_t            parameterCount;
+
+    /// The presets INCDAW ships for this effect (A5). Borrowed static
+    /// storage, like `parameters` — and empty for an effect with none.
+    FactoryPresetTable presets;
 };
 
 [[nodiscard]] const std::vector<BuiltinEffectInfo>& builtinEffects();

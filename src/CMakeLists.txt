@@ -61,6 +61,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/effects/BuiltinEffect.cpp
     engine/dsp/effects/BuiltinEffects.cpp
     engine/dsp/effects/DynamicsEffects.cpp
+    engine/dsp/effects/EffectPresets.cpp
     engine/dsp/effects/ModulationEffects.cpp
     engine/dsp/effects/SpaceEffects.cpp
     engine/dsp/effects/ToneEffects.cpp
@@ -129,6 +130,7 @@ add_library(incdaw_project STATIC
     project/ProjectFile.cpp
     project/MidiCapture.cpp
     project/ParameterRegistry.cpp
+    project/PresetLibrary.cpp
     project/PatternCompiler.cpp
     project/PluginStateFiles.cpp
     project/MidiFile.cpp

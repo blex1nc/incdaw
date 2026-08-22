@@ -1,6 +1,7 @@
 #include "engine/dsp/effects/BuiltinEffects.h"
 
 #include "engine/dsp/effects/DynamicsEffects.h"
+#include "engine/dsp/effects/EffectPresets.h"
 #include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
@@ -34,7 +35,7 @@ const std::vector<CatalogueEntry>& catalogue()
             const auto probe = factory(SampleRate{48000.0});
 
             rows.push_back({{uid, displayName, probe->parameters(),
-                             probe->parameterCount()},
+                             probe->parameterCount(), effectFactoryPresets(uid)},
                             std::move(factory)});
         };
 

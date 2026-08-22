@@ -8,6 +8,28 @@ public version yet.
 
 ## [Unreleased]
 
+### Sound — presets for every builtin instrument and effect — 2026-08-23
+
+- **A preset is a file.** `<Application Support>/INCDAW/Presets/<uid>/<Name>.json`,
+  versioned, one folder per instrument or effect, named by the file rather
+  than by anything inside it — so a sound can be copied between machines,
+  mailed, or kept in a repository without INCDAW being open. The theme
+  folder's rules are the ones followed: a copy renamed in Finder is the
+  name the user now means, and what INCDAW ships cannot be overwritten,
+  renamed or deleted.
+- **Factory presets, compiled in.** Every catalogue entry that has
+  parameters ships a handful — four EQ curves, three reverb spaces, three
+  compressor settings, five piano voicings, and so on. The two meters ship
+  none, because a preset of no parameters stores nothing. "Default" is not
+  among them: it is synthesised from the catalogue's own default values, so
+  there is one copy of those numbers rather than two that can drift.
+- **A preset names a subset.** Anything it leaves out keeps the value the
+  channel or the insert already had, which is what lets somebody audition
+  three reverb characters without losing the blend they set.
+- **Untrusted input, treated as such.** A document from a newer INCDAW, one
+  belonging to a different effect, one truncated by an unclean shutdown —
+  each degrades into "no preset" rather than into a wrong sound.
+
 ### UI — the mixer gets a dock, and the desk gets a plugin picker — 2026-08-23
 
 - **The selected strip's whole chain, down the right edge.** The strips

@@ -38,6 +38,29 @@ struct EffectParameter {
     bool          stepped      = false;
 };
 
+/// One stored parameter value: the whole content of a preset, and the same
+/// shape whether the preset was compiled in or read back off disk.
+struct PresetValue {
+    std::uint32_t parameterId = 0;
+    double        value       = 0.0;
+};
+
+/// A preset that ships with INCDAW. It names a *subset* of the parameters —
+/// anything it leaves out keeps the value it already had, which is what makes
+/// "Air Lift" usable on top of an EQ somebody has already dialled in.
+struct FactoryPreset {
+    const char*        name       = "";
+    const PresetValue* values     = nullptr;
+    std::size_t        valueCount = 0;
+};
+
+/// A borrowed view of one catalogue entry's factory presets. The rows are
+/// static storage, exactly as the parameter tables are.
+struct FactoryPresetTable {
+    const FactoryPreset* items = nullptr;
+    std::size_t          count = 0;
+};
+
 /// The shared base of every builtin effect.
 ///
 /// A builtin effect is an engine Node that also carries the two capability

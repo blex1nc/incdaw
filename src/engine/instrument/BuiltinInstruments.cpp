@@ -4,11 +4,15 @@
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
 
+#include <iterator>
+
 namespace incdaw::engine {
 
 namespace {
 
 using dsp::EffectParameter;
+using dsp::FactoryPreset;
+using dsp::PresetValue;
 
 constexpr EffectParameter samplerParameters[] = {
     {static_cast<std::uint32_t>(SamplerParam::attackSeconds),   "Attack",       0.0,    10.0,     0.002, false},
@@ -48,14 +52,131 @@ constexpr EffectParameter pianoParameters[] = {
     {static_cast<std::uint32_t>(PianoParam::gain),         "Gain",         0.0,  1.0, 0.7,  false},
 };
 
+// ── Factory presets ──────────────────────────────────────────────────────────
+//
+// Each names only the parameters it cares about; anything it leaves out keeps
+// the value the channel already had. The plain defaults are deliberately not
+// among them — PresetLibrary synthesises "Default" from the tables above, so
+// there is one copy of those numbers rather than two.
+
+constexpr PresetValue samplerPluck[] = {
+    {static_cast<std::uint32_t>(SamplerParam::attackSeconds), 0.001},
+    {static_cast<std::uint32_t>(SamplerParam::decaySeconds), 0.25},
+    {static_cast<std::uint32_t>(SamplerParam::sustainLevel), 0.0},
+    {static_cast<std::uint32_t>(SamplerParam::releaseSeconds), 0.15},
+};
+constexpr PresetValue samplerPad[] = {
+    {static_cast<std::uint32_t>(SamplerParam::attackSeconds), 0.6},
+    {static_cast<std::uint32_t>(SamplerParam::decaySeconds), 1.0},
+    {static_cast<std::uint32_t>(SamplerParam::sustainLevel), 0.8},
+    {static_cast<std::uint32_t>(SamplerParam::releaseSeconds), 1.2},
+    {static_cast<std::uint32_t>(SamplerParam::filterMode), 1.0},
+    {static_cast<std::uint32_t>(SamplerParam::filterCutoffHz), 6000.0},
+};
+constexpr PresetValue samplerSweep[] = {
+    {static_cast<std::uint32_t>(SamplerParam::filterMode), 1.0},
+    {static_cast<std::uint32_t>(SamplerParam::filterCutoffHz), 1200.0},
+    {static_cast<std::uint32_t>(SamplerParam::filterResonance), 3.0},
+    {static_cast<std::uint32_t>(SamplerParam::lfoRateHz), 0.4},
+    {static_cast<std::uint32_t>(SamplerParam::lfoToCutoff), 4.0},
+};
+constexpr PresetValue samplerVibrato[] = {
+    {static_cast<std::uint32_t>(SamplerParam::lfoRateHz), 5.5},
+    {static_cast<std::uint32_t>(SamplerParam::lfoToPitch), 0.4},
+};
+
+constexpr FactoryPreset samplerPresets[] = {
+    {"Pluck",         samplerPluck,   std::size(samplerPluck)},
+    {"Pad",           samplerPad,     std::size(samplerPad)},
+    {"Filter Sweep",  samplerSweep,   std::size(samplerSweep)},
+    {"Gentle Vibrato",samplerVibrato, std::size(samplerVibrato)},
+};
+
+constexpr PresetValue synthSawPad[] = {
+    {static_cast<std::uint32_t>(SimpleSynthParam::waveform),
+     static_cast<double>(SimpleSynth::Waveform::sawtooth)},
+    {static_cast<std::uint32_t>(SimpleSynthParam::gain), 0.35},
+    {static_cast<std::uint32_t>(SimpleSynthParam::attackSeconds), 0.45},
+    {static_cast<std::uint32_t>(SimpleSynthParam::decaySeconds), 0.5},
+    {static_cast<std::uint32_t>(SimpleSynthParam::sustainLevel), 0.7},
+    {static_cast<std::uint32_t>(SimpleSynthParam::releaseSeconds), 0.9},
+};
+constexpr PresetValue synthSquareLead[] = {
+    {static_cast<std::uint32_t>(SimpleSynthParam::waveform),
+     static_cast<double>(SimpleSynth::Waveform::square)},
+    {static_cast<std::uint32_t>(SimpleSynthParam::gain), 0.45},
+    {static_cast<std::uint32_t>(SimpleSynthParam::attackSeconds), 0.005},
+    {static_cast<std::uint32_t>(SimpleSynthParam::decaySeconds), 0.12},
+    {static_cast<std::uint32_t>(SimpleSynthParam::sustainLevel), 0.75},
+    {static_cast<std::uint32_t>(SimpleSynthParam::releaseSeconds), 0.12},
+};
+constexpr PresetValue synthSineBass[] = {
+    {static_cast<std::uint32_t>(SimpleSynthParam::waveform),
+     static_cast<double>(SimpleSynth::Waveform::sine)},
+    {static_cast<std::uint32_t>(SimpleSynthParam::gain), 0.6},
+    {static_cast<std::uint32_t>(SimpleSynthParam::attackSeconds), 0.002},
+    {static_cast<std::uint32_t>(SimpleSynthParam::decaySeconds), 0.3},
+    {static_cast<std::uint32_t>(SimpleSynthParam::sustainLevel), 0.5},
+    {static_cast<std::uint32_t>(SimpleSynthParam::releaseSeconds), 0.08},
+};
+
+constexpr FactoryPreset simpleSynthPresets[] = {
+    {"Saw Pad",      synthSawPad,     std::size(synthSawPad)},
+    {"Square Lead",  synthSquareLead, std::size(synthSquareLead)},
+    {"Sine Sub",     synthSineBass,   std::size(synthSineBass)},
+};
+
+constexpr PresetValue pianoConcert[] = {
+    {static_cast<std::uint32_t>(PianoParam::model), static_cast<double>(PianoModel::grand)},
+    {static_cast<std::uint32_t>(PianoParam::tone), 0.1},
+    {static_cast<std::uint32_t>(PianoParam::decay), 1.2},
+    {static_cast<std::uint32_t>(PianoParam::pedalTail), 0.45},
+    {static_cast<std::uint32_t>(PianoParam::stereoSpread), 0.45},
+};
+constexpr PresetValue pianoPop[] = {
+    {static_cast<std::uint32_t>(PianoParam::model), static_cast<double>(PianoModel::brightGrand)},
+    {static_cast<std::uint32_t>(PianoParam::tone), 0.45},
+    {static_cast<std::uint32_t>(PianoParam::hardness), 0.7},
+    {static_cast<std::uint32_t>(PianoParam::hammerNoise), 0.45},
+};
+constexpr PresetValue pianoBallad[] = {
+    {static_cast<std::uint32_t>(PianoParam::model), static_cast<double>(PianoModel::mellow)},
+    {static_cast<std::uint32_t>(PianoParam::tone), -0.35},
+    {static_cast<std::uint32_t>(PianoParam::hardness), 0.3},
+    {static_cast<std::uint32_t>(PianoParam::decay), 1.4},
+};
+constexpr PresetValue pianoTine[] = {
+    {static_cast<std::uint32_t>(PianoParam::model), static_cast<double>(PianoModel::electric)},
+    {static_cast<std::uint32_t>(PianoParam::tone), 0.2},
+    {static_cast<std::uint32_t>(PianoParam::hardness), 0.55},
+    {static_cast<std::uint32_t>(PianoParam::stereoSpread), 0.2},
+};
+constexpr PresetValue pianoBar[] = {
+    {static_cast<std::uint32_t>(PianoParam::model), static_cast<double>(PianoModel::upright)},
+    {static_cast<std::uint32_t>(PianoParam::tone), -0.1},
+    {static_cast<std::uint32_t>(PianoParam::stretchCents), 22.0},
+    {static_cast<std::uint32_t>(PianoParam::hammerNoise), 0.5},
+};
+
+constexpr FactoryPreset pianoPresets[] = {
+    {"Concert Grand", pianoConcert, std::size(pianoConcert)},
+    {"Pop Bright",    pianoPop,     std::size(pianoPop)},
+    {"Ballad Mellow", pianoBallad,  std::size(pianoBallad)},
+    {"Electric Tine", pianoTine,    std::size(pianoTine)},
+    {"Bar Upright",   pianoBar,     std::size(pianoBar)},
+};
+
 } // namespace
 
 const std::vector<BuiltinInstrumentInfo>& builtinInstruments()
 {
     static const std::vector<BuiltinInstrumentInfo> infos = {
-        {"incdaw.sampler", "Sampler", samplerParameters, 10},
-        {"incdaw.simplesynth", "Reference Synth", simpleSynthParameters, 6},
-        {"incdaw.piano", "INCDAW Piano", pianoParameters, 10},
+        {"incdaw.sampler", "Sampler", samplerParameters, 10,
+         {samplerPresets, std::size(samplerPresets)}},
+        {"incdaw.simplesynth", "Reference Synth", simpleSynthParameters, 6,
+         {simpleSynthPresets, std::size(simpleSynthPresets)}},
+        {"incdaw.piano", "INCDAW Piano", pianoParameters, 10,
+         {pianoPresets, std::size(pianoPresets)}},
     };
 
     return infos;
