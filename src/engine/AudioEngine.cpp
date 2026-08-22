@@ -155,6 +155,7 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
     profiler_.configure(sampleRateHz, blockSize);
     midiInput_.resetCounters();
     midiOutput_.resetCounters();
+    midiClock_.reset();
     outputMidi_.clear();
 
     // The sender thread lives exactly as long as the device does: nothing can
@@ -223,19 +224,24 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
     // host time so the system delivers each message on its own frame.
     outputMidi_.clear();
 
+    // Declared out here so the clock can be generated from the same plan even
+    // in the blocks before a graph exists: gear that follows INCDAW's clock
+    // should not have to wait for a project to be compiled.
+    BlockSegment plan[Transport::maxSegmentsPerBlock];
+    std::size_t  segmentCount = 0;
+    bool         playing      = false;
+
     if (CompiledGraph* graph = active_.load(std::memory_order_acquire)) {
         // The transport decides how this block is divided. A loop wrap in the
         // middle of a block becomes two segments, each rendered with its own
         // timeline position, so events land on their exact frame rather than
         // being rounded to the block boundary.
-        BlockSegment      plan[Transport::maxSegmentsPerBlock];
-        const std::size_t segmentCount =
-            transport_.processBlock(frameCount, plan, Transport::maxSegmentsPerBlock);
+        segmentCount = transport_.processBlock(frameCount, plan, Transport::maxSegmentsPerBlock);
 
         // Read once, after the plan: a stopped transport hands every block the
         // same position, and the nodes that read the timeline have to know
         // that rather than replaying the window under the playhead.
-        const bool playing = transport_.isPlaying();
+        playing = transport_.isPlaying();
 
         // Publish this block's host-time <-> timeline correlation for whoever
         // needs to place captured audio. Seqlock: odd while writing.
@@ -282,6 +288,10 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
     // post-graph, post-containment — so what a grab retrieves is what was
     // actually heard.
     logger_.log(outputChannels, channelCount, frameCount);
+
+    // The clock, from the same plan the graph rendered — one authority for
+    // time, inside INCDAW and outside it alike (docs/AUDIO_ENGINE.md §5).
+    midiClock_.generate(outputMidi_, plan, segmentCount, transport_.tempoMap(), playing, frameCount);
 
     // Queued last, so anything the block produced is included, and never sent
     // from here: this hands a trivially copyable struct to a lock-free queue

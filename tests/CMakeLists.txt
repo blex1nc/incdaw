@@ -16,6 +16,7 @@ add_executable(incdaw_tests
     unit/ProjectFormatTests.cpp
     unit/MidiTests.cpp
     unit/MidiOutputTests.cpp
+    unit/MidiClockTests.cpp
     unit/CommandTests.cpp
     unit/ProjectSessionTests.cpp
     unit/StoppedTransportTests.cpp

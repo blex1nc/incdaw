@@ -130,6 +130,7 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     NSButton*      _allMidiSources;
     NSView*        _midiList;
     NSPopUpButton* _midiOutput;
+    NSPopUpButton* _midiClockRole;
     NSTextField*   _status;
 
     NSMutableArray<NSButton*>* _midiChecks;
@@ -338,6 +339,18 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
                      toContent:page
                            atY:&y
                          width:size.width - pageInset * 2 - labelWidth];
+
+    _midiClockRole = [self addRow:@"Beat clock"
+                        toContent:page
+                              atY:&y
+                            width:size.width - pageInset * 2 - labelWidth];
+
+    // Off by default. A clock drives whatever is listening, and switching one
+    // on is a decision about someone else's hardware.
+    [_midiClockRole addItemWithTitle:@"Off"];
+    _midiClockRole.itemArray.firstObject.representedObject = @"off";
+    [_midiClockRole addItemWithTitle:@"Send"];
+    _midiClockRole.lastItem.representedObject = @"send";
 
     y -= 6.0;
 
@@ -1078,6 +1091,10 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     [self selectIdentifier:fromUtf8(_settings->midiOutputIdentifier)
                    inPopup:_midiOutput
               missingTitle:fromUtf8(_settings->midiOutputIdentifier)];
+
+    [self selectIdentifier:fromUtf8(_settings->midiClockRole)
+                   inPopup:_midiClockRole
+              missingTitle:@"Off"];
 }
 
 - (void)rebuildMidiList
@@ -1173,6 +1190,7 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     // layer already uses, so an all-checked list is stored as no list at all
     // and keeps working when the hardware changes.
     _settings->midiOutputIdentifier = [self selectedIdentifierOf:_midiOutput].UTF8String;
+    _settings->midiClockRole        = [self selectedIdentifierOf:_midiClockRole].UTF8String;
 
     _settings->midiInputIdentifiers.clear();
     if (_allMidiSources.state != NSControlStateValueOn) {

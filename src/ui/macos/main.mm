@@ -1819,6 +1819,15 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     }
 
     _audio->midiOutput().setDevice(_midiDevice.get());
+
+    // The clock only means anything with somewhere to send it, so the setting
+    // and the destination are read together: choosing "Send" with no
+    // destination is off, not an error.
+    const bool sendClock = _settings.midiClockRole == "send"
+                        && !_settings.midiOutputIdentifier.empty();
+
+    _audio->midiClock().setRole(sendClock ? engine::MidiClockRole::send
+                                          : engine::MidiClockRole::off);
 }
 
 // ── The update check ─────────────────────────────────────────────────────────

@@ -8,6 +8,40 @@ public version yet.
 
 ## [Unreleased]
 
+### MIDI — a beat clock the gear can actually follow — 2026-08-23
+
+- **24 pulses to the quarter, off the tempo map.** Each pulse is placed on
+  the frame the map says its tick falls on, so a tempo change *written on
+  the timeline* is followed by the hardware rather than approximated by
+  it. A generator that read the tempo once, or averaged it, would report
+  one number for a song that has two; the test for this asserts the pulse
+  spacing changes from 1000 frames to 2000 across a 120 → 60 change.
+- **The clock runs while the transport is stopped.** At the tempo under
+  the playhead. An arpeggiator or a tempo-synced delay needs to know what
+  tempo to be at *before* anyone presses play, and a clock that only
+  exists during playback tells it nothing until it is too late.
+- **Start, stop, continue and song position.** Playing from the top sends
+  start; playing from anywhere else sends stop, a song position pointer
+  and continue — in that order, because a bare pointer arriving mid-flight
+  is one a receiver is entitled to ignore. A seek sends the same bracket.
+- **A loop wrap is bracketed on the frame it happens on**, not at the
+  block boundary. Without it the gear plays straight past the loop point
+  while INCDAW is back at the top, and the two drift apart by exactly the
+  loop length — every time round.
+- **Settings → MIDI → Beat clock**, off by default. Choosing Send with no
+  destination selected is off rather than an error: a clock with nowhere
+  to go is not a configuration mistake worth a dialog.
+
+**Also fixed** — the input parser read every system-common message as
+three bytes. Song position pointer is three, but quarter frame and song
+select are two, and over-reading either swallows the message behind it.
+The receive half of transport sync depends on that being right.
+
+**Not yet** — receiving. The role setting has one direction in it today;
+slaving INCDAW's transport to an external clock is the other half of this
+item and is the next increment.
+
+
 ### MIDI — the port that only went one way now goes both — 2026-08-23
 
 - **A destination you can choose.** `platform::MidiDevice` enumerated

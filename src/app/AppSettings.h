@@ -70,6 +70,13 @@ struct AppSettings {
     /// (platform/MidiDevice.h).
     std::string midiOutputIdentifier;
 
+    /// What INCDAW does about MIDI beat clock: "off" or "send".
+    ///
+    /// A string rather than an enum so that this header does not have to know
+    /// about the engine, and so that a value a future build writes and this one
+    /// does not understand reads as "off" rather than as something arbitrary.
+    std::string midiClockRole = "off";
+
     /// Where the window was, and what it was showing.
     struct Workspace {
         /// All four zero means "never placed" — the window centres itself.

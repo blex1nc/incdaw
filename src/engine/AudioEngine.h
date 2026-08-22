@@ -7,6 +7,7 @@
 #include "engine/graph/RenderGraph.h"
 #include "engine/midi/MidiBuffer.h"
 #include "engine/midi/MidiInput.h"
+#include "engine/midi/MidiClock.h"
 #include "engine/midi/MidiOutput.h"
 #include "engine/transport/Transport.h"
 #include "platform/AudioDevice.h"
@@ -163,6 +164,11 @@ public:
     [[nodiscard]] MidiOutput&       midiOutput()       noexcept { return midiOutput_; }
     [[nodiscard]] const MidiOutput& midiOutput() const noexcept { return midiOutput_; }
 
+    /// MIDI beat clock generation. Off unless the user asks for it in
+    /// Settings; the pulses it produces join the block's outgoing buffer.
+    [[nodiscard]] MidiClockGenerator&       midiClock()       noexcept { return midiClock_; }
+    [[nodiscard]] const MidiClockGenerator& midiClock() const noexcept { return midiClock_; }
+
     /// The messages collected for the block just rendered. Read from the audio
     /// thread by nodes; exposed here for diagnostics and tests.
     [[nodiscard]] const MidiBuffer& lastBlockMidi() const noexcept { return blockMidi_; }
@@ -214,6 +220,7 @@ private:
     Transport                              transport_;
     MidiInput                              midiInput_;
     MidiOutput                             midiOutput_;
+    MidiClockGenerator                     midiClock_;
     MidiBuffer                             blockMidi_;
     MidiBuffer                             outputMidi_;   ///< what this block sends out
     MidiBuffer                             segmentMidi_;

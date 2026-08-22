@@ -55,6 +55,7 @@ std::string AppSettings::toJson() const
         inputs.append(Json(identifier));
     midiObject.set("inputs", std::move(inputs));
     midiObject.set("output", midiOutputIdentifier);
+    midiObject.set("clockRole", midiClockRole);
     root.set("midi", std::move(midiObject));
 
     Json workspaceObject = Json::object();
@@ -112,6 +113,12 @@ AppSettings AppSettings::fromJson(const std::string& text)
     }
 
     settings.midiOutputIdentifier = root["midi"]["output"].asString();
+
+    // Anything this build does not recognise is off. A clock is something the
+    // user switched on deliberately; guessing at an unknown value would drive
+    // hardware nobody asked to drive.
+    const std::string clockRole = root["midi"]["clockRole"].asString();
+    settings.midiClockRole = clockRole == "send" ? clockRole : std::string{"off"};
 
     const Json& workspaceObject = root["workspace"];
     if (workspaceObject.isObject()) {

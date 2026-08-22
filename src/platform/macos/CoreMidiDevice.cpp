@@ -294,12 +294,22 @@ void CoreMidiDevice::handlePackets(const MIDIPacketList& packets) noexcept
             const int type = status & 0xF0;
             UInt16 length = 3;
 
-            if (type == 0xC0 || type == 0xD0)
+            if (type == 0xC0 || type == 0xD0) {
                 length = 2;
-            else if (status >= 0xF8)
-                length = 1;        // system realtime
-            else if (status == 0xF0)
+            } else if (status >= 0xF8) {
+                length = 1;        // system realtime: clock, start, stop, continue
+            } else if (status == 0xF0) {
                 break;             // sysex: not handled in this phase
+            } else if (type == 0xF0) {
+                // System common. Song position pointer is three bytes and the
+                // transport-sync path depends on it; quarter frame and song
+                // select are two, and reading either as three swallows the
+                // message behind it.
+                if (status == 0xF1 || status == 0xF3)
+                    length = 2;
+                else if (status != 0xF2)
+                    length = 1;    // tune request, end-of-sysex, undefined
+            }
 
             if (offset + length > packet->length)
                 break;
