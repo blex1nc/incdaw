@@ -50,6 +50,13 @@ void AudioClipNode::process(const ProcessContext& context) noexcept
             const std::size_t sourceChannel =
                 channel < sourceChannels ? channel : sourceChannels - 1;
 
+            // Pan folds into the clip's gain once per channel, not per sample:
+            // the inner loop stays the single multiply it was.
+            const Sample gain = clip.gain
+                              * (channel == 0   ? clip.panLeft
+                                 : channel == 1 ? clip.panRight
+                                                : Sample{1});
+
             // Where this range's samples come from: direct indexing for a
             // preloaded clip, the streamer's window (via the scratch) for a
             // streamed one. Both paths then run the same gain-and-fade loop.
@@ -89,7 +96,7 @@ void AudioClipNode::process(const ProcessContext& context) noexcept
                 if (sourceIndex >= sourceEnd)
                     break;   // past the decoded audio: the rest is silence
 
-                Sample value = source[static_cast<std::size_t>(sourceIndex)] * clip.gain;
+                Sample value = source[static_cast<std::size_t>(sourceIndex)] * gain;
 
                 // Linear fades, positioned at the clip's edges.
                 if (clip.fadeInFrames > 0 && inClip < clip.fadeInFrames)

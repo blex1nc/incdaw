@@ -236,4 +236,29 @@ private:
     std::vector<bool> previous_;
 };
 
+/// Placement pan, -1 hard left to +1 hard right. Mergeable, so dragging the
+/// control is one undo entry.
+///
+/// The value is a property of the placement, not of the mixer strip the track
+/// feeds: two copies of the same audio on the same track can sit in different
+/// places in the image.
+class SetClipPanCommand final : public Command {
+public:
+    SetClipPanCommand(ClipIds clips, double pan) : clips_(std::move(clips)), pan_(pan) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.setPan"; }
+    [[nodiscard]] std::string name() const override { return "Set Clip Pan"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    [[nodiscard]] bool canMergeWith(const Command& next) const noexcept override;
+    void mergeWith(const Command& next) override;
+
+private:
+    ClipIds             clips_;
+    double              pan_ = 0.0;
+    std::vector<double> previous_;
+};
+
 } // namespace incdaw::app

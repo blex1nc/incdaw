@@ -44,6 +44,15 @@ public:
         bool          muted        = false;
         FrameCount    fadeInFrames  = 0;
         FrameCount    fadeOutFrames = 0;
+
+        /// Per-clip placement pan, already resolved to channel gains by the
+        /// compiler through the mixer's own pan law — the node applies the
+        /// numbers rather than knowing the law, exactly as it does for the
+        /// normalize factor already folded into `gain`. Unity here means
+        /// centre, so an unpanned clip is bit-identical to one with no pan at
+        /// all. Channels beyond the first two are left at unity.
+        Sample        panLeft      = 1.0f;
+        Sample        panRight     = 1.0f;
     };
 
     /// Build-time only; never after the graph is running.

@@ -509,4 +509,50 @@ void SetClipMutedCommand::undo(Project& project)
     }
 }
 
+// ── SetClipPanCommand ─────────────────────────────────────────────────────────
+
+bool SetClipPanCommand::execute(Project& project)
+{
+    const double pan = std::clamp(pan_, -1.0, 1.0);
+
+    previous_.clear();
+    previous_.reserve(clips_.size());
+
+    bool changed = false;
+
+    for (const EntityId id : clips_) {
+        Clip* clip = project.findClip(id);
+        if (clip == nullptr) {
+            previous_.push_back(0.0);
+            continue;
+        }
+
+        previous_.push_back(clip->pan);
+        changed = changed || clip->pan != pan;
+        clip->pan = pan;
+    }
+
+    return changed;
+}
+
+void SetClipPanCommand::undo(Project& project)
+{
+    for (std::size_t index = 0; index < clips_.size() && index < previous_.size(); ++index) {
+        if (Clip* clip = project.findClip(clips_[index]))
+            clip->pan = previous_[index];
+    }
+}
+
+bool SetClipPanCommand::canMergeWith(const Command& next) const noexcept
+{
+    const auto* other = dynamic_cast<const SetClipPanCommand*>(&next);
+    return other != nullptr && other->clips_ == clips_;
+}
+
+void SetClipPanCommand::mergeWith(const Command& next)
+{
+    if (const auto* other = dynamic_cast<const SetClipPanCommand*>(&next))
+        pan_ = other->pan_;
+}
+
 } // namespace incdaw::app

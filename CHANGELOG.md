@@ -8,6 +8,20 @@ public version yet.
 
 ## [Unreleased]
 
+### Playlist — a clip can be placed in the stereo image — 2026-08-23
+
+- **Per-clip pan.** `Clip::pan` has been written to the project file since
+  the format's first version and read back faithfully ever since; nothing
+  could set it and nothing played it. It now has a command, an undo entry
+  that folds a whole drag into one, and a **Pan…** item in the playlist's
+  clip menu that acts on the selection.
+- **One pan law.** The clip's gains are resolved at compile time through
+  `MixerStripNode::panGains`, the same constant-power law the mixer uses,
+  re-referenced so centre is unity — an unpanned clip renders bit-identical
+  to one that never had a pan field, so no existing project changes level.
+  The audio node applies the two numbers once per channel per block, which
+  leaves its inner loop the single multiply it was.
+
 ### UI — the mixer gets a dock, and the desk gets a plugin picker — 2026-08-23
 
 - **The selected strip's whole chain, down the right edge.** The strips

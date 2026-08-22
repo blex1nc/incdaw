@@ -1013,6 +1013,13 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
     [menu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem* pan = [menu addItemWithTitle:@"Pan\u2026"
+                                      action:@selector(panFromMenu:)
+                               keyEquivalent:@""];
+    pan.target = self;
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem* remove = [menu addItemWithTitle:@"Remove"
                                          action:@selector(removeFromMenu:)
                                   keyEquivalent:@""];
@@ -1052,6 +1059,51 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     (void)sender;
     [self commit:std::make_unique<app::SetClipMutedCommand>(_model->selection(), false)];
+}
+
+- (void)panFromMenu:(id)sender
+{
+    (void)sender;
+    [self editPan];
+}
+
+/// One dialog for the whole selection, seeded from the first clip in it: a
+/// multi-clip edit sets them all to one value, which is what a single control
+/// over several clips can honestly mean.
+- (void)editPan
+{
+    const app::ClipIds& selection = _model->selection();
+    if (selection.empty())
+        return;
+
+    double current = 0.0;
+    for (const project::EntityId id : selection) {
+        if (const project::Clip* clip = _project->findClip(id)) {
+            current = clip->pan;
+            break;
+        }
+    }
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Clip pan";
+    alert.informativeText = @"Left \u2013 centre \u2013 right.";
+    [alert addButtonWithTitle:@"Set"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSSlider* slider = [NSSlider sliderWithValue:current * 100.0
+                                        minValue:-100.0
+                                        maxValue:100.0
+                                          target:nil
+                                          action:nil];
+    slider.frame = NSMakeRect(0, 0, 220, 24);
+    slider.numberOfTickMarks = 3;
+    slider.allowsTickMarkValuesOnly = NO;
+    alert.accessoryView = slider;
+
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return;
+
+    [self commit:std::make_unique<app::SetClipPanCommand>(selection, slider.doubleValue / 100.0)];
 }
 
 - (void)removeFromMenu:(id)sender

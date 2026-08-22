@@ -770,6 +770,22 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                     }
                 }
 
+                // Placement pan, through the mixer's own law so there is one
+                // pan law in the application. That law is -3 dB at centre;
+                // dividing by the centre gain re-references it to unity there,
+                // so an unpanned clip plays at exactly the level it always did
+                // and only a panned one changes.
+                if (clip.pan != 0.0) {
+                    engine::Sample left  = 1.0f;
+                    engine::Sample right = 1.0f;
+                    engine::dsp::MixerStripNode::panGains(clip.pan, left, right);
+
+                    constexpr auto centre =
+                        static_cast<engine::Sample>(0.70710678118654752440);
+                    placed.panLeft  = left / centre;
+                    placed.panRight = right / centre;
+                }
+
                 node->addClip(std::move(placed));
             }
 
