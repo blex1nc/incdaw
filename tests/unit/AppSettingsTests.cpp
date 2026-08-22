@@ -238,3 +238,32 @@ TEST_CASE("a nonsense last-checked stamp leaves the check due rather than locked
 
     CHECK(app::AppSettings::load(file).updates.lastCheckedUnix == 0);
 }
+
+TEST_CASE("the appearance theme survives a round trip and defaults to Midnight")
+{
+    app::AppSettings settings;
+    CHECK(settings.appearance.themeName == "Midnight");
+
+    settings.appearance.themeName = "Neon";
+
+    const app::AppSettings restored = app::AppSettings::fromJson(settings.toJson());
+    CHECK(restored.appearance.themeName == "Neon");
+}
+
+TEST_CASE("a settings file written before themes existed still names a theme")
+{
+    // Every settings.json already on disk looks like this: no appearance
+    // object at all. It must resolve to the scheme the shell was designed
+    // against rather than to an empty name nothing answers to.
+    const app::AppSettings older = app::AppSettings::fromJson(
+        R"({"format":"incdaw-settings","version":1,"audio":{"sampleRate":44100.0}})");
+
+    CHECK(older.appearance.themeName == "Midnight");
+    CHECK(older.audio.sampleRate == doctest::Approx(44100.0));
+
+    // A blanked-out key is a hand-edited file, not a request for no theme.
+    const app::AppSettings blank =
+        app::AppSettings::fromJson(R"({"appearance":{"theme":""}})");
+
+    CHECK(blank.appearance.themeName == "Midnight");
+}
