@@ -5,6 +5,7 @@
 #include "app/commands/ChannelCommands.h"
 #include "app/Browser.h"
 #include "app/commands/ImportCommands.h"
+#include "app/commands/NoteCommands.h"
 #include "app/commands/SamplerCommands.h"
 #include "app/commands/StepCommands.h"
 #include "engine/instrument/BuiltinInstruments.h"
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,7 +40,7 @@ NSRect box(app::ChannelRackModel::Rect rect)
 
 /// What a drag started on, so that dragging keeps doing the same thing even
 /// when the cursor leaves the control it began in.
-enum class RackDrag { none, volume, pan, paintSteps };
+enum class RackDrag { none, volume, pan, paintSteps, stepLevel };
 
 } // namespace
 
@@ -61,6 +63,12 @@ enum class RackDrag { none, volume, pan, paintSteps };
     double            _knobDragStart;
     BOOL              _paintOn;
     int               _lastPaintedStep;
+
+    /// The note a level drag is editing: its index in the channel's event
+    /// vector, captured when the drag began. Velocity edits never re-sort the
+    /// vector, so the index stays valid for the whole gesture — the same
+    /// reasoning NoteCommands.h documents for the Piano Roll's own edits.
+    std::size_t       _levelNoteIndex;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -89,6 +97,7 @@ enum class RackDrag { none, volume, pan, paintSteps };
     _lastPaintedStep = -1;
     _knobDragStartY = 0.0;
     _knobDragStart  = 0.0;
+    _levelNoteIndex = app::noStep;
 
     return self;
 }
@@ -344,14 +353,22 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
         const std::vector<project::MidiEvent>* events = pattern->events(channel.id);
 
         for (int step = _model->firstStep(); step < lastStep; ++step) {
-            const bool on = events != nullptr
-                         && app::noteAtStep(*events, _model->tickForStep(step), _model->stepTicks(),
-                                            channel.stepKey) != app::noStep;
+            const std::size_t note =
+                events != nullptr
+                    ? app::noteAtStep(*events, _model->tickForStep(step), _model->stepTicks(),
+                                      channel.stepKey)
+                    : app::noStep;
+
+            // The step's own velocity, not a fixed brightness: a pattern
+            // programmed with dynamics must look like one.
+            const double level = note != app::noStep
+                                     ? static_cast<double>((*events)[note].value) / 127.0
+                                     : 1.0;
 
             // Every fourth step is lighter, so the beat is readable without a
             // ruler above the grid.
-            theme::drawStepPad(box(_model->stepRect(row, step)), colour, on, (step % 4) == 0,
-                               step == playheadStep, true);
+            theme::drawStepPad(box(_model->stepRect(row, step)), colour, note != app::noStep,
+                               (step % 4) == 0, step == playheadStep, true, level);
         }
     }
 
@@ -464,13 +481,32 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
             _knobDragStart  = channel.pan;
             return;
 
-        case app::ChannelRackModel::Zone::step:
+        case app::ChannelRackModel::Zone::step: {
+            // Shift turns the pad into a level control: how hard the step
+            // hits, dragged up and down over it. A programmed step only —
+            // there is no level to set on a step that is not there, and
+            // shift-dragging across an empty grid must not start writing one.
+            const std::size_t note = [self noteIndexForStep:hit.step channel:channelId];
+
+            if ((event.modifierFlags & NSEventModifierFlagShift) != 0 && note != app::noStep) {
+                const std::vector<project::MidiEvent>* events =
+                    [self currentPattern]->events(channelId);
+
+                _drag           = RackDrag::stepLevel;
+                _dragChannel    = channelId;
+                _levelNoteIndex = note;
+                _knobDragStartY = point.y;
+                _knobDragStart  = static_cast<double>((*events)[note].value);
+                return;
+            }
+
             _drag        = RackDrag::paintSteps;
             _dragChannel = channelId;
             [self toggleStep:hit.step channel:channelId];
             _paintOn         = [self stepIsOn:hit.step channel:channelId];
             _lastPaintedStep = hit.step;
             return;
+        }
 
         case app::ChannelRackModel::Zone::none:
             return;
@@ -503,6 +539,16 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
         return;
     }
 
+    if (_drag == RackDrag::stepLevel) {
+        const int velocity = static_cast<int>(std::lround(
+            app::ChannelRackModel::velocityForDrag(_knobDragStart, _knobDragStartY, point.y)));
+
+        [self merge:std::make_unique<app::SetVelocityCommand>(
+                        project::EntityId{self.patternIdValue}, _dragChannel,
+                        app::NoteIndices{_levelNoteIndex}, velocity)];
+        return;
+    }
+
     const auto hit = _model->hitTest([self channelCount], [self currentPattern], point.x, point.y);
     if (hit.zone != app::ChannelRackModel::Zone::step || hit.step == _lastPaintedStep)
         return;
@@ -519,7 +565,8 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
 - (void)mouseUp:(NSEvent*)event
 {
     (void)event;
-    _drag = RackDrag::none;
+    _drag           = RackDrag::none;
+    _levelNoteIndex = app::noStep;
 }
 
 - (void)rightMouseDown:(NSEvent*)event
@@ -529,6 +576,17 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
         return;
 
     const project::EntityId channelId = _project->channels()[hit.row].id;
+
+    // Over the grid, the right button clears — the gesture a step sequencer
+    // has always had for taking a step out without hunting for the one that is
+    // lit. The channel's menu belongs to the row's header, where there is
+    // nothing to erase.
+    if (hit.zone == app::ChannelRackModel::Zone::step) {
+        if ([self stepIsOn:hit.step channel:channelId])
+            [self toggleStep:hit.step channel:channelId];
+
+        return;
+    }
 
     NSMenu* menu = [[NSMenu alloc] init];
 
@@ -759,22 +817,29 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
 
 // ── Edits ────────────────────────────────────────────────────────────────────
 
-- (BOOL)stepIsOn:(int)step channel:(project::EntityId)channelId
+/// The note occupying a step, or `app::noStep`. One answer to "is this step
+/// on?", so the grid, the paint gesture and the level drag cannot disagree.
+- (std::size_t)noteIndexForStep:(int)step channel:(project::EntityId)channelId
 {
     const project::Pattern* pattern = [self currentPattern];
     if (pattern == nullptr)
-        return NO;
+        return app::noStep;
 
     const std::vector<project::MidiEvent>* events = pattern->events(channelId);
     if (events == nullptr)
-        return NO;
+        return app::noStep;
 
     const project::Channel* channel = _project->findChannel(channelId);
     if (channel == nullptr)
-        return NO;
+        return app::noStep;
 
     return app::noteAtStep(*events, _model->tickForStep(step), _model->stepTicks(),
-                           channel->stepKey) != app::noStep;
+                           channel->stepKey);
+}
+
+- (BOOL)stepIsOn:(int)step channel:(project::EntityId)channelId
+{
+    return [self noteIndexForStep:step channel:channelId] != app::noStep;
 }
 
 - (void)toggleStep:(int)step channel:(project::EntityId)channelId

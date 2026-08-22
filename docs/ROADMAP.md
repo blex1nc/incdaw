@@ -548,6 +548,20 @@ two labelled things in the pane ride as a recycled CATextLayer pool above it.
 view's height without overlapping; a click in the ruler draws nothing; and key
 and y still round-trip with the band in the way, asserted per key.
 
+### Increment 15 — the rack's step levels — DONE 2026-08-23
+
+A step sequencer whose steps are all equally loud programs flat patterns.
+Shift-dragging a pad now sets its velocity, 1..127, shown as both a dimmed
+channel colour and a foot rising from the pad's low edge; the right button
+clears a step over the grid, leaving the channel's menu to the row header.
+No step-level command was added: a step IS a note, so the rack commits the
+Piano Roll's `SetVelocityCommand` and the two editors cannot drift.
+
+**Exit criterion (met):** a level drag is one undo entry that returns to the
+velocity the step was programmed at; the step stays programmed at any level
+(the floor is 1, not 0); and the drag's arithmetic is relative to where it
+began, asserted rather than eyeballed.
+
 ### Remaining, by gate
 
 - **Dependency approval required (§41):** AU hosting, then VST3; FLAC and

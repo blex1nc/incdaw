@@ -173,6 +173,20 @@ public:
         return knobForDrag(startVolume, startY, y, 0.0, 1.0);
     }
 
+    /// A step's velocity after a vertical drag, 1..127.
+    ///
+    /// The same relative-from-the-start rule the knobs use, and for the same
+    /// reason: a level read back from the project on every move would compound
+    /// rounding and drift away from the cursor. Zero is deliberately not
+    /// reachable — a step at velocity zero is a step that is on and silent,
+    /// which looks like a bug to whoever programmed it. Clearing a step is the
+    /// other gesture.
+    [[nodiscard]] static double velocityForDrag(double startVelocity, double startY,
+                                                double y) noexcept
+    {
+        return knobForDrag(startVelocity, startY, y, 1.0, 127.0);
+    }
+
 private:
     Layout layout_;
     Tick   stepTicks_ = incdaw::engine::ticksPerQuarterNote / 4;

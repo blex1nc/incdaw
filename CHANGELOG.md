@@ -8,6 +8,48 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### UI — the rack's steps get a level — 2026-08-23
+
+**Added**
+
+- **Step levels.** Shift-drag up or down over a programmed step and it
+  sets how hard that step hits, 1..127. The pad shows it two ways at
+  once: the channel colour dims with the level, and a foot rises from
+  the pad's low edge to the value. Brightness alone is hard to compare
+  between two pads that are not side by side; a measured edge is not.
+  A drag is one undo entry, like every other continuous gesture in the
+  rack.
+- **Right-click clears a step.** Over the grid, the right button takes a
+  step out — the gesture a step sequencer has always had for erasing
+  without hunting for the lit pad. The channel's context menu still
+  belongs to the row's header, where there is nothing to erase.
+
+**Changed**
+
+- `theme::drawStepPad` takes a `level`, defaulted so unlit pads and
+  other callers are unaffected. It is the same velocity-to-brightness
+  rule the Piano Roll draws its notes with, so a step and a note read
+  as the same object seen in two editors.
+- The rack draws each step from the note that occupies it rather than
+  from a bool, through one `noteIndexForStep:` that the grid, the paint
+  gesture and the level drag all share.
+
+**Notes**
+
+- A step IS a note (`StepCommands.h`), so a level is an ordinary
+  velocity edit: the rack reuses the Piano Roll's `SetVelocityCommand`
+  rather than inventing a step-level command. Editing the same step in
+  either editor is the same undo entry kind, and neither can drift.
+- The floor is velocity 1, not 0. A step at zero is lit and silent,
+  which reads as a bug to whoever programmed it; clearing a step is the
+  other gesture.
+
+**Files**
+
+- `src/app/ChannelRackModel.h` — `velocityForDrag`
+- `src/ui/macos/ChannelRackView.mm`, `src/ui/macos/Theme.{h,mm}`
+- `tests/unit/ChannelRackTests.cpp` — 2 new cases
+
 ### UI — the Piano Roll gets its ruler, its ghosts and its key — 2026-08-23
 
 **Added**

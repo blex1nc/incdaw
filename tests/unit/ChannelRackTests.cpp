@@ -758,3 +758,70 @@ TEST_CASE("scrolling does not move where the bars appear to start")
     CHECK(model.stepOffset(8) - model.stepOffset(7)
           == doctest::Approx(pitch + layout.stepGroupGap));
 }
+
+// ── Step levels ───────────────────────────────────────────────────────────────
+
+TEST_CASE("a step level drag is vertical, relative, and never reaches silence")
+{
+    using app::ChannelRackModel;
+
+    // Up is louder, the same direction the knobs turn.
+    CHECK(ChannelRackModel::velocityForDrag(64.0, 100.0, 40.0) > 64.0);
+    CHECK(ChannelRackModel::velocityForDrag(64.0, 100.0, 160.0) < 64.0);
+
+    // The travel is the whole 1..127 sweep, so half of it from the middle
+    // reaches an end, exactly as it does for pan.
+    CHECK(ChannelRackModel::velocityForDrag(64.0, 100.0,
+                                            100.0 - ChannelRackModel::knobDragTravel / 2.0)
+          == doctest::Approx(127.0));
+
+    // The floor is one, not zero: a step at velocity zero is a step that is
+    // lit and silent, which reads as a bug to whoever programmed it. Clearing
+    // a step is the other gesture.
+    CHECK(ChannelRackModel::velocityForDrag(64.0, 100.0, 900.0) == doctest::Approx(1.0));
+    CHECK(ChannelRackModel::velocityForDrag(64.0, 100.0, -900.0) == doctest::Approx(127.0));
+
+    // It starts from the value the drag began at, not from where the step is
+    // now — reading the current velocity on every move compounds rounding.
+    CHECK(ChannelRackModel::velocityForDrag(20.0, 100.0, 100.0) == doctest::Approx(20.0));
+}
+
+TEST_CASE("setting a step's level edits the note the step already is")
+{
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    const project::EntityId channel = project.addChannel("Kick").id;
+    project::Pattern& pattern = project.addPattern("Pattern 1");
+
+    REQUIRE(registry.execute(
+        std::make_unique<app::ToggleStepCommand>(stepAt(pattern.id, channel, 4))));
+
+    // The rack finds the note by step, exactly as the grid and the paint
+    // gesture do; a level edit then addresses it by index like any Piano Roll
+    // edit, because a step IS a note.
+    const std::vector<project::MidiEvent>* events =
+        project.findPattern(pattern.id)->events(channel);
+    REQUIRE(events != nullptr);
+
+    const std::size_t index = app::noteAtStep(*events, step16 * 4, step16, 60);
+    REQUIRE(index != app::noStep);
+
+    const std::size_t depth = registry.undoDepth();
+
+    // Every point of the drag, the first included — one gesture, one entry.
+    for (const int velocity : {96, 80, 64, 51})
+        REQUIRE(registry.executeMerging(std::make_unique<app::SetVelocityCommand>(
+            pattern.id, channel, app::NoteIndices{index}, velocity)));
+
+    CHECK(registry.undoDepth() == depth + 1);
+    CHECK((*project.findPattern(pattern.id)->events(channel))[index].value == 51);
+
+    // The step is still on: a level is not a way of clearing one.
+    CHECK(app::noteAtStep(*project.findPattern(pattern.id)->events(channel), step16 * 4, step16, 60)
+          == index);
+
+    // One undo returns to the velocity the step was programmed at.
+    REQUIRE(registry.undo());
+    CHECK((*project.findPattern(pattern.id)->events(channel))[index].value == 100);
+}

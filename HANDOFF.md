@@ -2087,6 +2087,39 @@ UI build-out increment 14 — the Piano Roll's ruler, ghosts and key
       nudge tool uses. If a key-signature control is ever added, it sets
       those two and both follow.
 
+UI build-out increment 15 — the rack's step levels (2026-08-23):
+
+    - A step IS a note, so a step's level is an ordinary velocity edit:
+      the rack commits the Piano Roll's SetVelocityCommand. There is
+      deliberately no step-level command. If one is ever added, the two
+      editors can drift apart on the same MidiEvent, which is the thing
+      StepCommands.h exists to prevent.
+    - Shift+drag over a lit pad is the gesture. Plain drag still paints,
+      and painting must keep working over an empty grid — the level drag
+      therefore only begins on a step that is already programmed.
+    - The note's index is captured at mouseDown and reused for the whole
+      drag. That is safe for exactly one reason: velocity edits do not
+      re-sort the event vector. A gesture that moves or adds notes may
+      not do this (NoteCommands.h says which commands re-sort).
+    - The floor is velocity 1. Zero would be a step that is lit and
+      silent; clearing is the right button's job.
+    - Right-click over the grid clears a step and does NOT open the
+      channel menu. The menu is still there over the row's header. If a
+      step context menu is ever wanted, that is the zone to branch on —
+      the branch already exists in rightMouseDown.
+    - theme::drawStepPad's `level` is defaulted, so any pane that draws a
+      pad without one is unchanged.
+
+    Scope expansion, found and NOT taken (CLAUDE.md §40): an on-screen
+    keyboard or a click-to-audition step cannot be built yet. Live MIDI
+    is merged into EVERY InstrumentNode (InstrumentNode.cpp, the
+    context.liveMidi loop) — there is no live-target channel — so one
+    preview note would sound every channel in the project at once. That
+    is also true of a hardware keyboard today. A live-input target
+    (armed channel, or FL's "typing keyboard to piano roll" routing) is
+    the feature that has to land first; MidiInput::injectForTesting is
+    already the intended entry point for the UI side.
+
 Things to be careful about:
 
   - third_party/ is gitignored: a fresh clone or worktree has neither

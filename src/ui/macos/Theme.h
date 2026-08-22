@@ -152,8 +152,14 @@ void drawSeparator(NSRect rect);
 
 /// FL's step button under GarageBand's rounding: unlit pads carry the beat
 /// grouping, lit pads carry the channel colour and a soft glow.
+///
+/// `level` is how hard the step hits, 0..1. It dims the lit colour and raises a
+/// foot from the pad's low edge, so a pattern's dynamics are readable by
+/// scanning the grid rather than by opening an editor for each step. It is the
+/// same velocity-to-brightness rule the Piano Roll draws its notes with;
+/// unlit pads ignore it.
 void drawStepPad(NSRect rect, NSColor* colour, bool on, bool downbeat, bool underPlayhead,
-                 bool flipped = false);
+                 bool flipped = false, double level = 1.0);
 
 /// A GarageBand-style region: rounded, gradient-filled in the material colour,
 /// with a darker name band along its top edge. `contentInset` reports where a

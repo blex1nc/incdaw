@@ -298,15 +298,22 @@ void drawSeparator(NSRect rect)
 // ── Controls ─────────────────────────────────────────────────────────────────
 
 void drawStepPad(NSRect rect, NSColor* colour, bool on, bool downbeat, bool underPlayhead,
-                 bool flipped)
+                 bool flipped, double level)
 {
     if (rect.size.width <= 0.0 || rect.size.height <= 0.0)
         return;
 
     if (on) {
+        const CGFloat amount = unit(level);
+
+        // A quiet step is a darker step. The floor is deliberately not black:
+        // the pad must still read as lit and as this channel's colour at the
+        // lowest velocity, or a soft step and a cleared one look alike.
+        NSColor* lit = darken(colour, 0.5 * (1.0 - amount));
+
         // Lit pads carry the channel colour, brightest at the top edge, with a
         // ring that separates neighbouring lit steps.
-        fillGradient(rect, metrics::radiusPad, lighten(colour, 0.32), darken(colour, 0.12), flipped);
+        fillGradient(rect, metrics::radiusPad, lighten(lit, 0.32), darken(lit, 0.12), flipped);
         strokeRounded(rect, metrics::radiusPad, darken(colour, 0.45));
 
         const NSRect gloss = flipped
@@ -317,6 +324,23 @@ void drawStepPad(NSRect rect, NSColor* colour, bool on, bool downbeat, bool unde
 
         fillRounded(gloss, metrics::radiusPad - 1.0,
                     [NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.16]);
+
+        // The foot: how far up the pad the level has filled. Brightness alone
+        // is hard to compare across two pads that are not side by side; a
+        // measured edge is not.
+        const CGFloat inset      = 2.0;
+        const CGFloat footHeight = (rect.size.height - 2.0 * inset) * amount;
+
+        if (footHeight >= 1.0 && rect.size.width > 2.0 * inset) {
+            const NSRect foot = flipped
+                ? NSMakeRect(NSMinX(rect) + inset, NSMaxY(rect) - inset - footHeight,
+                             rect.size.width - 2.0 * inset, footHeight)
+                : NSMakeRect(NSMinX(rect) + inset, NSMinY(rect) + inset,
+                             rect.size.width - 2.0 * inset, footHeight);
+
+            fillRounded(foot, metrics::radiusPad - 1.0,
+                        [NSColor colorWithSRGBRed:1 green:1 blue:1 alpha:0.13]);
+        }
     } else {
         NSColor* base = downbeat ? mix(ink(Ink::panelRaised), ink(Ink::panelSunken), 0.25)
                                  : mix(ink(Ink::panelSunken), ink(Ink::panelRaised), 0.35);
