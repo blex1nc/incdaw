@@ -54,6 +54,7 @@ std::string AppSettings::toJson() const
     for (const std::string& identifier : midiInputIdentifiers)
         inputs.append(Json(identifier));
     midiObject.set("inputs", std::move(inputs));
+    midiObject.set("output", midiOutputIdentifier);
     root.set("midi", std::move(midiObject));
 
     Json workspaceObject = Json::object();
@@ -109,6 +110,8 @@ AppSettings AppSettings::fromJson(const std::string& text)
                 settings.midiInputIdentifiers.push_back(element.asString());
         }
     }
+
+    settings.midiOutputIdentifier = root["midi"]["output"].asString();
 
     const Json& workspaceObject = root["workspace"];
     if (workspaceObject.isObject()) {

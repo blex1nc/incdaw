@@ -53,8 +53,30 @@ public:
 
     [[nodiscard]] virtual bool isOpen() const noexcept = 0;
 
-    /// Sends a message to the opened output, timestamped for `hostTimeNanos`
+    /// Chooses the destination `sendMessage` writes to.
+    ///
+    /// An empty identifier means *no output*, which is deliberately asymmetric
+    /// with the input list above, where empty means *everything*. Connecting to
+    /// every source is what a player expects; sending unrequested notes to
+    /// whichever destination happened to enumerate first is a stuck note on
+    /// someone else's synthesiser, or a feedback loop through a virtual port.
+    ///
+    /// Requires an open client, and a selection does not survive `close()` —
+    /// the caller re-selects after reopening, the same way it re-connects
+    /// inputs.
+    [[nodiscard]] virtual bool selectOutput(const std::string& identifier, std::string& error) = 0;
+
+    /// The identifier `selectOutput` last accepted; empty when nothing is
+    /// selected, which is the state in which `sendMessage` does nothing.
+    [[nodiscard]] virtual std::string selectedOutput() const = 0;
+
+    /// Sends a message to the selected output, timestamped for `hostTimeNanos`
     /// (0 means "as soon as possible").
+    ///
+    /// NOT for the audio thread. CoreMIDI's send path takes locks and may
+    /// allocate; the engine's `MidiOutput` owns a sender thread that calls this
+    /// with timestamps far enough ahead that the system schedules them
+    /// precisely (engine/midi/MidiOutput.h).
     virtual void sendMessage(const TimestampedMidiMessage& message) noexcept = 0;
 };
 

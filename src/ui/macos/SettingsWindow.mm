@@ -129,6 +129,7 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     NSButton*      _checkForUpdates;
     NSButton*      _allMidiSources;
     NSView*        _midiList;
+    NSPopUpButton* _midiOutput;
     NSTextField*   _status;
 
     NSMutableArray<NSButton*>* _midiChecks;
@@ -142,6 +143,7 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
 
     std::vector<platform::AudioDeviceInfo> _devices;
     std::vector<platform::MidiDeviceInfo>  _midiInputs;
+    std::vector<platform::MidiDeviceInfo>  _midiOutputs;
 
     std::filesystem::path _themesDirectory;
 
@@ -325,6 +327,19 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     NSView* page = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
 
     CGFloat y = size.height - rowHeight - 6.0;
+
+    [page addSubview:makeLabel(@"MIDI OUTPUT", NSMakeRect(pageInset, y, 200, rowHeight), YES)];
+    y -= rowHeight;
+
+    // One destination, and "None" is the default. Inputs may sensibly be "all
+    // of them"; outputs may not — sending to every destination puts notes into
+    // hardware nobody asked to drive (platform/MidiDevice.h).
+    _midiOutput = [self addRow:@"Destination"
+                     toContent:page
+                           atY:&y
+                         width:size.width - pageInset * 2 - labelWidth];
+
+    y -= 6.0;
 
     [page addSubview:makeLabel(@"MIDI INPUT", NSMakeRect(pageInset, y, 200, rowHeight), YES)];
     y -= rowHeight;
@@ -848,14 +863,18 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     else
         _devices.clear();
 
-    if (const std::unique_ptr<platform::MidiDevice> midi = platform::MidiDevice::create())
-        _midiInputs = midi->enumerateInputs();
-    else
+    if (const std::unique_ptr<platform::MidiDevice> midi = platform::MidiDevice::create()) {
+        _midiInputs  = midi->enumerateInputs();
+        _midiOutputs = midi->enumerateOutputs();
+    } else {
         _midiInputs.clear();
+        _midiOutputs.clear();
+    }
 
     [self rebuildDevicePopups];
     [self rebuildRatePopups];
     [self rebuildMidiList];
+    [self rebuildMidiOutputPopup];
 
     _openInputAtLaunch.state = _settings->openInputAtLaunch ? NSControlStateValueOn
                                                             : NSControlStateValueOff;
@@ -1041,6 +1060,26 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
 
 // ── MIDI ─────────────────────────────────────────────────────────────────────
 
+- (void)rebuildMidiOutputPopup
+{
+    [_midiOutput removeAllItems];
+
+    [_midiOutput addItemWithTitle:@"None"];
+    _midiOutput.itemArray.firstObject.representedObject = @"";
+
+    for (const platform::MidiDeviceInfo& info : _midiOutputs) {
+        [_midiOutput addItemWithTitle:fromUtf8(info.name)];
+        _midiOutput.lastItem.representedObject = fromUtf8(info.identifier);
+    }
+
+    // A destination chosen on another day and unplugged since stays visible
+    // and stays selected, rather than silently reverting to None and leaving
+    // the user to wonder why nothing plays.
+    [self selectIdentifier:fromUtf8(_settings->midiOutputIdentifier)
+                   inPopup:_midiOutput
+              missingTitle:fromUtf8(_settings->midiOutputIdentifier)];
+}
+
 - (void)rebuildMidiList
 {
     for (NSButton* check in _midiChecks)
@@ -1133,6 +1172,8 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     // An empty list means "every source" — the same convention the platform
     // layer already uses, so an all-checked list is stored as no list at all
     // and keeps working when the hardware changes.
+    _settings->midiOutputIdentifier = [self selectedIdentifierOf:_midiOutput].UTF8String;
+
     _settings->midiInputIdentifiers.clear();
     if (_allMidiSources.state != NSControlStateValueOn) {
         for (NSButton* check in _midiChecks) {

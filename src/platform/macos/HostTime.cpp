@@ -49,6 +49,22 @@ std::uint64_t hostTimeToNanos(std::uint64_t hostTime) noexcept
     return whole * base.numerator + remainder * base.numerator / base.denominator;
 }
 
+std::uint64_t nanosToHostTime(std::uint64_t nanos) noexcept
+{
+    const Timebase& base = timebase();
+
+    if (base.numerator == base.denominator)
+        return nanos;
+
+    // Mirror of hostTimeToNanos with the ratio inverted, split the same way so
+    // that a large tick count keeps its precision rather than overflowing the
+    // multiply.
+    const std::uint64_t whole     = nanos / base.numerator;
+    const std::uint64_t remainder = nanos % base.numerator;
+
+    return whole * base.denominator + remainder * base.denominator / base.numerator;
+}
+
 std::uint64_t hostTimeNowNanos() noexcept
 {
     return hostTimeToNanos(mach_absolute_time());

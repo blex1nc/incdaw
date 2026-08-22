@@ -154,6 +154,13 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
 {
     profiler_.configure(sampleRateHz, blockSize);
     midiInput_.resetCounters();
+    midiOutput_.resetCounters();
+    outputMidi_.clear();
+
+    // The sender thread lives exactly as long as the device does: nothing can
+    // be scheduled against a clock that is not running.
+    midiOutput_.start();
+
     blockMidi_.clear();
     blockMidi_.resetOverflowCount();
     blockCounter_.store(0, std::memory_order_release);
@@ -181,7 +188,14 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
     rt::resetViolations();
 }
 
-void AudioEngine::audioDeviceStopped() {}
+void AudioEngine::audioDeviceStopped()
+{
+    // Anything the last block scheduled is released before the sender stops,
+    // and a note left sounding on external hardware is cut — the note-off it
+    // was waiting for belonged to a block that will never be rendered.
+    midiOutput_.sendAllNotesOff();
+    midiOutput_.stop();
+}
 
 void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t channelCount,
                                    std::int64_t frameCount, std::uint64_t blockHostTimeNanos) noexcept
@@ -199,8 +213,15 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
     // Collected once for the whole block, before it is split: MIDI offsets are
     // relative to the block the device handed us, and each segment re-bases the
     // ones that fall inside it.
-    midiInput_.collectForBlock(blockMidi_, blockHostTimeNanos, frameCount,
-                               device_ != nullptr ? device_->actualSampleRate() : 0.0);
+    const SampleRate blockRate = device_ != nullptr ? device_->actualSampleRate() : 0.0;
+
+    midiInput_.collectForBlock(blockMidi_, blockHostTimeNanos, frameCount, blockRate);
+
+    // What leaves INCDAW this block. Filled by whatever generates outgoing
+    // MIDI — the clock generator, an externally routed channel — and handed to
+    // the sender at the end of the callback, timestamped against this block's
+    // host time so the system delivers each message on its own frame.
+    outputMidi_.clear();
 
     if (CompiledGraph* graph = active_.load(std::memory_order_acquire)) {
         // The transport decides how this block is divided. A loop wrap in the
@@ -261,6 +282,11 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
     // post-graph, post-containment — so what a grab retrieves is what was
     // actually heard.
     logger_.log(outputChannels, channelCount, frameCount);
+
+    // Queued last, so anything the block produced is included, and never sent
+    // from here: this hands a trivially copyable struct to a lock-free queue
+    // and returns (engine/midi/MidiOutput.h).
+    midiOutput_.sendForBlock(outputMidi_, blockHostTimeNanos, blockRate);
 
     const auto finished = std::chrono::steady_clock::now();
     profiler_.record(std::chrono::duration<double>(finished - started).count(), frameCount,

@@ -7,6 +7,7 @@
 #include "engine/graph/RenderGraph.h"
 #include "engine/midi/MidiBuffer.h"
 #include "engine/midi/MidiInput.h"
+#include "engine/midi/MidiOutput.h"
 #include "engine/transport/Transport.h"
 #include "platform/AudioDevice.h"
 
@@ -156,6 +157,12 @@ public:
     [[nodiscard]] MidiInput&       midiInput()       noexcept { return midiInput_; }
     [[nodiscard]] const MidiInput& midiInput() const noexcept { return midiInput_; }
 
+    /// MIDI output, timestamped so that what INCDAW generates is heard on the
+    /// frame it was written for. The device it writes to is chosen by the
+    /// shell; the sender thread runs for as long as the audio device does.
+    [[nodiscard]] MidiOutput&       midiOutput()       noexcept { return midiOutput_; }
+    [[nodiscard]] const MidiOutput& midiOutput() const noexcept { return midiOutput_; }
+
     /// The messages collected for the block just rendered. Read from the audio
     /// thread by nodes; exposed here for diagnostics and tests.
     [[nodiscard]] const MidiBuffer& lastBlockMidi() const noexcept { return blockMidi_; }
@@ -206,7 +213,9 @@ private:
     std::unique_ptr<platform::AudioDevice> device_;
     Transport                              transport_;
     MidiInput                              midiInput_;
+    MidiOutput                             midiOutput_;
     MidiBuffer                             blockMidi_;
+    MidiBuffer                             outputMidi_;   ///< what this block sends out
     MidiBuffer                             segmentMidi_;
 
     std::atomic<CompiledGraph*>                active_{nullptr};

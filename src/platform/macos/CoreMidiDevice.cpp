@@ -67,6 +67,9 @@ public:
 
     [[nodiscard]] bool isOpen() const noexcept override { return client_ != 0; }
 
+    bool        selectOutput(const std::string& identifier, std::string& error) override;
+    std::string selectedOutput() const override { return outputIdentifier_; }
+
     void sendMessage(const TimestampedMidiMessage& message) noexcept override;
 
 private:
@@ -76,7 +79,12 @@ private:
     MIDIClientRef   client_      = 0;
     MIDIPortRef     inputPort_   = 0;
     MIDIPortRef     outputPort_  = 0;
-    MIDIEndpointRef outputEndpoint_ = 0;
+
+    /// Read by the sender thread, written by whoever calls selectOutput.
+    /// Atomic rather than mutex-guarded so that a send in flight sees either
+    /// the old endpoint or the new one, never a torn value.
+    std::atomic<MIDIEndpointRef> outputEndpoint_{0};
+    std::string                  outputIdentifier_;
 
     std::atomic<MidiInputCallback*> callback_{nullptr};
 };
@@ -176,10 +184,10 @@ bool CoreMidiDevice::open(const std::vector<std::string>& inputIdentifiers, Midi
     }
 
     // Output is optional: a project with no external gear is perfectly normal,
-    // and failing to open would block MIDI input for no reason.
-    if (MIDIOutputPortCreate(client_, CFSTR("INCDAW Output"), &outputPort_) == noErr
-        && MIDIGetNumberOfDestinations() > 0)
-        outputEndpoint_ = MIDIGetDestination(0);
+    // and failing to open would block MIDI input for no reason. The port is
+    // created here; which destination it writes to is `selectOutput`'s
+    // decision, and until one is made nothing is sent.
+    (void)MIDIOutputPortCreate(client_, CFSTR("INCDAW Output"), &outputPort_);
 
     if (connected == 0 && !inputIdentifiers.empty()) {
         error = "none of the requested MIDI inputs were found";
@@ -209,7 +217,42 @@ void CoreMidiDevice::close()
         client_ = 0;
     }
 
-    outputEndpoint_ = 0;
+    outputEndpoint_.store(0, std::memory_order_release);
+    outputIdentifier_.clear();
+}
+
+bool CoreMidiDevice::selectOutput(const std::string& identifier, std::string& error)
+{
+    if (identifier.empty()) {
+        outputEndpoint_.store(0, std::memory_order_release);
+        outputIdentifier_.clear();
+        return true;
+    }
+
+    if (client_ == 0 || outputPort_ == 0) {
+        error = "MIDI output is not open";
+        return false;
+    }
+
+    const ItemCount count = MIDIGetNumberOfDestinations();
+
+    for (ItemCount index = 0; index < count; ++index) {
+        const MIDIEndpointRef endpoint = MIDIGetDestination(index);
+        if (endpoint == 0 || endpointIdentifier(endpoint) != identifier)
+            continue;
+
+        outputEndpoint_.store(endpoint, std::memory_order_release);
+        outputIdentifier_ = identifier;
+        return true;
+    }
+
+    // A destination that has been unplugged since it was chosen is the common
+    // case here, so the selection is cleared rather than left pointing at a
+    // stale endpoint the system may reuse for something else.
+    outputEndpoint_.store(0, std::memory_order_release);
+    outputIdentifier_.clear();
+    error = "MIDI output \"" + identifier + "\" was not found";
+    return false;
 }
 
 void CoreMidiDevice::readProc(const MIDIPacketList* packets, void* readContext, void*) noexcept
@@ -277,7 +320,9 @@ void CoreMidiDevice::handlePackets(const MIDIPacketList& packets) noexcept
 
 void CoreMidiDevice::sendMessage(const TimestampedMidiMessage& message) noexcept
 {
-    if (outputPort_ == 0 || outputEndpoint_ == 0)
+    const MIDIEndpointRef endpoint = outputEndpoint_.load(std::memory_order_acquire);
+
+    if (outputPort_ == 0 || endpoint == 0)
         return;
 
     Byte            storage[256];
@@ -285,13 +330,30 @@ void CoreMidiDevice::sendMessage(const TimestampedMidiMessage& message) noexcept
     MIDIPacket*     packet = MIDIPacketListInit(list);
 
     const int  type   = message.status & 0xF0;
-    const Byte length = (type == 0xC0 || type == 0xD0) ? 2 : 3;
+
+    // System realtime (clock, start, stop, continue) is one byte; program
+    // change and channel pressure are two. Sending three regardless appends
+    // whatever happened to be in the struct, which a device reads as a second
+    // message.
+    Byte length = 3;
+    if (message.status >= 0xF8)
+        length = 1;
+    else if (type == 0xC0 || type == 0xD0)
+        length = 2;
+
     const Byte data[3] = {message.status, message.data1, message.data2};
 
-    packet = MIDIPacketListAdd(list, sizeof(storage), packet, message.hostTimeNanos, length, data);
+    // Nanoseconds are INCDAW's currency; CoreMIDI schedules in mach ticks. The
+    // two are not the same unit on Apple silicon, so the conversion is what
+    // makes a scheduled message land when it was meant to. Zero keeps its
+    // meaning of "as soon as possible" and is passed through untouched.
+    const MIDITimeStamp when =
+        message.hostTimeNanos != 0 ? nanosToHostTime(message.hostTimeNanos) : 0;
+
+    packet = MIDIPacketListAdd(list, sizeof(storage), packet, when, length, data);
 
     if (packet != nullptr)
-        MIDISend(outputPort_, outputEndpoint_, list);
+        MIDISend(outputPort_, endpoint, list);
 }
 
 } // namespace

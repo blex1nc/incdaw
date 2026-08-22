@@ -67,6 +67,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/effects/UtilityEffects.cpp
     engine/dsp/MetronomeNode.cpp
     engine/midi/MidiInput.cpp
+    engine/midi/MidiOutput.cpp
     engine/midi/SmfFile.cpp
     engine/midi/MidiRecorder.cpp
     engine/midi/NoteSequence.cpp

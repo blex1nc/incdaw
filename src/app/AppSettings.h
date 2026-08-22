@@ -63,6 +63,13 @@ struct AppSettings {
     /// what someone who plugs in a keyboard and plays a note expects.
     std::vector<std::string> midiInputIdentifiers;
 
+    /// The MIDI destination INCDAW sends to. Empty means none, and that
+    /// asymmetry with the input list is deliberate: connecting to every source
+    /// is helpful, while sending to every destination puts notes into
+    /// somebody's hardware synthesiser without being asked
+    /// (platform/MidiDevice.h).
+    std::string midiOutputIdentifier;
+
     /// Where the window was, and what it was showing.
     struct Workspace {
         /// All four zero means "never placed" — the window centres itself.

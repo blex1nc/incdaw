@@ -8,6 +8,51 @@ public version yet.
 
 ## [Unreleased]
 
+### MIDI — the port that only went one way now goes both — 2026-08-23
+
+- **A destination you can choose.** `platform::MidiDevice` enumerated
+  outputs and then quietly sent everything to whichever one happened to
+  be first in the list. Settings → MIDI now has a Destination pop-up, and
+  "None" is the default: connecting to every *source* is helpful, while
+  sending to every *destination* puts notes into hardware nobody asked to
+  drive. A destination that has since been unplugged stays listed and
+  stays selected, marked "not connected", rather than reverting to None
+  and leaving the user to wonder why nothing plays.
+- **Sample-accurate on the way out.** `engine::MidiOutput` is the mirror
+  of `MidiInput`: it converts each message's frame offset back into the
+  host time at which that frame will be heard, and hands the system a
+  deadline rather than a message. Sending at the moment the block is
+  rendered would quantise output to the buffer size — the same 2.7 ms at
+  128 frames that the input path exists to avoid.
+- **Stop means stop on hardware too.** A transport stopped mid-note left
+  an external synthesiser holding it forever, because the note-off
+  belonged to a block that is never rendered. Stopping the device now
+  releases sustain and then all notes, on all sixteen channels, in that
+  order — all-notes-off with the pedal still down leaves the notes
+  sounding on anything that honours it.
+
+**Architecture**
+
+- The audio thread does not talk to CoreMIDI. Its send path allocates and
+  takes locks, either of which in a callback is a dropout. Messages cross
+  a lock-free queue to a sender thread that runs a block ahead of the
+  deadlines it is scheduling, so its polling interval costs no accuracy.
+- `platform::nanosToHostTime` — the inverse the platform layer never
+  needed until now. `sendMessage` was passing nanoseconds straight to
+  CoreMIDI as a `MIDITimeStamp`, which is mach ticks; on Apple silicon
+  the two are different units, so every scheduled message landed at the
+  wrong moment. Reading a past time hid the bug — scheduling a future one
+  does not.
+- Message length is now derived from the status byte on the way out as
+  well as on the way in. Sending three bytes for a program change appends
+  whatever was in the struct, which a device reads as a second message.
+
+**Known gap** — a channel cannot yet be *routed* to an external
+instrument. That needs a field on `project::Channel`, which belongs to
+the project format rather than to this layer; the port, the scheduling
+and the settings are in place and waiting for it.
+
+
 ### UI — the mixer gets a dock, and the desk gets a plugin picker — 2026-08-23
 
 - **The selected strip's whole chain, down the right edge.** The strips

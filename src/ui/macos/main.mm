@@ -1765,7 +1765,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self refreshStatus];
 }
 
-/// Connects the configured MIDI sources to the engine's input.
+/// Connects the configured MIDI sources to the engine's input, and the
+/// configured destination to its output.
 ///
 /// Until this existed, engine::MidiInput was fed by nothing but the tests: a
 /// keyboard plugged into the Mac reached CoreMIDI and stopped there, which
@@ -1778,6 +1779,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 {
     if (_audio == nullptr)
         return;
+
+    // Detached before anything is closed: the engine's sender thread holds
+    // this pointer, and clearing it waits for a send in flight to finish
+    // (engine/midi/MidiOutput.h).
+    _audio->midiOutput().setDevice(nullptr);
 
     if (_midiDevice != nullptr)
         _midiDevice->close();
@@ -1799,6 +1805,20 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     }
 
     _lastMidiError = nil;
+
+    // The destination is separate and equally non-fatal. A synthesiser that
+    // was plugged in yesterday and is not today should cost a line in the
+    // status bar, not a failure to open MIDI at all.
+    if (!_settings.midiOutputIdentifier.empty()) {
+        std::string outputError;
+        if (!_midiDevice->selectOutput(_settings.midiOutputIdentifier, outputError)) {
+            NSLog(@"INCDAW: MIDI output unavailable: %s", outputError.c_str());
+            _lastMidiError = [NSString stringWithFormat:@"midi out: %s", outputError.c_str()];
+            return;
+        }
+    }
+
+    _audio->midiOutput().setDevice(_midiDevice.get());
 }
 
 // ── The update check ─────────────────────────────────────────────────────────
@@ -4983,8 +5003,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     }
 
     // The MIDI client delivers on its own thread and holds a reference to the
-    // engine's input: it must be closed before the engine goes away.
+    // engine's input: it must be closed before the engine goes away. The
+    // engine's sender holds a pointer the other way, so that is detached
+    // first — _audio->stop() has already flushed and stopped it.
     if (_midiDevice != nullptr) {
+        if (_audio != nullptr)
+            _audio->midiOutput().setDevice(nullptr);
+
         _midiDevice->close();
         _midiDevice.reset();
     }
