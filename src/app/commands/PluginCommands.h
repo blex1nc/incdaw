@@ -21,8 +21,17 @@ using project::PluginSlot;
 
 class AddInsertCommand final : public Command {
 public:
+    /// Appends to the chain.
     AddInsertCommand(EntityId mixerNode, plugins::PluginIdentifier plugin)
         : mixerNode_(mixerNode), plugin_(std::move(plugin)) {}
+
+    /// Inserts AT `index`, which is what dropping a plugin onto a particular
+    /// slot means. An index past the end appends, so a drop below the chain
+    /// does the obvious thing rather than failing. Redo replays the same
+    /// index: an insert that landed third must land third again, or the undo
+    /// stack above it would be describing a different chain.
+    AddInsertCommand(EntityId mixerNode, plugins::PluginIdentifier plugin, std::size_t index)
+        : mixerNode_(mixerNode), plugin_(std::move(plugin)), index_(index) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "mixer.insert.add"; }
     [[nodiscard]] std::string name() const override { return "Add Insert"; }
@@ -35,8 +44,11 @@ public:
     [[nodiscard]] EntityId slotId() const noexcept { return slot_.id; }
 
 private:
+    static constexpr std::size_t append = static_cast<std::size_t>(-1);
+
     EntityId                  mixerNode_;
     plugins::PluginIdentifier plugin_;
+    std::size_t               index_ = append;
     PluginSlot                slot_;
     bool                      minted_ = false;
 };

@@ -28,7 +28,10 @@ bool AddInsertCommand::execute(Project& project)
         minted_      = true;
     }
 
-    node->inserts.push_back(slot_);
+    const std::size_t at = std::min(index_ == append ? node->inserts.size() : index_,
+                                    node->inserts.size());
+
+    node->inserts.insert(node->inserts.begin() + static_cast<std::ptrdiff_t>(at), slot_);
     return true;
 }
 

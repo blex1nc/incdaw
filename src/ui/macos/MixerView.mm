@@ -6,6 +6,7 @@
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "project/Model.h"
+#include "ui/macos/PluginPickerView.h"
 #include "ui/macos/Theme.h"
 
 #include <algorithm>
@@ -42,6 +43,28 @@ constexpr CGFloat insertLampWidth      = 11.0;
 constexpr CGFloat insertRackHeight =
     insertSlotsShown * (insertSlotHeight + insertSlotGap) + 4.0;
 
+/// The dock down the right edge: the selected strip's WHOLE chain, and the
+/// catalogue it is filled from.
+///
+/// The strips keep their four-slot summary — it is what makes a chain visible
+/// while scanning the desk — and the dock is where a chain is worked on. Ten
+/// rows is the depth a mixer channel is conventionally given, and it is a
+/// window onto the chain, not a limit on it: a longer chain scrolls the rack
+/// rather than being truncated.
+constexpr CGFloat   dockWidth       = 232.0;
+constexpr CGFloat   dockPadding     = 8.0;
+constexpr CGFloat   dockHeader      = 22.0;
+constexpr CGFloat   dockSlotHeight  = 22.0;
+constexpr CGFloat   dockSlotGap     = 3.0;
+constexpr std::size_t dockSlotsShown = 10;
+constexpr CGFloat   dockLampWidth   = 16.0;
+
+constexpr CGFloat dockRackHeight =
+    dockSlotsShown * (dockSlotHeight + dockSlotGap) + dockSlotGap;
+
+/// No slot under the pointer.
+constexpr std::size_t noDockSlot = static_cast<std::size_t>(-1);
+
 using theme::fillRect;
 
 /// Fader travel is not linear in gain: a linear fader spends most of its length
@@ -62,12 +85,26 @@ enum class MixerDrag { none, fader, pan };
 
 } // namespace
 
+@interface INCDAWMixerView () <NSDraggingDestination>
+@end
+
 @implementation INCDAWMixerView {
     project::Project*     _project;
     app::CommandRegistry* _registry;
 
     MixerDrag         _drag;
     project::EntityId _dragNode;
+
+    INCDAWPluginPickerView* _picker;
+
+    /// The dock rack row a drag is hovering over, so the drop lands where the
+    /// insertion line is drawn and not merely on the chain's end.
+    std::size_t _dropSlot;
+    bool        _dropping;
+
+    /// How far the dock rack is scrolled, in rows, when the chain is longer
+    /// than the rack is tall.
+    std::size_t _rackTop;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -81,8 +118,48 @@ enum class MixerDrag { none, fader, pan };
     _project  = project;
     _registry = registry;
     _drag     = MixerDrag::none;
+    _dropSlot = noDockSlot;
+    _dropping = false;
+    _rackTop  = 0;
+
+    _picker = [[INCDAWPluginPickerView alloc] initWithFrame:NSZeroRect];
+
+    __weak INCDAWMixerView* weakSelf = self;
+    _picker.onChoose = ^(NSString* identifier) {
+        [weakSelf insertPlugin:identifier atSlot:noDockSlot];
+    };
+
+    [self addSubview:_picker];
+
+    // The strips accept a plugin too, on their own four-row summary: a drag
+    // that crosses the desk should be droppable where the user is looking.
+    [self registerForDraggedTypes:@[ INCDAWPluginPasteboardType ]];
 
     return self;
+}
+
+- (void)setAvailableInserts:(NSArray<NSDictionary*>*)availableInserts
+{
+    _availableInserts     = [availableInserts copy];
+    _picker.hostedPlugins = _availableInserts;
+}
+
+/// The strip the dock is editing.
+///
+/// An unset selection resolves to the master rather than to nothing: the dock
+/// is always showing SOME chain, and the master is the one strip every project
+/// has.
+- (project::EntityId)dockNode
+{
+    if (_project == nullptr)
+        return project::EntityId{};
+
+    const project::EntityId selected{_selectedMixerNodeIdValue};
+
+    if (selected.isValid() && _project->findMixerNode(selected) != nullptr)
+        return selected;
+
+    return _project->masterMixerNode();
 }
 
 - (BOOL)isFlipped { return YES; }
@@ -167,6 +244,97 @@ enum class MixerDrag { none, fader, pan };
     return [self stripRectAt:_project->mixerNodes().size()];
 }
 
+// ── The dock ─────────────────────────────────────────────────────────────────
+
+- (CGFloat)stripsWidth
+{
+    return std::max<CGFloat>(0.0, self.bounds.size.width - dockWidth);
+}
+
+- (NSRect)dockRect
+{
+    return NSMakeRect([self stripsWidth], 0.0, std::min(dockWidth, self.bounds.size.width),
+                      self.bounds.size.height);
+}
+
+- (NSRect)dockRackRect
+{
+    const NSRect dock = [self dockRect];
+
+    return NSMakeRect(NSMinX(dock) + dockPadding, dockHeader + dockPadding,
+                      dock.size.width - dockPadding * 2.0,
+                      std::min(dockRackHeight,
+                               std::max<CGFloat>(0.0, dock.size.height - dockHeader
+                                                          - dockPadding * 2.0)));
+}
+
+- (NSRect)dockSlotRect:(std::size_t)row
+{
+    const NSRect rack = [self dockRackRect];
+
+    return NSMakeRect(NSMinX(rack) + dockSlotGap,
+                      NSMinY(rack) + dockSlotGap
+                          + static_cast<CGFloat>(row) * (dockSlotHeight + dockSlotGap),
+                      rack.size.width - dockSlotGap * 2.0, dockSlotHeight);
+}
+
+/// The rack row under a point, or noDockSlot. Rows are addressed as drawn —
+/// scrolling is added by the caller that needs a chain index.
+- (std::size_t)dockSlotAtPoint:(NSPoint)point
+{
+    for (std::size_t row = 0; row < dockSlotsShown; ++row)
+        if (NSPointInRect(point, [self dockSlotRect:row]))
+            return row;
+
+    return noDockSlot;
+}
+
+/// The chain index a rack row shows.
+- (std::size_t)chainIndexForRow:(std::size_t)row
+{
+    return _rackTop + row;
+}
+
+/// Keeps the rack's window over a chain that may have shrunk under it.
+- (void)clampRack
+{
+    const project::MixerNode* node = _project->findMixerNode([self dockNode]);
+    const std::size_t chain = node != nullptr ? node->inserts.size() : 0;
+
+    // One empty row past the end is always reachable: that row is where the
+    // next insert goes, and a chain exactly as long as the rack would
+    // otherwise have nowhere to grow from.
+    const std::size_t rows = chain + 1;
+    const std::size_t highest = rows > dockSlotsShown ? rows - dockSlotsShown : 0;
+
+    if (_rackTop > highest)
+        _rackTop = highest;
+}
+
+- (void)resizeSubviewsWithOldSize:(NSSize)oldSize
+{
+    [super resizeSubviewsWithOldSize:oldSize];
+    [self layoutPicker];
+}
+
+/// The picker is positioned from the dock's geometry, which is a function of
+/// the view's size — so it is repositioned wherever that size comes from,
+/// including the first time the shell hands the mixer its frame.
+- (void)setFrameSize:(NSSize)size
+{
+    [super setFrameSize:size];
+    [self layoutPicker];
+}
+
+- (void)layoutPicker
+{
+    const NSRect dock = [self dockRect];
+    const CGFloat top = NSMaxY([self dockRackRect]) + dockPadding;
+
+    _picker.frame = NSMakeRect(NSMinX(dock), top, dock.size.width,
+                               std::max<CGFloat>(0.0, dock.size.height - top));
+}
+
 // ── Drawing ──────────────────────────────────────────────────────────────────
 
 - (void)drawRect:(NSRect)dirtyRect
@@ -180,6 +348,12 @@ enum class MixerDrag { none, fader, pan };
 
     const std::vector<project::MixerNode>& nodes = _project->mixerNodes();
 
+    // Strips are clipped to their own region: the dock is a fixed pane, and a
+    // desk with more strips than fit must not draw over it.
+    [NSGraphicsContext saveGraphicsState];
+    [NSBezierPath clipRect:NSMakeRect(0.0, 0.0, [self stripsWidth],
+                                      self.bounds.size.height)];
+
     for (std::size_t index = 0; index < nodes.size(); ++index)
         [self drawStrip:index node:nodes[index]];
 
@@ -189,6 +363,109 @@ enum class MixerDrag { none, fader, pan };
 
     theme::drawTextCentred(@"＋", add, theme::ink(Ink::textSecondary),
                            theme::labelFont(16.0), theme::Align::centre);
+
+    [NSGraphicsContext restoreGraphicsState];
+
+    [self drawDock];
+}
+
+/// The dock: whose chain this is, the chain itself, and — below, in its own
+/// view — what can be put in it.
+- (void)drawDock
+{
+    const NSRect dock = [self dockRect];
+    if (dock.size.width <= 0.0)
+        return;
+
+    fillRect(dock, theme::ink(Ink::panel));
+    fillRect(NSMakeRect(NSMinX(dock), 0.0, 1.0, dock.size.height),
+             theme::ink(Ink::separator));
+
+    const project::MixerNode* node = _project->findMixerNode([self dockNode]);
+
+    const NSRect header = NSMakeRect(NSMinX(dock) + dockPadding, 0.0,
+                                     dock.size.width - dockPadding * 2.0, dockHeader);
+
+    theme::drawTextCentred(node != nullptr
+                               ? [NSString stringWithFormat:@"%s — Inserts",
+                                                            node->name.c_str()]
+                               : @"Inserts",
+                           header, theme::ink(Ink::textSecondary),
+                           theme::labelFont(10.5, NSFontWeightSemibold));
+
+    const NSRect rack = [self dockRackRect];
+    theme::drawWell(rack, theme::metrics::radiusPad, true);
+
+    if (node == nullptr)
+        return;
+
+    const std::size_t chain = node->inserts.size();
+
+    for (std::size_t row = 0; row < dockSlotsShown; ++row) {
+        const NSRect slotRect = [self dockSlotRect:row];
+        if (NSMaxY(slotRect) > NSMaxY(rack))
+            break;
+
+        const std::size_t index = [self chainIndexForRow:row];
+
+        // Where a drop would land, drawn as a line between rows rather than as
+        // a filled row: the plugin goes BETWEEN two links of the chain, and a
+        // highlight over a slot would say it replaces it.
+        if (_dropping && _dropSlot == row)
+            fillRect(NSMakeRect(NSMinX(slotRect), NSMinY(slotRect) - 2.0,
+                                slotRect.size.width, 2.0),
+                     theme::ink(Ink::accent));
+
+        if (index >= chain) {
+            if (index == chain)
+                theme::drawTextCentred(@"＋  Insert", slotRect,
+                                       theme::withAlpha(theme::ink(Ink::textDim), 0.8),
+                                       theme::labelFont(10.0), theme::Align::centre);
+            continue;
+        }
+
+        const project::PluginSlot& slot = node->inserts[index];
+
+        theme::fillRounded(slotRect, theme::metrics::radiusPad,
+                           slot.bypassed
+                               ? theme::withAlpha(theme::ink(Ink::panelRaised), 0.55)
+                               : theme::ink(Ink::panelRaised));
+        theme::strokeRounded(slotRect, theme::metrics::radiusPad,
+                             theme::withAlpha(theme::ink(Ink::shadow), 0.6));
+
+        // The number is the chain position, which is the signal order: the
+        // rack is read top to bottom the way the audio travels it.
+        theme::drawTextCentred([NSString stringWithFormat:@"%zu", index + 1],
+                               NSMakeRect(NSMinX(slotRect) + 3.0, NSMinY(slotRect),
+                                          dockLampWidth - 6.0, slotRect.size.height),
+                               theme::ink(Ink::textDim), theme::numericFont(9.0),
+                               theme::Align::centre);
+
+        theme::drawTextCentred([self titleForSlot:slot],
+                               NSMakeRect(NSMinX(slotRect) + dockLampWidth, NSMinY(slotRect),
+                                          slotRect.size.width - dockLampWidth - 18.0,
+                                          slotRect.size.height),
+                               slot.bypassed ? theme::ink(Ink::textDim)
+                                             : theme::ink(Ink::textPrimary),
+                               theme::labelFont(10.5));
+
+        // The lamp lives at the RIGHT edge here, away from the name, because a
+        // dock row is wide enough that a lamp beside the text would be a long
+        // way from the switch the user is aiming at.
+        const NSRect lamp = NSMakeRect(NSMaxX(slotRect) - 13.0, NSMidY(slotRect) - 4.0,
+                                       8.0, 8.0);
+        theme::fillRounded(lamp, 4.0,
+                           slot.bypassed ? theme::withAlpha(theme::ink(Ink::textDim), 0.6)
+                                         : theme::ink(Ink::accent));
+    }
+
+    if (chain + 1 > dockSlotsShown)
+        theme::drawTextCentred([NSString stringWithFormat:@"%zu of %zu",
+                                                          _rackTop + dockSlotsShown, chain],
+                               NSMakeRect(NSMinX(rack), NSMaxY(rack) - 12.0,
+                                          rack.size.width - 6.0, 12.0),
+                               theme::ink(Ink::textDim), theme::numericFont(8.5),
+                               theme::Align::right);
 }
 
 - (void)drawStrip:(std::size_t)index node:(const project::MixerNode&)node
@@ -413,18 +690,209 @@ enum class MixerDrag { none, fader, pan };
 
 - (std::size_t)stripIndexAtX:(CGFloat)x
 {
-    if (x < 0.0)
+    // A point in the dock is not in any strip, however far along the row it
+    // would otherwise fall.
+    if (x < 0.0 || x >= [self stripsWidth])
         return static_cast<std::size_t>(-1);
 
     return static_cast<std::size_t>(x / (stripWidth + stripGap));
 }
 
+// ── The dock's rack ──────────────────────────────────────────────────────────
+
+/// Inserts `identifier` into the docked chain. `row` is a rack row, or
+/// noDockSlot to append — which is what choosing from the picker means.
+- (void)insertPlugin:(NSString*)identifier atSlot:(std::size_t)row
+{
+    plugins::PluginIdentifier plugin;
+    if (identifier == nil
+        || !plugins::PluginIdentifier::fromString(identifier.UTF8String, plugin))
+        return;
+
+    const project::EntityId nodeId = [self dockNode];
+
+    const project::MixerNode* node = _project->findMixerNode(nodeId);
+    if (node == nullptr)
+        return;
+
+    if (row == noDockSlot) {
+        [self commitStructural:std::make_unique<app::AddInsertCommand>(nodeId,
+                                                                       std::move(plugin))];
+        return;
+    }
+
+    [self commitStructural:std::make_unique<app::AddInsertCommand>(
+                               nodeId, std::move(plugin), [self chainIndexForRow:row])];
+}
+
+- (void)handleDockClickAt:(NSPoint)point
+{
+    const std::size_t row = [self dockSlotAtPoint:point];
+    if (row == noDockSlot)
+        return;
+
+    const project::EntityId   nodeId = [self dockNode];
+    const project::MixerNode* node   = _project->findMixerNode(nodeId);
+    if (node == nullptr)
+        return;
+
+    const std::size_t index = [self chainIndexForRow:row];
+
+    if (index >= node->inserts.size()) {
+        // An empty row is where the next plugin goes: put the caret in the
+        // search field so the next thing typed is what goes in it.
+        [_picker focusSearch];
+        return;
+    }
+
+    const project::PluginSlot& slot = node->inserts[index];
+    const NSRect slotRect = [self dockSlotRect:row];
+
+    if (point.x > NSMaxX(slotRect) - 18.0) {
+        [self commitStructural:std::make_unique<app::SetInsertBypassedCommand>(
+                                   nodeId, slot.id, !slot.bypassed)];
+        return;
+    }
+
+    if (self.onOpenInsertEditor != nil)
+        self.onOpenInsertEditor(slot.id.value());
+}
+
+- (void)showDockSlotMenuForRow:(std::size_t)row event:(NSEvent*)event
+{
+    const project::EntityId   nodeId = [self dockNode];
+    const project::MixerNode* node   = _project->findMixerNode(nodeId);
+    if (node == nullptr)
+        return;
+
+    const std::size_t index = [self chainIndexForRow:row];
+    if (index >= node->inserts.size())
+        return;
+
+    const project::PluginSlot& slot = node->inserts[index];
+
+    NSDictionary* address = @{@"node": @(nodeId.value()), @"slot": @(slot.id.value())};
+
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    NSMenuItem* bypass = [menu addItemWithTitle:@"Bypass"
+                                         action:@selector(toggleInsertBypassFromMenu:)
+                                  keyEquivalent:@""];
+    bypass.target            = self;
+    bypass.representedObject = address;
+    bypass.state = slot.bypassed ? NSControlStateValueOn : NSControlStateValueOff;
+
+    NSMenuItem* moveUp = [menu addItemWithTitle:@"Move Up"
+                                         action:@selector(moveInsertUpFromMenu:)
+                                  keyEquivalent:@""];
+    moveUp.target            = self;
+    moveUp.representedObject = address;
+
+    NSMenuItem* moveDown = [menu addItemWithTitle:@"Move Down"
+                                           action:@selector(moveInsertDownFromMenu:)
+                                    keyEquivalent:@""];
+    moveDown.target            = self;
+    moveDown.representedObject = address;
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* remove = [menu addItemWithTitle:@"Remove"
+                                         action:@selector(removeInsertFromMenu:)
+                                  keyEquivalent:@""];
+    remove.target            = self;
+    remove.representedObject = address;
+
+    [NSMenu popUpContextMenu:menu withEvent:event forView:self];
+}
+
+// ── Dropping a plugin ────────────────────────────────────────────────────────
+
+- (BOOL)pasteboardCarriesPlugin:(id<NSDraggingInfo>)info
+{
+    return [info.draggingPasteboard.types containsObject:INCDAWPluginPasteboardType];
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info
+{
+    return [self draggingUpdated:info];
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info
+{
+    if (![self pasteboardCarriesPlugin:info])
+        return NSDragOperationNone;
+
+    const NSPoint point = [self convertPoint:info.draggingLocation fromView:nil];
+
+    // Dragging over a STRIP selects it, so a plugin can be carried to a chain
+    // that was not the one on show when the drag began.
+    const std::size_t index = [self stripIndexAtX:point.x];
+
+    if (index != static_cast<std::size_t>(-1) && index < _project->mixerNodes().size()) {
+        const project::EntityId hovered = _project->mixerNodes()[index].id;
+
+        if (hovered.value() != _selectedMixerNodeIdValue) {
+            _selectedMixerNodeIdValue = hovered.value();
+            _rackTop                  = 0;
+        }
+
+        _dropping = true;
+        _dropSlot = noDockSlot;
+        [self setNeedsDisplay:YES];
+        return NSDragOperationCopy;
+    }
+
+    const std::size_t row = [self dockSlotAtPoint:point];
+
+    _dropping = true;
+    _dropSlot = row;
+    [self setNeedsDisplay:YES];
+
+    return NSDragOperationCopy;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)info
+{
+    (void)info;
+    _dropping = false;
+    _dropSlot = noDockSlot;
+    [self setNeedsDisplay:YES];
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info
+{
+    if (![self pasteboardCarriesPlugin:info])
+        return NO;
+
+    NSString* identifier =
+        [info.draggingPasteboard stringForType:INCDAWPluginPasteboardType];
+
+    const std::size_t row = _dropSlot;
+
+    _dropping = false;
+    _dropSlot = noDockSlot;
+
+    if (identifier == nil)
+        return NO;
+
+    // A drop that was not over a rack row appends: it landed on the strip, or
+    // on the dock's chrome, and both mean "add this to the chain".
+    [self insertPlugin:identifier atSlot:row];
+    return YES;
+}
+
 - (void)mouseDown:(NSEvent*)event
 {
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
-    const std::size_t index = [self stripIndexAtX:point.x];
 
     _drag = MixerDrag::none;
+
+    if (NSPointInRect(point, [self dockRect])) {
+        [self handleDockClickAt:point];
+        return;
+    }
+
+    const std::size_t index = [self stripIndexAtX:point.x];
 
     if (index == static_cast<std::size_t>(-1))
         return;
@@ -438,6 +906,15 @@ enum class MixerDrag { none, fader, pan };
 
     const project::MixerNode& node = _project->mixerNodes()[index];
     const project::EntityId nodeId = node.id;
+
+    // Any click on a strip makes it the strip the dock is editing. FL's mixer
+    // behaves the same way, and the alternative — a separate "select" target —
+    // is a control whose only job is to be clicked before the real one.
+    if (nodeId.value() != _selectedMixerNodeIdValue) {
+        _selectedMixerNodeIdValue = nodeId.value();
+        _rackTop                  = 0;
+        [self setNeedsDisplay:YES];
+    }
 
     if (NSPointInRect(point, [self muteRectAt:index])) {
         [self commitStructural:std::make_unique<app::SetMixerMutedCommand>(nodeId, !node.muted)];
@@ -494,6 +971,26 @@ enum class MixerDrag { none, fader, pan };
         [self applyPanAt:point index:index];
 }
 
+- (void)scrollWheel:(NSEvent*)event
+{
+    const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+
+    if (!NSPointInRect(point, [self dockRackRect])) {
+        [super scrollWheel:event];
+        return;
+    }
+
+    const CGFloat delta = event.scrollingDeltaY;
+
+    if (delta < 0.0)
+        ++_rackTop;
+    else if (delta > 0.0 && _rackTop > 0)
+        --_rackTop;
+
+    [self clampRack];
+    [self setNeedsDisplay:YES];
+}
+
 - (void)mouseUp:(NSEvent*)event
 {
     (void)event;
@@ -508,6 +1005,15 @@ enum class MixerDrag { none, fader, pan };
 - (void)rightMouseDown:(NSEvent*)event
 {
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+
+    if (NSPointInRect(point, [self dockRect])) {
+        const std::size_t row = [self dockSlotAtPoint:point];
+        if (row != noDockSlot)
+            [self showDockSlotMenuForRow:row event:event];
+
+        return;
+    }
+
     const std::size_t index = [self stripIndexAtX:point.x];
 
     if (index >= _project->mixerNodes().size())
@@ -1017,6 +1523,8 @@ enum class MixerDrag { none, fader, pan };
 
 - (void)structuralChange
 {
+    // The chain may have grown past the rack or shrunk under it.
+    [self clampRack];
     [self setNeedsDisplay:YES];
 
     if (self.onChange != nil)

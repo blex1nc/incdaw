@@ -26,6 +26,7 @@ add_executable(incdaw_tests
     unit/PianoRollTests.cpp
     unit/InstrumentTests.cpp
     unit/PianoInstrumentTests.cpp
+    unit/PluginPickerTests.cpp
     unit/InstrumentParameterTests.cpp
     unit/BuiltinEffectTests.cpp
     unit/BuiltinInsertTests.cpp

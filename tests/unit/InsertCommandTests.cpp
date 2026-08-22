@@ -175,3 +175,68 @@ TEST_CASE("bypass toggles, undoes, and refuses a no-op")
     REQUIRE(fixture.registry.undo());
     CHECK(!fixture.master().inserts.front().bypassed);
 }
+
+// ── Dropping a plugin ONTO a slot (UI build-out increment 15) ─────────────────
+//
+// The mixer's dock lets a plugin be dragged onto a particular link of the
+// chain. Chain order is signal order, so "third" has to mean third — on the
+// first execute and on every redo after it.
+
+TEST_CASE("an insert can be added at a position, and redo puts it back there")
+{
+    Fixture fixture;
+
+    plugins::PluginIdentifier first  = fixture.gain();
+    plugins::PluginIdentifier second = fixture.gain();
+    second.uid = "com.incdaw.second";
+
+    plugins::PluginIdentifier dropped = fixture.gain();
+    dropped.uid = "com.incdaw.dropped";
+
+    REQUIRE(fixture.registry.execute(
+        std::make_unique<app::AddInsertCommand>(fixture.project.masterMixerNode(), first)));
+    REQUIRE(fixture.registry.execute(
+        std::make_unique<app::AddInsertCommand>(fixture.project.masterMixerNode(), second)));
+
+    // Between the two, which is what a drop on the second row means.
+    REQUIRE(fixture.registry.execute(std::make_unique<app::AddInsertCommand>(
+        fixture.project.masterMixerNode(), dropped, 1)));
+
+    REQUIRE(fixture.master().inserts.size() == 3);
+    CHECK(fixture.master().inserts[0].plugin.uid == "com.incdaw.testgain");
+    CHECK(fixture.master().inserts[1].plugin.uid == "com.incdaw.dropped");
+    CHECK(fixture.master().inserts[2].plugin.uid == "com.incdaw.second");
+
+    const project::EntityId slotId = fixture.master().inserts[1].id;
+
+    fixture.registry.undo();
+    REQUIRE(fixture.master().inserts.size() == 2);
+    CHECK(fixture.master().inserts[1].plugin.uid == "com.incdaw.second");
+
+    fixture.registry.redo();
+    REQUIRE(fixture.master().inserts.size() == 3);
+    CHECK(fixture.master().inserts[1].plugin.uid == "com.incdaw.dropped");
+
+    // Same position AND same id: an automation lane written against this slot
+    // has to survive the round trip.
+    CHECK(fixture.master().inserts[1].id == slotId);
+}
+
+TEST_CASE("a position past the end of the chain appends rather than failing")
+{
+    Fixture fixture;
+
+    REQUIRE(fixture.registry.execute(std::make_unique<app::AddInsertCommand>(
+        fixture.project.masterMixerNode(), fixture.gain(), 9)));
+
+    REQUIRE(fixture.master().inserts.size() == 1);
+
+    plugins::PluginIdentifier late = fixture.gain();
+    late.uid = "com.incdaw.late";
+
+    REQUIRE(fixture.registry.execute(std::make_unique<app::AddInsertCommand>(
+        fixture.project.masterMixerNode(), late, 7)));
+
+    REQUIRE(fixture.master().inserts.size() == 2);
+    CHECK(fixture.master().inserts[1].plugin.uid == "com.incdaw.late");
+}

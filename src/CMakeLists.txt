@@ -154,6 +154,7 @@ add_library(incdaw_app STATIC
     app/MusicTheory.cpp
     app/PianoRollModel.cpp
     app/ChannelRackModel.cpp
+    app/PluginPickerModel.cpp
     app/PlaylistModel.cpp
     app/commands/NoteCommands.cpp
     app/commands/TempoCommands.cpp
@@ -204,6 +205,7 @@ if(APPLE)
         ui/macos/PatternListView.mm
         ui/macos/PlaylistView.mm
         ui/macos/MixerView.mm
+        ui/macos/PluginPickerView.mm
         ui/macos/AudioEditorView.mm
         ui/macos/InsertParameterPanel.mm
         ui/macos/SpectrumView.mm

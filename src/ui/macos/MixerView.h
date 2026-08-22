@@ -22,6 +22,11 @@ namespace incdaw::engine::dsp { class MixerStripNode; }
 /// Channel whose routing the mixer acts on ("route this channel here").
 @property (nonatomic, assign) unsigned long long selectedChannelIdValue;
 
+/// The strip the dock is editing: its chain fills the insert rack on the
+/// right, and what the picker inserts goes there. Zero means "the master",
+/// which is what an empty selection resolves to rather than nothing at all.
+@property (nonatomic, assign) unsigned long long selectedMixerNodeIdValue;
+
 /// Returns the strip rendering a mixer node right now, or nullptr.
 @property (nonatomic, copy) incdaw::engine::dsp::MixerStripNode* (^stripLookup)(unsigned long long);
 
