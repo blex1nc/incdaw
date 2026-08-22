@@ -8,6 +8,112 @@ public version yet.
 
 ## [Unreleased] — UI build-out
 
+### UI — the Piano Roll gets a control strip — 2026-08-23
+
+**Added**
+
+- **A header strip above the Piano Roll** with the four things the editor
+  could not say about itself: the snap division, the key, the scale, and
+  whether ghost notes and the velocity lane are showing. Each readout
+  opens a list; the two toggles are buttons.
+- **Snap is now a setting.** It was fixed at a sixteenth and reachable
+  from nowhere. Bar, 1/2, 1/4, 1/8, 1/16, 1/32 and Off, and it is the
+  same value the note-length, drag and quantize arithmetic already read
+  — the grid the notes land on and the grid the strip claims cannot
+  disagree.
+- **The key signature is now a setting** — root and scale. Scale
+  highlighting and the note-nudge tool (`[` and `]`) both read it, so
+  changing the key in the strip changes what the grid calls in-key and
+  what the tool nudges towards, together.
+
+**Changed**
+
+- `INCDAWPianoRollView` publishes its settings (`snapTicks`,
+  `keyRootPitchClass`, `scaleIndex`, `ghostNotesVisible`,
+  `velocityLaneVisible`) and reports `onEditorStateChanged` when a
+  keystroke moves one, so the strip follows `E` and `G` rather than
+  showing what used to be true. The editor remains the only place the
+  state lives.
+
+**Notes**
+
+- The strip is a sibling view, not a band inside the Piano Roll. The
+  editor draws through Metal where the only primitive is a rectangle and
+  text costs a layer each — the budget that buys ten thousand notes in
+  one draw call (D-006). Chrome with five labels belongs outside it, in
+  CoreGraphics, through the theme.
+
+**Files**
+
+- `src/app/PianoRollHeaderModel.h` — geometry, hit testing, snap and
+  scale vocabulary (new)
+- `src/ui/macos/PianoRollHeaderView.{h,mm}` (new)
+- `src/ui/macos/PianoRollView.{h,mm}`, `src/ui/macos/main.mm`
+- `tests/unit/PianoRollTests.cpp` — 4 new cases
+
+### Mixing — a Tone insert, and a curve that agrees with the filter — 2026-08-23
+
+**Added**
+
+- **Tone (Bass/Mid/Treble).** A new insert in the builtin catalogue,
+  `incdaw.tone`, for the everyday move a mix needs before anything
+  clever: less mud, less honk, a little air. It is the three-band EQ —
+  the same class, the same parameter table, the same state blob — under
+  a different face, because a second tone stack would be the same
+  filter written twice.
+- **Its panel.** Three bipolar knobs over a live frequency-response
+  curve, each reading in decibels with the band's frequency underneath.
+  Drag a knob to shape it, ⌥-drag for a fine move, double-click or hit
+  "Flat" to return to neutral, which snaps at ±0.6 dB so neutral is a
+  gesture rather than a hunt for the pixel. The EQ's frequencies and the
+  mid's Q live behind an "Advanced" disclosure the window grows to fit.
+- **The curve is the filter.** It is plotted from `eqMagnitudeDb`,
+  which designs its biquads with the code the audio thread runs, and a
+  test measures a shaped EQ's actual output against the curve it draws
+  — so the picture cannot quietly drift from the sound.
+
+**Notes**
+
+- "EQ 3-Band" is unchanged and keeps its generic seven-slider panel;
+  the difference between the two catalogue entries is the editor, not
+  the processing.
+- A defaulted Tone insert is still bit-exact bypass.
+
+### UI — the settings window grows tabs, and the palette becomes a file — 2026-08-23
+
+**Added**
+
+- **Appearance settings.** Settings has an Appearance tab: a theme menu,
+  every colour the shell draws with, and a picker beside each one.
+  Changes apply live to the whole application while the transport runs
+  — there is no preview strip, because the application is the preview.
+- **Four built-in schemes.** Midnight (the scheme the shell was designed
+  against, and still the default), Slate, Ember and Daylight. They are
+  read-only: editing a colour while one is selected quietly makes a copy
+  you own and carries on there, so the shipped ground is always one menu
+  selection away.
+- **Themes are files.** A user theme is a versioned JSON file in
+  `~/Library/Application Support/INCDAW/Themes`, named by the file rather
+  than by anything inside it — so a theme can be copied to another
+  machine, hand-edited, or sent to somebody else. "Reveal Themes Folder"
+  opens it, "Duplicate" copies the current one, "Delete" removes one,
+  "Reset This Theme" puts a copy back to the built-in it came from.
+- **The window follows the theme.** A light palette hands AppKit the
+  light `NSAppearance`, so scrollers, sheets and menus stop arriving in
+  the wrong scheme over it.
+
+**Changed**
+
+- **Settings is four tabs** — Audio, MIDI, Appearance, Updates — rather
+  than one column. The column was already full before Appearance had
+  thirty-seven colours to put in it.
+- `theme::ink` reads from the active palette through a cache rebuilt on
+  a palette change rather than from a compiled-in `switch`. Roles, role
+  names and every drawing call are unchanged; the fourteen views that
+  draw through them needed no edit.
+- `settings.json` carries `appearance.theme`. A name nothing answers to
+  falls back to the built-in default rather than to an unpainted window.
+
 ### UI — the rack's steps get a level — 2026-08-23
 
 **Added**

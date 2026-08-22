@@ -155,8 +155,27 @@ std::filesystem::path pathOf(NSString* text)
     [self addSubview:scroll];
 
     [self reload];
+
+    // The outline's background is a colour handed to AppKit once, not a
+    // binding: without this, a theme change repaints every pane the browser
+    // sits beside and leaves the browser's own ground behind (D-039).
+    __weak INCDAWBrowserView* weakSelf = self;
+    [NSNotificationCenter.defaultCenter
+        addObserverForName:theme::kPaletteChangedNotification
+                    object:nil
+                     queue:NSOperationQueue.mainQueue
+                usingBlock:^(NSNotification* note) {
+                    (void)note;
+                    weakSelf.outlineView.backgroundColor = theme::ink(Ink::panel);
+                    [weakSelf.outlineView reloadData];
+                }];
+
     return self;
 }
+
+/// The outline, for the palette observer above. Not part of the public
+/// interface: nothing outside this file has any business reaching into it.
+- (NSOutlineView*)outlineView { return _outline; }
 
 // ── The tree ────────────────────────────────────────────────────────────────
 

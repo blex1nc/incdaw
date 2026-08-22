@@ -221,3 +221,41 @@ makes the project format usable with version control.
 5. **Corruption:** truncated and malformed files are rejected cleanly, never
    crash, never silently lose data.
 6. **Fuzz:** randomly corrupted project files must not crash the loader.
+
+---
+
+## 9. Files that are not the project
+
+A project stores what the music is. Two other formats store what the *machine*
+is, and they live in `~/Library/Application Support/INCDAW` rather than in the
+package — because putting either in the project is what makes a project
+unopenable on a second Mac (docs/DECISIONS.md D-036).
+
+Both are versioned, both tolerate unknown and missing keys, and both degrade to
+defaults rather than to an error: they are caches of a preference, never
+preconditions for launching.
+
+### `settings.json` — `app::AppSettings`
+
+    { "format": "incdaw-settings", "version": 1, … }
+
+The audio device, rate and block size; MIDI sources; the window's last frame
+and editor; the update check; and `appearance.theme`, the name of the scheme
+the shell draws with.
+
+### `Themes/<name>.json` — `ui::theme::ThemePalette`
+
+    { "format": "incdaw-theme", "version": 1, "name": …,
+      "colours": { "windowBackground": "#FF0F1115", … } }
+
+One file per user theme, one `#AARRGGBB` string per role (D-039). The alpha
+byte is always written: the two bevel roles exist only as a partial alpha and
+would draw as solid without it.
+
+**The file name is the theme's name**, not the `name` field — a theme travels
+between machines by being copied and renamed, so the folder is the authority.
+The built-in schemes are compiled in and are never written here; a user theme
+may not take a built-in's name.
+
+A colour that does not parse, a role this build does not have, or a file that
+is not JSON at all costs that role its value and nothing else.

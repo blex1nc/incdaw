@@ -1385,3 +1385,92 @@ an extension of this one.
 
 **Date:** 2026-08-22
 **Status:** ACCEPTED
+
+---
+
+## D-039 — A theme is a file: the palette is data, and the user owns it
+
+**Context:** D-035 gave the shell one drawn design language, and put every
+colour in it behind a named role in `ui/macos/Theme.h`. That fixed the problem
+it was written for — six panes inventing their own greys — and left a different
+one: the values behind those roles were a `switch` statement compiled into the
+binary. Changing one grey meant editing Objective-C++ and rebuilding, and a
+user could not change any of them at all. Every DAW INCDAW is measured against
+ships user-editable skins, and for good reason: a person who spends ten hours a
+day in a window has a legitimate claim on what that window looks like, and no
+single palette survives every room, every monitor and every pair of eyes.
+
+**Options:**
+
+1. **Leave it compiled in.** Nothing to build, nothing to maintain, nothing to
+   corrupt. Also nothing the user can do.
+2. **A handful of alternative schemes, compiled in, chosen from a menu.** Cheap
+   and safe, but it makes the shipped opinions the only opinions.
+3. **A skin format with images, gradients and control artwork.** What FL
+   Studio's skins historically were. It would mean an asset pipeline, an asset
+   format, a compatibility surface, and a way for a downloaded file to make the
+   application unusable — for a shell that deliberately draws every pixel from
+   primitives and imports no artwork at all (CLAUDE.md §43).
+4. **Colours only, as a versioned JSON file per theme, in a folder the user
+   owns.** Built-in schemes compiled in and read-only; a user theme is a file
+   that can be copied, hand-edited, or sent to somebody else.
+
+**Chosen:** 4.
+
+**Reason:** the design language is the shape, and the shape is INCDAW's. The
+palette is the part that is legitimately a preference, and it is the part that
+serialises to a hundred lines of text with no asset pipeline behind it. Making
+it a file rather than a settings key is what makes a theme shareable, which is
+most of the point of having themes at all.
+
+**How it is split:** `ui/ThemePalette.{h,cpp}` holds the roles, the values and
+the file format, and contains no AppKit — so a theme can be parsed, validated
+and round-tripped in a unit test with no window server. `ui/ThemeLibrary.{h,cpp}`
+holds the awkward parts of a user-writable folder: names with separators in
+them, two themes that want one file, a file that vanished between the scan and
+the load. `ui/macos/Theme.mm` keeps the drawing and now reads its colours from
+the active palette through a cache rebuilt only when the palette changes —
+never in a draw.
+
+**Versioned from the first line written (CLAUDE.md §2):** the file carries
+`format` and `version`. Colours are `#AARRGGBB` strings rather than integers
+because people hand-edit these files, and the alpha byte is always written
+because two roles — the bevel highlight and the bevel shadow — exist only as a
+partial alpha and would draw as solid slabs without it.
+
+**Every failure degrades:** an unparseable file, a colour with a typo in it, a
+role from a newer build, a theme deleted in Finder while INCDAW is open. Each
+resolves to the built-in value for what could not be read and keeps what could.
+A theme file is a preference, never a precondition for drawing a window — the
+same rule D-036 set for `settings.json`.
+
+**Built-ins are read-only, and the first edit copies.** Editing a colour while
+a built-in is selected silently duplicates it to a theme the user owns and
+continues there. That keeps the scheme INCDAW ships with one selection away
+from any mess, and it removes the modal question ("do you want to make a copy?")
+from a gesture as small as dragging a colour picker.
+
+**No preview strip.** Every change applies live to the whole application. A
+palette that has to stay legible over a running transport cannot be judged in a
+swatch, so the application is the preview.
+
+**The file name is the theme's name.** Not the name inside the file: a theme
+travels between machines by being copied and renamed in Finder, and the folder
+has to be the authority or a renamed copy reports itself as the original.
+
+**What AppKit forced:** the shell draws its own surfaces, but scrollers, sheets,
+menus and text fields are AppKit's. The window's `NSAppearance` therefore
+follows the palette's luminance, so a light theme does not arrive with dark
+scrollers over it. Colours handed to AppKit controls are snapshots rather than
+bindings, so a palette change posts a notification and the few places holding
+one reapply it.
+
+**Tradeoffs:** thirty-seven roles is a long list to scroll, and grouping it
+under eight headings only partly answers that. A user can still make an
+unreadable theme — nothing here validates contrast — but "Reset This Theme"
+returns to the built-in it came from, and selecting a built-in is always one
+menu away. Themes are colours only: anyone expecting FL Studio's image-based
+skins will not find them here, and that is the decision, not an omission.
+
+**Date:** 2026-08-23
+**Status:** ACCEPTED

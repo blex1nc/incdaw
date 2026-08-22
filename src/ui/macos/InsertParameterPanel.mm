@@ -135,7 +135,9 @@ NSString* formattedValue(double value, BOOL stepped)
     window.releasedWhenClosed = NO;
     window.title              = title;
     window.contentView        = scroll;
-    window.appearance         = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    window.appearance         = [NSAppearance appearanceNamed:theme::paletteIsLight()
+                                                                  ? NSAppearanceNameAqua
+                                                                  : NSAppearanceNameDarkAqua];
     window.backgroundColor    = theme::ink(Ink::windowBackground);
 
     objc_setAssociatedObject(window, panelOwnerKey, panel,
