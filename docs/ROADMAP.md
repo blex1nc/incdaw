@@ -562,6 +562,20 @@ velocity the step was programmed at; the step stays programmed at any level
 (the floor is 1, not 0); and the drag's arithmetic is relative to where it
 began, asserted rather than eyeballed.
 
+### Increment 16 — the Piano Roll's control strip — DONE 2026-08-23
+
+The editor had settings no control could reach: the grid was fixed at a
+sixteenth and the key signature at C major, though the scale highlighting and
+the nudge tool both read it. A strip above the pane now shows and sets snap,
+key and scale, and carries the ghost and velocity-lane toggles that were
+keystrokes only. It is a sibling AppKit view rather than a band inside the
+Metal editor, whose text budget is spent on bar numbers and key names.
+
+**Exit criterion (met):** the snap picker speaks the editor's own tick units
+and round-trips every division; the strip's controls do not overlap and the
+toggles stay measured from the trailing edge; and a click lands on the control
+it looks like it lands on, asserted per zone.
+
 ### Remaining, by gate
 
 - **Dependency approval required (§41):** AU hosting, then VST3; FLAC and

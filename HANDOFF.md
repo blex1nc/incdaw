@@ -2120,6 +2120,28 @@ UI build-out increment 15 — the rack's step levels (2026-08-23):
     the feature that has to land first; MidiInput::injectForTesting is
     already the intended entry point for the UI side.
 
+UI build-out increment 16 — the Piano Roll's control strip (2026-08-23):
+
+    - The strip is a SIBLING view (main.mm places it in editorContainer
+      and hides it with the pane), not a band inside PianoRollView.
+      Putting it inside would spend the Metal pane's text budget on
+      chrome; that budget is what D-006's one-draw-call model rests on.
+      applyViewportGeometry is untouched and still divides the pane's own
+      height between ruler, grid and velocity lane.
+    - The editor owns the state; the strip only shows it. Every pick goes
+      PianoRollHeaderView -> main.mm -> INCDAWPianoRollView, and the
+      strip is then re-read from the editor (syncPianoRollHeader). Do not
+      give the strip its own copy — E and G change the same settings from
+      the keyboard, which is what onEditorStateChanged exists for.
+    - Snap zero means "do not snap" in PianoRollModel already, so the
+      picker hands ticks straight over. snapForTicks maps any value to
+      the nearest division AT OR BELOW it, which is why a value set from
+      elsewhere can never make the strip claim a finer grid than the one
+      notes land on.
+    - Key and scale are the SAME _keyRootPc and _scale the nudge tool and
+      the scale highlighting read (increment 14's note). There is still
+      only one key signature in the editor, and now it has a control.
+
 Things to be careful about:
 
   - third_party/ is gitignored: a fresh clone or worktree has neither
