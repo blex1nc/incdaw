@@ -2144,6 +2144,69 @@ UI build-out increment 16 — the Piano Roll's control strip (2026-08-23):
       the scale highlighting read (increment 14's note). There is still
       only one key signature in the editor, and now it has a control.
 
+UI build-out increment 17 — the mixer's dock and the plugin picker
+(2026-08-23):
+
+    - dockWidth is subtracted from the STRIPS' region, not from the view:
+      stripIndexAtX refuses anything at or past stripsWidth, and the strip
+      loop draws inside a clip of the same rectangle. Both are needed —
+      without the clip a desk with more strips than fit paints over the
+      dock, and without the hit-test guard a click in the dock lands on
+      whichever strip the arithmetic says is there.
+    - The dock's rack is a WINDOW over the chain (_rackTop), not the chain.
+      A rack row is not a chain index: go through chainIndexForRow. The
+      window always keeps one empty row past the end reachable, because
+      that row is where the next insert goes.
+    - AddInsertCommand's index is replayed on redo. It is stored, not
+      recomputed from the chain's length at execute time: a redo after
+      other edits must put the slot back where it was, and the slot id is
+      minted once for the same reason.
+    - The picker's rows() is rebuilt on every setSearch, and the highlight
+      is reset to the first entry rather than kept: a row index into the
+      previous filter means nothing after it.
+    - INCDAWPluginPasteboardType carries a PluginIdentifier string and
+      nothing else. It is deliberately private — a plugin choice dropped
+      into another application would mean nothing — which is also why the
+      mixer's drop target and the Channel Rack's file-URL drop cannot
+      collide.
+    - The strips' own four-row summary was NOT replaced by the dock. It is
+      what makes a chain visible while scanning the desk; the dock is
+      where one chain is worked on. Do not "unify" them.
+    - The picker offers effects only. If instruments are ever added to it,
+      the insert path has to reject them first — AddInsertCommand will
+      happily build a slot the compiler cannot make an effect out of.
+    - Hosted plugins are unclassified ("Plugins"), because PluginScan
+      records id/name/vendor and no plugin type. Classifying them is a
+      SCANNER change (ClapDescriptor + the TSV's version), not a picker
+      change.
+
+Instruments — the piano (2026-08-23):
+
+    - PianoInstrument computes every partial's frequency and decay
+      coefficient at NOTE-ON. The render loop advances a rotation (two
+      multiplies) per partial and calls no transcendental function. Do not
+      move a std::sin into it: the 64-voice bench number (4.2% of the
+      block budget) is what that choice buys.
+    - The partials are normalised by the SUM of their amplitudes, not by
+      their energy. They all start in phase — that alignment IS the hammer
+      strike — so energy normalisation lets a bright note leave the
+      instrument at roughly three times full scale.
+    - The hammer noise is seeded from the key and the voice's strike
+      counter, never from a clock. Offline render equivalence depends on
+      it, and PianoInstrumentTests asserts two identical event streams
+      render identically.
+    - A voice retires when its peak falls below 1e-7. Without that the
+      levels decay into denormals and stay there, costing far more than
+      the voice is worth.
+    - pedalTail is applied at the STRIKE, not continuously: a note struck
+      with the pedal already down gets a longer tail. It is not
+      sympathetic resonance and the header says so.
+    - SetChannelInstrumentCommand DISCARDS instrumentParameters and
+      instrumentStateFile, and restores them on undo. Parameter ids belong
+      to the outgoing instrument; the compiler applies stored values blind
+      (D-034), so carrying them across would write the sampler's cutoff
+      onto the piano's release.
+
 Things to be careful about:
 
   - third_party/ is gitignored: a fresh clone or worktree has neither

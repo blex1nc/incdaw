@@ -1474,3 +1474,50 @@ skins will not find them here, and that is the decision, not an omission.
 
 **Date:** 2026-08-23
 **Status:** ACCEPTED
+
+---
+
+## D-040 — INCDAW's piano is synthesized, not sampled
+
+**Context:** Phase 15 needed a first instrument anyone would choose to play,
+and a piano is the instrument a DAW is judged by. The obvious route is a
+multisampled library: record a real instrument at several velocities per key
+and map the zones. The Sampler already supports exactly that.
+
+**Options:**
+
+1. Ship a multisampled piano library with the application.
+2. Ship nothing, and let users map their own samples into the Sampler.
+3. Synthesize the piano: model the struck string, and make the voicings
+   parameters of that model.
+
+**Chosen:** 3.
+
+**Reason:** CLAUDE.md §20 and §43 forbid bundling copyrighted or commercial
+content, and no public-domain multisampled piano of usable quality exists that
+could be redistributed with a closed product — so option 1 is not available,
+whatever its merits. Option 2 is not an instrument; it is an empty sampler
+with a piano-shaped hole. Option 3 is the only route to something that plays
+out of the box, and it also gives what a sample library cannot: five voicings
+that are five sets of physics rather than five gigabytes, per-note continuous
+control of brightness and decay, and a footprint of one source file.
+
+The model is a stiff struck string: inharmonic partials at n·f0·√(1+Bn²), a
+strike-point comb, per-partial two-stage decay, a register-dependent damper
+and the sustain pedal. The electric voicing swaps the string for a 2-operator
+FM tine, which is what a Rhodes-style electric piano actually is.
+
+**Tradeoffs:** A synthesized acoustic piano does not match a good sample
+library for realism, and saying otherwise would be the kind of claim §47
+forbids. The electric voicing is the one that is genuinely convincing, because
+FM is how that instrument's timbre really works. The partial budget (24) also
+truncates the lowest notes' spectra, which have more audible partials than
+that in reality.
+
+The route to sampled realism stays open and costs nothing: a piano library is
+a set of Sampler zones, and the Sampler has supported key and velocity
+layering since Phase 14. This decision is about what INCDAW *ships*, not about
+what it can play.
+
+**Date:** 2026-08-23
+**Status:** ACCEPTED

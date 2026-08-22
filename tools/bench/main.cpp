@@ -8,6 +8,8 @@
 #include "engine/core/AudioBufferPool.h"
 #include "engine/dsp/Resampler.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
+#include "engine/instrument/PianoInstrument.h"
+#include "engine/instrument/SimpleSynth.h"
 #include "engine/transport/TempoMap.h"
 #include "project/Model.h"
 #include "project/OfflineRender.h"
@@ -212,6 +214,91 @@ int main()
 
             std::printf("  %-12s %7.1f ns/frame  (%5.2f%% of the block budget)\n",
                         info.displayName, nsPerFrame, blockBudgetPercent);
+        }
+    }
+
+    // ── Instrument cost: the piano's voice budget ────────────────────────
+    //
+    // The piano is a modal model — up to 24 rotating partials per voice — so
+    // unlike the reference synth its cost scales with how much of the
+    // keyboard is held down. With the pedal down nothing retires, which is
+    // the worst case a player can actually produce.
+    {
+        constexpr engine::FrameCount blockSize = 512;
+
+        // ~4 seconds of audio: long enough to be a stable measurement, short
+        // enough that the notes are still sounding at the end of it. Measuring
+        // past the decay would be measuring silence, which is exactly what an
+        // earlier run of this benchmark did.
+        constexpr int blocks = 400;
+
+        engine::AudioBufferPool pool;
+        pool.allocate(1, 2, blockSize);
+        const auto output = pool.buffer(0);
+
+        std::printf("\ninstrument cost, 512-frame stereo blocks, pedal down:\n");
+
+        const struct { const char* label; int model; int voices; } cases[] = {
+            {"piano grand    1 voice ", 0,  1},
+            {"piano grand   16 voices", 0, 16},
+            {"piano grand   64 voices", 0, 64},
+            {"piano electric 64 voices", 4, 64},
+        };
+
+        for (const auto& measured : cases) {
+            engine::PianoInstrument piano;
+            piano.prepare(48000.0, blockSize);
+            piano.setParameter(static_cast<std::uint32_t>(engine::PianoParam::model),
+                               static_cast<double>(measured.model));
+
+            engine::MidiBuffer midi;
+            midi.insert(engine::MidiMessage::controlChange(0, 64, 127));
+            for (int voice = 0; voice < measured.voices; ++voice)
+                midi.insert(engine::MidiMessage::noteOn(0, 24 + voice, 100));
+
+            output.clear();
+            piano.processBlock(output, midi);
+
+            const engine::MidiBuffer empty;
+            const auto start = Clock::now();
+            for (int block = 0; block < blocks; ++block) {
+                output.clear();
+                piano.processBlock(output, empty);
+            }
+            const double elapsed = millisecondsSince(start);
+
+            const double blockBudgetPercent =
+                elapsed / static_cast<double>(blocks) / (1000.0 * blockSize / 48000.0) * 100.0;
+
+            std::printf("  %-24s %7.2f%% of the block budget  (%d sounding)\n",
+                        measured.label, blockBudgetPercent, piano.activeVoiceCount());
+        }
+
+        // The reference synth at the same polyphony, as the yardstick.
+        {
+            engine::SimpleSynth synth;
+            synth.prepare(48000.0, blockSize);
+
+            engine::MidiBuffer midi;
+            for (int voice = 0; voice < 32; ++voice)
+                midi.insert(engine::MidiMessage::noteOn(0, 24 + voice, 100));
+
+            output.clear();
+            synth.processBlock(output, midi);
+
+            const engine::MidiBuffer empty;
+            const auto start = Clock::now();
+            for (int block = 0; block < blocks; ++block) {
+                output.clear();
+                synth.processBlock(output, empty);
+            }
+            const double elapsed = millisecondsSince(start);
+
+            std::printf("  %-24s %7.2f%% of the block budget  (%d sounding)\n",
+                        "synth 32 voices", 
+                        elapsed / static_cast<double>(blocks)
+                            / (1000.0 * blockSize / 48000.0) * 100.0,
+                        synth.activeVoiceCount());
         }
     }
 

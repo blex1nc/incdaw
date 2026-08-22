@@ -8,6 +8,60 @@ public version yet.
 
 ## [Unreleased]
 
+### UI — the mixer gets a dock, and the desk gets a plugin picker — 2026-08-23
+
+- **The selected strip's whole chain, down the right edge.** The strips
+  keep their four-row summary — it is what makes a chain visible while
+  scanning the desk — and the dock is where a chain is worked on: ten
+  rows, numbered in signal order, each with the plugin's name and a
+  bypass lamp. A chain longer than the rack scrolls rather than being
+  truncated.
+- **A searchable catalogue under it.** Builtin effects grouped by what
+  they do (Dynamics, Tone, Modulation, Space, Utility) and every scanned
+  plugin below them. Double-click or Return appends to the chain; typing
+  filters by name or category; the arrow keys walk the entries and step
+  over the headings.
+- **Drag a plugin onto the link it should occupy.** A drop between two
+  inserts lands between them, in one undo entry. Dragging across the desk
+  re-selects the strip under the pointer, so a chain that was not on show
+  when the drag began is still reachable.
+- **Clicking a strip selects it.** Anywhere on it — FL's mixer behaves the
+  same way, and a separate "select" target is a control whose only job is
+  to be clicked before the real one.
+
+**Architecture**
+
+- `app::PluginPickerModel` holds the catalogue, the filter, the row
+  layout and the hit test. A filter and a hit test that must agree with
+  what was drawn are logic, and logic in a `.mm` file cannot be tested.
+- The picker offers **effects only**. A generator belongs to a channel,
+  not to an insert slot; offering one here would build a slot the
+  compiler cannot make an effect out of.
+- `AddInsertCommand` gained an optional position, replayed on redo. Chain
+  order is signal order: an insert that landed third has to land third
+  again, or the undo stack above it describes a different chain.
+- The view still knows menus, not catalogues: scanned plugins arrive
+  through `availableInserts`, exactly as the insert menu already received
+  them. The right-click menu is untouched and still reaches everything.
+
+**Known gap**
+
+- Scanned plugins are listed under a flat "Plugins" heading and are not
+  separated into instruments and effects, because the CLAP scan records
+  an id, a name and a vendor and nothing about what the plugin does.
+  Guessing from the name would be a wrong label presented as a fact.
+
+**Files**
+
+- `src/app/PluginPickerModel.{h,cpp}` (new),
+  `src/ui/macos/PluginPickerView.{h,mm}` (new)
+- `src/ui/macos/MixerView.{h,mm}`, `src/app/commands/PluginCommands.{h,cpp}`
+- `tests/unit/PluginPickerTests.cpp` (new, 7 cases),
+  `tests/unit/InsertCommandTests.cpp` — 2 new cases
+
+---
+
+
 ### Fixed — a theme change reaches the panels too — 2026-08-23
 
 - **Open panels follow the palette.** Choosing a theme repainted the main

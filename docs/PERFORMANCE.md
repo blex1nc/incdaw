@@ -174,3 +174,34 @@ compile 64ch 0.197 ms, render 69.9× realtime, effects 0.5–15.6 ns/frame.
 - UI frame profiling beyond the Phase 6 culling record needs
   Instruments.app (full Xcode) — a dependency decision recorded in §6,
   still not forced.
+
+---
+
+## Instrument cost — the piano's voice budget (2026-08-23)
+
+The piano is a modal model — up to 24 rotating partials per voice — so unlike
+the reference synth its cost scales with how much of the keyboard is sounding.
+Measured with `incdaw-bench` (Release, arm64), 512-frame stereo blocks at
+48 kHz, sustain pedal down so nothing retires, over ~4 seconds of audio.
+
+| Workload | Share of the block budget |
+|---|---|
+| Piano, Grand, 1 voice | 0.05 % |
+| Piano, Grand, 16 voices | 1.08 % |
+| Piano, Grand, 64 voices (full polyphony) | **4.20 %** |
+| Piano, Electric, 64 voices | 0.97 % |
+| Reference synth, 32 voices | 0.82 % |
+
+A whole keyboard held down with the pedal costs about a twentieth of one
+callback, which is the number that mattered: the rotation-based oscillator
+was chosen over `std::sin` per partial per sample precisely so that this
+would be affordable, and it is.
+
+The measurement window is deliberately ~4 s. An earlier run measured 21 s and
+reported the electric at 0.23 %, which was the cost of silence — the voices
+had decayed away before the benchmark ended.
+
+### Not optimised, deliberately
+
+- The piano at anything under full polyphony. Four percent at 64 voices leaves
+  no case for tuning a path that costs one percent in ordinary playing.
