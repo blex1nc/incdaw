@@ -3,6 +3,7 @@
 #include "engine/transport/TempoMap.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace incdaw::engine {
 namespace {
@@ -172,6 +173,153 @@ void MidiClockGenerator::generate(MidiBuffer& destination, const BlockSegment* s
         expectedFrame_ = last.startFrame + last.length;
     } else {
         expectedFrame_ = blockStart;
+    }
+}
+
+// ── Receiving ────────────────────────────────────────────────────────────────
+
+void MidiClockReceiver::reset() noexcept
+{
+    elapsedFrames_  = 0;
+    lastPulseFrame_ = 0;
+    hasPulse_       = false;
+    intervalFrames_ = 0.0;
+    acceptedRun_    = 0;
+    rejectedRun_    = 0;
+    seedSum_        = 0.0;
+    seedCount_      = 0;
+
+    estimatedTempo_.store(0.0, std::memory_order_relaxed);
+    locked_.store(false, std::memory_order_relaxed);
+    externalTick_.store(0, std::memory_order_relaxed);
+    pulses_.store(0, std::memory_order_relaxed);
+    rejected_.store(0, std::memory_order_relaxed);
+}
+
+void MidiClockReceiver::acceptInterval(double intervalFrames, SampleRate sampleRate) noexcept
+{
+    if (seedCount_ < seedIntervals) {
+        // Still finding the rate. A plain mean, because there is nothing yet
+        // to judge an outlier against.
+        seedSum_ += intervalFrames;
+        ++seedCount_;
+        intervalFrames_ = seedSum_ / static_cast<double>(seedCount_);
+    } else {
+        intervalFrames_ += (intervalFrames - intervalFrames_) * smoothing;
+    }
+
+    if (intervalFrames_ <= 0.0 || sampleRate <= 0.0)
+        return;
+
+    // 24 pulses to the quarter: one pulse every (60 / bpm / 24) seconds.
+    const double beatsPerMinute = sampleRate * 60.0 / (intervalFrames_ * 24.0);
+    estimatedTempo_.store(beatsPerMinute, std::memory_order_relaxed);
+
+    if (acceptedRun_ >= pulsesToLock)
+        locked_.store(true, std::memory_order_relaxed);
+}
+
+void MidiClockReceiver::process(const MidiBuffer& incoming, Transport& transport,
+                                FrameCount blockSize, SampleRate sampleRate) noexcept
+{
+    if (role_.load(std::memory_order_relaxed) != MidiClockRole::receive || blockSize <= 0)
+        return;
+
+    for (const MidiMessage& message : incoming) {
+        const FrameCount at = elapsedFrames_ + message.frameOffset;
+
+        switch (message.status) {
+        case 0xFA: {
+            // Start: from the beginning. The spec has motion begin on the
+            // following pulse; beginning here instead costs at most one pulse
+            // and keeps the transport's own seek-then-play ordering intact.
+            externalTick_.store(0, std::memory_order_relaxed);
+            transport.seek(0);
+            transport.play();
+
+            hasPulse_ = false;   // the phase belongs to the run that just ended
+            break;
+        }
+
+        case 0xFB:
+            transport.play();
+            hasPulse_ = false;
+            break;
+
+        case 0xFC:
+            transport.stop();
+            locked_.store(false, std::memory_order_relaxed);
+            hasPulse_ = false;
+            break;
+
+        case 0xF2: {
+            // Song position pointer: 14 bits of MIDI beats, which are
+            // sixteenth notes, little end first.
+            const int  beats = message.data1 | (static_cast<int>(message.data2) << 7);
+            const Tick tick  = static_cast<Tick>(beats) * ticksPerSongPositionBeat;
+
+            externalTick_.store(tick, std::memory_order_relaxed);
+            transport.seekToTick(tick);
+            break;
+        }
+
+        case 0xF8: {
+            pulses_.fetch_add(1, std::memory_order_relaxed);
+            externalTick_.fetch_add(ticksPerPulse, std::memory_order_relaxed);
+
+            if (hasPulse_) {
+                const auto interval = static_cast<double>(at - lastPulseFrame_);
+
+                if (interval > 0.0) {
+                    // Nothing is rejected while the seed is still being
+                    // gathered: the estimate has no authority to reject with.
+                    const bool plausible =
+                        seedCount_ < seedIntervals
+                        || std::abs(interval - intervalFrames_) <= intervalFrames_ * toleranceRatio;
+
+                    if (plausible) {
+                        ++acceptedRun_;
+                        rejectedRun_ = 0;
+                        acceptInterval(interval, sampleRate);
+                    } else {
+                        rejected_.fetch_add(1, std::memory_order_relaxed);
+                        acceptedRun_ = 0;
+
+                        // A run of them is not slop: the master changed tempo,
+                        // and an outlier filter that never gives in would sit
+                        // at the old one forever.
+                        if (++rejectedRun_ >= rejectionsBeforeReseed) {
+                            intervalFrames_ = 0.0;
+                            rejectedRun_    = 0;
+                            seedSum_        = 0.0;
+                            seedCount_      = 0;
+                            locked_.store(false, std::memory_order_relaxed);
+                            acceptInterval(interval, sampleRate);
+                        }
+                    }
+                }
+            }
+
+            lastPulseFrame_ = at;
+            hasPulse_       = true;
+            break;
+        }
+
+        default:
+            break;   // channel traffic, and the realtime messages we ignore
+        }
+    }
+
+    elapsedFrames_ += blockSize;
+
+    // The master has gone quiet. The transport is deliberately left running —
+    // only an explicit stop stops it, and a cable knocked out mid-take should
+    // not silence the session — but nothing is being measured any more, so the
+    // estimate stops claiming to be locked.
+    if (hasPulse_ && sampleRate > 0.0
+        && static_cast<double>(elapsedFrames_ - lastPulseFrame_) > sampleRate * dropoutSeconds) {
+        locked_.store(false, std::memory_order_relaxed);
+        hasPulse_ = false;
     }
 }
 

@@ -19,6 +19,7 @@ class TempoMap;
 enum class MidiClockRole : std::uint8_t {
     off,
     send,
+    receive,
 };
 
 /// MIDI beat clock, generated from the tempo map.
@@ -100,6 +101,121 @@ private:
 
     /// Frames accumulated towards the next free-running pulse while stopped.
     double stoppedPhaseFrames_ = 0.0;
+};
+
+/// The other direction: INCDAW's transport following someone else's clock.
+///
+/// What this does and does not claim matters, so it is written down rather
+/// than implied. Start, stop, continue and song position are followed exactly
+/// — the external machine's transport is INCDAW's transport, and a locate on
+/// the master is a locate here, on the frame the message arrived on. The
+/// *tempo* is measured from the pulse intervals and published; applying it to
+/// the project is the shell's job, not the audio thread's, because installing
+/// a tempo map allocates.
+///
+/// What it does not do is phase-lock: between locates, INCDAW's timeline
+/// advances at the project's own tempo rather than being nudged pulse by
+/// pulse. A master running at a slightly different tempo therefore drifts
+/// until the next locate. Closing that loop needs the timeline to run at a
+/// rate the audio path can follow, which is a larger change than this one.
+///
+/// The jitter filter is the reason a measured tempo is worth having at all.
+/// Clock arrives over a bus with a millisecond of slop in it; feeding raw
+/// intervals to anything produces a tempo that visibly shakes. Intervals far
+/// from the running estimate are rejected as slop rather than averaged in —
+/// and a run of consecutive rejections is read as the master genuinely
+/// changing tempo, which is the case a plain outlier filter gets wrong.
+class MidiClockReceiver {
+public:
+    static constexpr Tick ticksPerPulse = MidiClockGenerator::ticksPerPulse;
+    static constexpr Tick ticksPerSongPositionBeat = MidiClockGenerator::ticksPerSongPositionBeat;
+
+    /// Accepted intervals before the estimate is called settled. 24 is one
+    /// quarter note: long enough to average the bus slop out, short enough
+    /// that a user pressing play on the master does not wait for it.
+    static constexpr int pulsesToLock = 24;
+
+    /// How far an interval may be from the running estimate and still be
+    /// treated as slop rather than as a tempo change.
+    static constexpr double toleranceRatio = 0.30;
+
+    /// Consecutive rejections that mean the master really did change tempo.
+    static constexpr int rejectionsBeforeReseed = 8;
+
+    /// Intervals averaged, unfiltered, before the tolerance test starts.
+    ///
+    /// Seeding from a single interval hands the filter whatever slop that one
+    /// packet carried, and the tolerance test then defends that number against
+    /// the truth: a clock alternating either side of its nominal rate would
+    /// settle on one extreme and reject the other forever. A short mean has no
+    /// side to take.
+    static constexpr int seedIntervals = 8;
+
+    /// Smoothing factor for the running estimate. One sixteenth settles
+    /// within a beat or so and still rides out a single late packet.
+    static constexpr double smoothing = 1.0 / 16.0;
+
+    /// No pulse for this long means the master has gone away. The transport
+    /// is left alone — only an explicit stop stops it — but the estimate stops
+    /// being called locked, because it is no longer being measured.
+    static constexpr double dropoutSeconds = 1.0;
+
+    void setRole(MidiClockRole role) noexcept { role_.store(role, std::memory_order_relaxed); }
+    [[nodiscard]] MidiClockRole role() const noexcept { return role_.load(std::memory_order_relaxed); }
+
+    void reset() noexcept;
+
+    /// Audio thread. Reads this block's incoming messages and drives
+    /// `transport`. Realtime-safe: transport control is atomic stores, and the
+    /// filter is a handful of arithmetic operations per pulse.
+    void process(const MidiBuffer& incoming,
+                 Transport&        transport,
+                 FrameCount        blockSize,
+                 SampleRate        sampleRate) noexcept;
+
+    /// The measured tempo, or 0 before the estimate settles.
+    [[nodiscard]] double estimatedTempo() const noexcept
+    {
+        return estimatedTempo_.load(std::memory_order_relaxed);
+    }
+
+    /// True while pulses are arriving and the estimate has settled.
+    [[nodiscard]] bool isLocked() const noexcept { return locked_.load(std::memory_order_relaxed); }
+
+    /// The musical position the incoming clock reports, in ticks. Advances 40
+    /// ticks per pulse from the last start or song position pointer.
+    [[nodiscard]] Tick externalTick() const noexcept
+    {
+        return externalTick_.load(std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] std::uint64_t pulseCount()    const noexcept { return pulses_.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::uint64_t rejectedCount() const noexcept { return rejected_.load(std::memory_order_relaxed); }
+
+private:
+    void acceptInterval(double intervalFrames, SampleRate sampleRate) noexcept;
+
+    std::atomic<MidiClockRole> role_{MidiClockRole::off};
+
+    std::atomic<double>        estimatedTempo_{0.0};
+    std::atomic<bool>          locked_{false};
+    std::atomic<Tick>          externalTick_{0};
+    std::atomic<std::uint64_t> pulses_{0};
+    std::atomic<std::uint64_t> rejected_{0};
+
+    /// Absolute frames since `reset`, so an interval can be measured across a
+    /// block boundary.
+    FrameCount elapsedFrames_ = 0;
+
+    FrameCount lastPulseFrame_ = 0;
+    bool       hasPulse_       = false;
+
+    double intervalFrames_  = 0.0;   ///< the running estimate, 0 until seeded
+    int    acceptedRun_     = 0;
+    int    rejectedRun_     = 0;
+
+    double seedSum_   = 0.0;
+    int    seedCount_ = 0;
 };
 
 } // namespace incdaw::engine

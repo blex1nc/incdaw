@@ -156,6 +156,7 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
     midiInput_.resetCounters();
     midiOutput_.resetCounters();
     midiClock_.reset();
+    midiClockInput_.reset();
     outputMidi_.clear();
 
     // The sender thread lives exactly as long as the device does: nothing can
@@ -217,6 +218,11 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
     const SampleRate blockRate = device_ != nullptr ? device_->actualSampleRate() : 0.0;
 
     midiInput_.collectForBlock(blockMidi_, blockHostTimeNanos, frameCount, blockRate);
+
+    // Before the transport is planned, not after: a start or a locate that
+    // arrived in this block should govern the block it arrived in, rather
+    // than being applied to the next one.
+    midiClockInput_.process(blockMidi_, transport_, frameCount, blockRate);
 
     // What leaves INCDAW this block. Filled by whatever generates outgoing
     // MIDI — the clock generator, an externally routed channel — and handed to

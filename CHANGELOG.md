@@ -8,6 +8,41 @@ public version yet.
 
 ## [Unreleased]
 
+### MIDI — following someone else's clock — 2026-08-23
+
+- **Start, stop, continue and locate are followed exactly.** The external
+  machine's transport is INCDAW's transport: start plays from the top
+  wherever the playhead was, continue resumes without moving it, and a
+  song position pointer locates to the bar it names — on the frame the
+  message arrived on, not at the next block boundary.
+- **The tempo is measured, with a filter that has an opinion.** Clock
+  arrives over a bus with slop in it, and feeding raw intervals to
+  anything produces a number that visibly shakes. Intervals far from the
+  running estimate are rejected as slop — but a *run* of rejections is
+  read as the master genuinely changing tempo, which is the case a plain
+  outlier filter gets wrong and sits at the old tempo forever. The
+  estimate seeds from a short mean rather than from one interval, so a
+  clock that alternates either side of its rate cannot make the filter
+  pick a side and then defend it.
+- **A clock that goes away does not stop the song.** After a second of
+  silence the estimate stops claiming to be locked, and the transport
+  keeps playing. Only an explicit stop stops it — a cable knocked out
+  mid-take is not a reason to silence the session.
+- **Settings → MIDI → Beat clock → Receive.** One setting with three
+  values rather than two switches, because sending and receiving are
+  mutually exclusive: a machine that drives the clock and follows it is
+  chasing its own tail.
+
+**What this is not.** Between locates, INCDAW's timeline advances at the
+project's own tempo rather than being nudged pulse by pulse, so a master
+at a slightly different tempo drifts until the next locate. The measured
+tempo is published for the shell to apply; nothing applies it yet,
+because the only path to the project's tempo today is an undoable command
+and a full graph rebuild — neither of which belongs on a clock that
+ticks 24 times a beat. **That question is on the user's desk, not
+silently resolved here.**
+
+
 ### MIDI — a beat clock the gear can actually follow — 2026-08-23
 
 - **24 pulses to the quarter, off the tempo map.** Each pulse is placed on

@@ -169,6 +169,20 @@ public:
     [[nodiscard]] MidiClockGenerator&       midiClock()       noexcept { return midiClock_; }
     [[nodiscard]] const MidiClockGenerator& midiClock() const noexcept { return midiClock_; }
 
+    /// The receiving half. Reads the incoming stream and drives the transport.
+    [[nodiscard]] MidiClockReceiver&       midiClockInput()       noexcept { return midiClockInput_; }
+    [[nodiscard]] const MidiClockReceiver& midiClockInput() const noexcept { return midiClockInput_; }
+
+    /// Sets both halves at once. Sending and receiving are mutually exclusive
+    /// — a machine that drives the clock and follows it is chasing its own
+    /// tail — and setting one role rather than two flags is what makes that
+    /// true by construction rather than by convention.
+    void setMidiClockRole(MidiClockRole role) noexcept
+    {
+        midiClock_.setRole(role);
+        midiClockInput_.setRole(role);
+    }
+
     /// The messages collected for the block just rendered. Read from the audio
     /// thread by nodes; exposed here for diagnostics and tests.
     [[nodiscard]] const MidiBuffer& lastBlockMidi() const noexcept { return blockMidi_; }
@@ -221,6 +235,7 @@ private:
     MidiInput                              midiInput_;
     MidiOutput                             midiOutput_;
     MidiClockGenerator                     midiClock_;
+    MidiClockReceiver                      midiClockInput_;
     MidiBuffer                             blockMidi_;
     MidiBuffer                             outputMidi_;   ///< what this block sends out
     MidiBuffer                             segmentMidi_;

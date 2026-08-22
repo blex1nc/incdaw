@@ -367,6 +367,9 @@ TEST_CASE("the clock role round-trips, and an unknown one reads as off")
     CHECK(app::AppSettings::fromJson(settings.toJson()).midiClockRole == "send");
 
     // A value from a build that knows more than this one drives nothing.
-    CHECK(app::AppSettings::fromJson(R"({"midi":{"clockRole":"receive"}})").midiClockRole == "off");
+    settings.midiClockRole = "receive";
+    CHECK(app::AppSettings::fromJson(settings.toJson()).midiClockRole == "receive");
+
+    CHECK(app::AppSettings::fromJson(R"({"midi":{"clockRole":"chase"}})").midiClockRole == "off");
     CHECK(app::AppSettings::fromJson(R"({"midi":{}})").midiClockRole == "off");
 }

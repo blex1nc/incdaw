@@ -70,7 +70,7 @@ struct AppSettings {
     /// (platform/MidiDevice.h).
     std::string midiOutputIdentifier;
 
-    /// What INCDAW does about MIDI beat clock: "off" or "send".
+    /// What INCDAW does about MIDI beat clock: "off", "send" or "receive".
     ///
     /// A string rather than an enum so that this header does not have to know
     /// about the engine, and so that a value a future build writes and this one

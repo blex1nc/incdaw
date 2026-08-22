@@ -351,6 +351,8 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     _midiClockRole.itemArray.firstObject.representedObject = @"off";
     [_midiClockRole addItemWithTitle:@"Send"];
     _midiClockRole.lastItem.representedObject = @"send";
+    [_midiClockRole addItemWithTitle:@"Receive (follow external)"];
+    _midiClockRole.lastItem.representedObject = @"receive";
 
     y -= 6.0;
 

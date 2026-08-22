@@ -1820,14 +1820,18 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     _audio->midiOutput().setDevice(_midiDevice.get());
 
-    // The clock only means anything with somewhere to send it, so the setting
+    // Sending only means anything with somewhere to send it, so the setting
     // and the destination are read together: choosing "Send" with no
-    // destination is off, not an error.
-    const bool sendClock = _settings.midiClockRole == "send"
-                        && !_settings.midiOutputIdentifier.empty();
+    // destination is off, not an error. Receiving needs no destination — it
+    // listens on whichever sources are already connected.
+    engine::MidiClockRole clockRole = engine::MidiClockRole::off;
 
-    _audio->midiClock().setRole(sendClock ? engine::MidiClockRole::send
-                                          : engine::MidiClockRole::off);
+    if (_settings.midiClockRole == "send" && !_settings.midiOutputIdentifier.empty())
+        clockRole = engine::MidiClockRole::send;
+    else if (_settings.midiClockRole == "receive")
+        clockRole = engine::MidiClockRole::receive;
+
+    _audio->setMidiClockRole(clockRole);
 }
 
 // ── The update check ─────────────────────────────────────────────────────────
