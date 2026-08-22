@@ -56,9 +56,12 @@
 #include "engine/dsp/effects/UtilityEffects.h"
 #include "ui/macos/ControlBarView.h"
 #include "ui/macos/InsertParameterPanel.h"
+#include "ui/macos/PresetBar.h"
 #include "ui/macos/SpectrumView.h"
 #include "ui/macos/TonePanel.h"
 #include "ui/macos/Theme.h"
+#include "project/PresetLibrary.h"
+#include "app/commands/PresetCommands.h"
 #include "ui/ThemeLibrary.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
@@ -133,6 +136,19 @@ std::filesystem::path incdawThemesDirectory()
         return {};
 
     return support / "Themes";
+}
+
+/// Where the user's own presets live — a folder per instrument or effect uid,
+/// one versioned JSON file per preset (project/PresetLibrary.h). Same reason
+/// as the themes folder: a sound somebody spends an evening on should be a
+/// file they can copy to another machine or send to somebody else.
+std::filesystem::path incdawPresetsDirectory()
+{
+    const std::filesystem::path support = incdawSupportDirectory();
+    if (support.empty())
+        return {};
+
+    return support / "Presets";
 }
 
 } // namespace
@@ -2041,6 +2057,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
 
         [INCDAWInsertParameterPanel refreshAppearance:window];
+        [INCDAWPresetBar refreshAppearanceInWindow:window];
         ui::theme::refreshViewTree(window.contentView);
     }
 }
@@ -2516,6 +2533,273 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self markDirty];
 }
 
+// ── Presets ──────────────────────────────────────────────────────────────────
+//
+// The bar is attached to a panel from the outside and configured here, so the
+// panels themselves stay ignorant of where presets live. A hosted plugin gets
+// no bar: it carries its own preset system, and a second one over the top
+// would be two sources of truth for one sound.
+
+- (NSArray<NSDictionary*>*)presetEntriesForUid:(const std::string&)uid
+{
+    const project::PresetLibrary library{incdawPresetsDirectory()};
+    const std::vector<project::PresetLibrary::Entry> rows = library.entries(uid);
+
+    NSMutableArray<NSDictionary*>* entries = [NSMutableArray array];
+    for (const project::PresetLibrary::Entry& row : rows)
+        [entries addObject:@{@"name": @(row.name.c_str()), @"factory": @(row.factory)}];
+
+    return entries;
+}
+
+- (void)reportPresetProblem:(const std::string&)message
+{
+    NSAlert* alert        = [[NSAlert alloc] init];
+    alert.messageText     = @"The preset could not be saved";
+    alert.informativeText = @(message.c_str());
+    alert.alertStyle      = NSAlertStyleWarning;
+    [alert addButtonWithTitle:@"OK"];
+    (void)[alert runModal];
+}
+
+/// What the LIVE effect holds for every parameter it has — the panel's rows
+/// already decode exactly that, so a preset saved from a panel matches what
+/// the panel shows.
+- (std::vector<engine::dsp::PresetValue>)currentValuesForSlotKey:(unsigned long long)slotKey
+{
+    std::vector<engine::dsp::PresetValue> values;
+
+    const project::PluginSlot* slot = [self insertSlotForKey:slotKey];
+    if (slot == nullptr)
+        return values;
+
+    for (NSDictionary* row in [self parameterRowsForSlot:*slot])
+        values.push_back({[row[@"id"] unsignedIntValue], [row[@"value"] doubleValue]});
+
+    return values;
+}
+
+/// The MODEL's view of a channel's instrument: every parameter at its default,
+/// overridden by whatever the channel stored. The same rule the panel and the
+/// compiler follow (D-034).
+- (std::vector<engine::dsp::PresetValue>)currentValuesForChannelKey:(unsigned long long)channelKey
+{
+    std::vector<engine::dsp::PresetValue> values;
+
+    const project::Channel* channel = _project->findChannel(project::EntityId{channelKey});
+    if (channel == nullptr)
+        return values;
+
+    const engine::BuiltinInstrumentInfo* info = [self instrumentInfoForChannel:*channel];
+    if (info == nullptr)
+        return values;
+
+    for (std::size_t index = 0; index < info->parameterCount; ++index) {
+        const engine::dsp::EffectParameter& parameter = info->parameters[index];
+
+        double value = parameter.defaultValue;
+        for (const project::ChannelInstrumentParameter& stored : channel->instrumentParameters)
+            if (stored.parameterId == parameter.id)
+                value = stored.value;
+
+        values.push_back({parameter.id, value});
+    }
+
+    return values;
+}
+
+- (void)savePresetNamed:(NSString*)name
+                 values:(std::vector<engine::dsp::PresetValue>)values
+                    uid:(const std::string&)uid
+                    bar:(INCDAWPresetBar*)bar
+{
+    project::Preset preset;
+    preset.uid    = uid;
+    preset.name   = project::PresetLibrary::sanitiseName(name.UTF8String);
+    preset.values = std::move(values);
+
+    const project::PresetLibrary library{incdawPresetsDirectory()};
+
+    // Overwriting one's own preset is normal; doing it silently is not.
+    if (library.contains(uid, preset.name)
+        && !project::PresetLibrary::isFactoryName(uid, preset.name)) {
+        NSAlert* confirm        = [[NSAlert alloc] init];
+        confirm.messageText     = [NSString stringWithFormat:@"Replace the preset “%s”?",
+                                                             preset.name.c_str()];
+        confirm.informativeText = @"The existing preset of that name is overwritten.";
+        [confirm addButtonWithTitle:@"Replace"];
+        [confirm addButtonWithTitle:@"Cancel"];
+
+        if ([confirm runModal] != NSAlertFirstButtonReturn)
+            return;
+    }
+
+    std::string error;
+    if (!library.store(preset, error)) {
+        [self reportPresetProblem:error];
+        return;
+    }
+
+    [bar setEntries:[self presetEntriesForUid:uid] selected:@(preset.name.c_str())];
+}
+
+- (void)renamePresetFrom:(NSString*)from
+                      to:(NSString*)to
+                     uid:(const std::string&)uid
+                     bar:(INCDAWPresetBar*)bar
+{
+    const project::PresetLibrary library{incdawPresetsDirectory()};
+
+    std::string error;
+    if (!library.rename(uid, from.UTF8String, to.UTF8String, error)) {
+        [self reportPresetProblem:error];
+        return;
+    }
+
+    [bar setEntries:[self presetEntriesForUid:uid]
+           selected:@(project::PresetLibrary::sanitiseName(to.UTF8String).c_str())];
+}
+
+- (void)duplicatePresetNamed:(NSString*)name
+                         uid:(const std::string&)uid
+                         bar:(INCDAWPresetBar*)bar
+{
+    const project::PresetLibrary library{incdawPresetsDirectory()};
+
+    std::string       error;
+    const std::string copy =
+        library.duplicate(uid, name.UTF8String, name.UTF8String, error);
+
+    if (copy.empty()) {
+        [self reportPresetProblem:error];
+        return;
+    }
+
+    [bar setEntries:[self presetEntriesForUid:uid] selected:@(copy.c_str())];
+}
+
+- (void)deletePresetNamed:(NSString*)name
+                      uid:(const std::string&)uid
+                      bar:(INCDAWPresetBar*)bar
+{
+    const project::PresetLibrary library{incdawPresetsDirectory()};
+
+    std::string error;
+    if (!library.remove(uid, name.UTF8String, error)) {
+        [self reportPresetProblem:error];
+        return;
+    }
+
+    [bar setEntries:[self presetEntriesForUid:uid] selected:nil];
+}
+
+- (void)recallPreset:(NSString*)name forSlotKey:(unsigned long long)slotKey
+                 uid:(const std::string&)uid
+{
+    const project::PresetLibrary library{incdawPresetsDirectory()};
+
+    const std::optional<project::Preset> preset = library.resolve(uid, name.UTF8String);
+    if (!preset.has_value()) {
+        NSBeep();
+        return;
+    }
+
+    // Only the parameters the preset names change, so only those are worth
+    // remembering for the undo.
+    const std::vector<engine::dsp::PresetValue> live = [self currentValuesForSlotKey:slotKey];
+
+    std::vector<engine::dsp::PresetValue> before;
+    for (const engine::dsp::PresetValue& wanted : preset->values)
+        for (const engine::dsp::PresetValue& held : live)
+            if (held.parameterId == wanted.parameterId)
+                before.push_back(held);
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+
+    app::ApplyInsertPresetCommand::Writer writer =
+        [weakSelf, slotKey](std::uint32_t parameterId, double plainValue) {
+            [weakSelf writeInsertParameter:slotKey
+                               parameterId:parameterId
+                                plainValue:plainValue];
+        };
+
+    if (!_registry->execute(std::make_unique<app::ApplyInsertPresetCommand>(
+            before, preset->values, preset->name, std::move(writer))))
+        return;   // the preset was already loaded; nothing to say about it
+}
+
+- (void)recallPreset:(NSString*)name forChannelKey:(unsigned long long)channelKey
+                 uid:(const std::string&)uid
+{
+    const project::PresetLibrary library{incdawPresetsDirectory()};
+
+    const std::optional<project::Preset> preset = library.resolve(uid, name.UTF8String);
+    if (!preset.has_value()) {
+        NSBeep();
+        return;
+    }
+
+    if (!_registry->execute(std::make_unique<app::ApplyInstrumentPresetCommand>(
+            project::EntityId{channelKey}, preset->values, preset->name)))
+        return;
+
+    [self rebuildGraph];
+}
+
+/// Hangs a configured bar off a panel window. `uid` is empty for a target
+/// that has no builtin presets, in which case no bar appears at all.
+- (void)attachPresetBarTo:(NSWindow*)window
+                      uid:(const std::string&)uid
+                  slotKey:(unsigned long long)slotKey
+               isInstrument:(BOOL)isInstrument
+{
+    if (uid.empty())
+        return;
+
+    const project::PresetLibrary library{incdawPresetsDirectory()};
+    if (library.entries(uid).empty())
+        return;   // a target with no parameters has nothing to preset
+
+    INCDAWPresetBar* bar = [INCDAWPresetBar attachToWindow:window];
+    [bar setEntries:[self presetEntriesForUid:uid] selected:nil];
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+    __weak INCDAWPresetBar*   weakBar  = bar;
+    const std::string         target   = uid;
+
+    bar.onRecall = ^(NSString* name) {
+        if (isInstrument)
+            [weakSelf recallPreset:name forChannelKey:slotKey uid:target];
+        else
+            [weakSelf recallPreset:name forSlotKey:slotKey uid:target];
+    };
+
+    bar.onSave = ^(NSString* name) {
+        INCDAWAppDelegate* strongSelf = weakSelf;
+        if (strongSelf == nil)
+            return;
+
+        [strongSelf savePresetNamed:name
+                             values:isInstrument
+                                        ? [strongSelf currentValuesForChannelKey:slotKey]
+                                        : [strongSelf currentValuesForSlotKey:slotKey]
+                                uid:target
+                                bar:weakBar];
+    };
+
+    bar.onRename = ^(NSString* from, NSString* to) {
+        [weakSelf renamePresetFrom:from to:to uid:target bar:weakBar];
+    };
+
+    bar.onDuplicate = ^(NSString* name) {
+        [weakSelf duplicatePresetNamed:name uid:target bar:weakBar];
+    };
+
+    bar.onDelete = ^(NSString* name) {
+        [weakSelf deletePresetNamed:name uid:target bar:weakBar];
+    };
+}
+
 - (void)openParameterPanelForSlotKey:(unsigned long long)slotKey
 {
     NSNumber* key = @(slotKey);
@@ -2571,6 +2855,12 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
             makePanelWithTitle:[self displayNameForSlotKey:slotKey]
                           rows:rows
                        onWrite:write];
+
+    [self attachPresetBarTo:window
+                        uid:slot->plugin.format == plugins::Format::builtin
+                                ? slot->plugin.uid : std::string{}
+                    slotKey:slotKey
+               isInstrument:NO];
 
     [window center];
     [window makeKeyAndOrderFront:nil];
@@ -2782,6 +3072,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                               parameterId:parameterId
                                                plainValue:plainValue];
                    }];
+
+    [self attachPresetBarTo:window
+                        uid:info->uid
+                    slotKey:channelKey
+               isInstrument:YES];
 
     [window center];
     [window makeKeyAndOrderFront:nil];

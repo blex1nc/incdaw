@@ -29,6 +29,16 @@ public version yet.
 - **Untrusted input, treated as such.** A document from a newer INCDAW, one
   belonging to a different effect, one truncated by an unclean shutdown —
   each degrades into "no preset" rather than into a wrong sound.
+- **One control, three panels.** A preset strip attaches to the generic
+  parameter panel, the Tone panel and the instrument panel from the outside,
+  so none of them knows where presets live: pick one from the list to
+  recall it, or Save As / Duplicate / Rename / Delete. A hosted plugin gets
+  no strip — it carries its own preset system, and a second one over the top
+  would be two sources of truth for one sound.
+- **Recall is one undo entry.** Not several, and not none: a preset sets
+  many parameters at once, which is exactly what the merge rule behind a
+  slider drag cannot fold. Recalling the preset that is already loaded adds
+  no entry at all.
 
 ### UI — the mixer gets a dock, and the desk gets a plugin picker — 2026-08-23
 

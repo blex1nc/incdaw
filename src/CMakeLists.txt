@@ -211,6 +211,7 @@ if(APPLE)
         ui/macos/PluginPickerView.mm
         ui/macos/AudioEditorView.mm
         ui/macos/InsertParameterPanel.mm
+        ui/macos/PresetBar.mm
         ui/macos/SpectrumView.mm
         ui/macos/TonePanel.mm
         ui/macos/BrowserView.mm
