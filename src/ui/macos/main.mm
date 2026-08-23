@@ -1409,6 +1409,58 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self audioAssetChanged];
 }
 
+/// Switches the editor between the waveform and the spectral picture.
+- (void)editToggleSpectral:(NSMenuItem*)sender
+{
+    self.audioEditor.spectralMode = !self.audioEditor.spectralMode;
+    sender.state = self.audioEditor.spectralMode ? NSControlStateValueOn : NSControlStateValueOff;
+
+    [self.audioEditor setNeedsDisplay:YES];
+}
+
+/// Erases the selected rectangle of time and frequency.
+- (void)editSpectralErase:(id)sender
+{
+    (void)sender;
+
+    engine::edits::Region region;
+    project::EntityId     asset;
+
+    if (![self editorSelection:&region asset:&asset]) {
+        _lastRecordError = @"select a time range first";
+        [self refreshStatus];
+        return;
+    }
+
+    if (!self.audioEditor.spectralMode) {
+        // Erasing every frequency across a span is what Silence does, and it
+        // does it without a Fourier transform. Refusing here says which tool
+        // the user wanted rather than doing the expensive version of the
+        // other one.
+        _lastRecordError = @"switch to the spectral view to choose a frequency band";
+        [self refreshStatus];
+        return;
+    }
+
+    const double low  = self.audioEditor.selectionLowHertz;
+    const double high = self.audioEditor.selectionHighHertz;
+
+    if (!(high > low)) {
+        _lastRecordError = @"drag a band of frequencies in the spectral view";
+        [self refreshStatus];
+        return;
+    }
+
+    if (!_registry->execute(std::make_unique<app::SpectralEraseCommand>(asset, region, low, high,
+                                                                       1.0))) {
+        _lastRecordError = @"spectral erase: nothing to do";
+        [self refreshStatus];
+        return;
+    }
+
+    [self audioAssetChanged];
+}
+
 - (void)editNormalize:(id)sender { (void)sender; [self applyAudioEdit:app::AudioEditOp::normalize factor:1.0f]; }
 - (void)editReverse:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::reverse factor:1.0f]; }
 - (void)editSilence:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::silence factor:1.0f]; }
@@ -5426,6 +5478,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         {@"Fade Out",          @selector(editFadeOut:)},
         {@"Gain +3 dB",        @selector(editGainUp:)},
         {@"Gain -3 dB",        @selector(editGainDown:)},
+        {@"Spectral View",     @selector(editToggleSpectral:)},
+        {@"Spectral Erase",    @selector(editSpectralErase:)},
         {@"Learn Noise Profile", @selector(editLearnNoiseProfile:)},
         {@"Denoise…",          @selector(editDenoise:)},
         {@"Time Stretch…",     @selector(editTimeStretch:)},

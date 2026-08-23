@@ -399,3 +399,167 @@ TEST_CASE("an empty profile and an empty region are refused")
     CHECK_FALSE(dsp::denoise(data, 5000, 5000, profile, 1.0));
     CHECK_FALSE(dsp::denoise(data, 9000, 1000, profile, 1.0));
 }
+
+// ── C11: the spectral view and spectral editing ──────────────────────────────
+
+#include "engine/dsp/Spectrogram.h"
+
+TEST_CASE("a spectrogram puts a tone in the row it belongs to")
+{
+    const auto data = monoOf(sine(60000, 2000.0, 48000.0, 0.6f));
+
+    const auto picture = dsp::buildSpectrogram(data, 0, 60000);
+
+    REQUIRE_FALSE(picture.isEmpty());
+    CHECK(picture.sampleRate == doctest::Approx(48000.0));
+    CHECK(picture.binCount == dsp::Stft::defaultFftSize / 2 + 1);
+
+    const std::size_t expected = picture.binOfFrequency(2000.0);
+
+    // The loudest bin of the middle column, which is well clear of the edges.
+    const std::size_t column = picture.columns / 2;
+
+    std::size_t peak = 0;
+    for (std::size_t bin = 1; bin < picture.binCount; ++bin)
+        if (picture.at(column, bin) > picture.at(column, peak))
+            peak = bin;
+
+    CHECK(peak >= expected - 1);
+    CHECK(peak <= expected + 1);
+
+    // And the picture has range: a spectrogram whose cells are all the same
+    // number is a black rectangle.
+    CHECK(picture.highestDb > picture.lowestDb + 40.0f);
+}
+
+TEST_CASE("a long region is capped in columns, not in coverage")
+{
+    const auto data = monoOf(sine(480000, 440.0, 48000.0, 0.5f));
+
+    const auto picture = dsp::buildSpectrogram(data, 0, 480000, 64);
+
+    // Ten seconds at a 512-frame hop is nearly a thousand frames; the picture
+    // is 64 columns and still describes all ten seconds.
+    CHECK(picture.columns == 64);
+    CHECK(picture.frameCount == 480000);
+    CHECK(picture.startFrame == 0);
+}
+
+TEST_CASE("a spectrogram of nothing is empty rather than a crash")
+{
+    const AudioFileData nothing;
+    CHECK(dsp::buildSpectrogram(nothing, 0, 1000).isEmpty());
+
+    const auto data = monoOf(sine(1000, 440.0, 48000.0));
+    CHECK(dsp::buildSpectrogram(data, 500, 500).isEmpty());
+    CHECK(dsp::buildSpectrogram(data, 0, 1000, 0).isEmpty());
+}
+
+TEST_CASE("bins and frequencies round-trip")
+{
+    const auto data    = monoOf(sine(20000, 440.0, 48000.0));
+    const auto picture = dsp::buildSpectrogram(data, 0, 20000);
+
+    REQUIRE_FALSE(picture.isEmpty());
+
+    for (double hertz : {0.0, 1000.0, 5000.0, 20000.0}) {
+        const std::size_t bin = picture.binOfFrequency(hertz);
+        CHECK(picture.frequencyOfBin(bin) == doctest::Approx(hertz).epsilon(0.02));
+    }
+
+    // Above Nyquist clamps rather than running off the end.
+    CHECK(picture.binOfFrequency(96000.0) == picture.binCount - 1);
+}
+
+TEST_CASE("erasing a band removes the tone in it and leaves the others")
+{
+    // Three tones, well apart. The middle one is the squeak to be removed.
+    std::vector<Sample> mixed(96000, 0.0f);
+
+    const auto lowTone    = sine(96000, 300.0, 48000.0, 0.4f);
+    const auto middleTone = sine(96000, 3000.0, 48000.0, 0.4f);
+    const auto highTone   = sine(96000, 9000.0, 48000.0, 0.4f);
+
+    for (std::size_t index = 0; index < mixed.size(); ++index)
+        mixed[index] = lowTone[index] + middleTone[index] + highTone[index];
+
+    auto data = monoOf(mixed);
+
+    REQUIRE(dsp::spectralErase(data, 0, 96000, 2500.0, 3500.0, 1.0));
+
+    // Measured through the analysis, which is the only way to say "that
+    // frequency is gone" rather than "the file got quieter".
+    const dsp::Stft stft;
+
+    std::vector<float> loudest(stft.binCount(), 0.0f);
+    stft.analyse(data.channels[0], [&](std::size_t frameIndex,
+                                       const std::vector<float>& magnitudes) {
+        // Skip the padded ends, where the erase's own taper lives.
+        if (frameIndex < 8)
+            return;
+
+        for (std::size_t bin = 0; bin < loudest.size(); ++bin)
+            loudest[bin] = std::max(loudest[bin], magnitudes[bin]);
+    });
+
+    const auto binAt = [&](double hertz) {
+        return static_cast<std::size_t>(hertz * static_cast<double>(stft.fftSize()) / 48000.0 + 0.5);
+    };
+
+    const float low    = loudest[binAt(300.0)];
+    const float middle = loudest[binAt(3000.0)];
+    const float high   = loudest[binAt(9000.0)];
+
+    CHECK(middle < low * 0.05f);
+    CHECK(middle < high * 0.05f);
+
+    // The neighbours are untouched — an erase that took the whole spectrum
+    // down would pass "the band is gone" and be useless.
+    CHECK(low > 0.1f);
+    CHECK(high > 0.1f);
+}
+
+TEST_CASE("erasing by nothing, or an empty band, is refused")
+{
+    auto data = monoOf(sine(30000, 1000.0, 48000.0, 0.5f));
+    const auto original = data.channels[0];
+
+    CHECK_FALSE(dsp::spectralErase(data, 0, 30000, 1000.0, 1000.0, 1.0));
+    CHECK_FALSE(dsp::spectralErase(data, 0, 30000, 2000.0, 1000.0, 1.0));
+    CHECK_FALSE(dsp::spectralErase(data, 0, 30000, 500.0, 1500.0, 0.0));
+    CHECK_FALSE(dsp::spectralErase(data, 5000, 5000, 500.0, 1500.0, 1.0));
+
+    CHECK(data.channels[0] == original);
+}
+
+TEST_CASE("a partial erase attenuates rather than removing")
+{
+    const auto tone = sine(60000, 1000.0, 48000.0, 0.5f);
+
+    auto full = monoOf(tone);
+    auto half = monoOf(tone);
+
+    REQUIRE(dsp::spectralErase(full, 0, 60000, 800.0, 1200.0, 1.0));
+    REQUIRE(dsp::spectralErase(half, 0, 60000, 800.0, 1200.0, 0.5));
+
+    const double fullRms = rms(full.channels[0], 10000, 50000);
+    const double halfRms = rms(half.channels[0], 10000, 50000);
+    const double toneRms = rms(tone, 10000, 50000);
+
+    CHECK(fullRms < halfRms);
+    CHECK(halfRms < toneRms);
+    CHECK(halfRms == doctest::Approx(toneRms * 0.5).epsilon(0.15));
+}
+
+TEST_CASE("a spectral erase leaves the audio outside the region alone")
+{
+    const auto tone = sine(120000, 1000.0, 48000.0, 0.5f);
+    auto       data = monoOf(tone);
+
+    const std::vector<Sample> before(data.channels[0].begin() + 90000, data.channels[0].end());
+
+    REQUIRE(dsp::spectralErase(data, 30000, 60000, 800.0, 1200.0, 1.0));
+
+    const std::vector<Sample> after(data.channels[0].begin() + 90000, data.channels[0].end());
+    CHECK(after == before);
+}

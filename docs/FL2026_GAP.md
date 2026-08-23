@@ -140,7 +140,7 @@ and note tools · a synthesized piano · **automation touch/latch/write modes**
 | C8 | Comping editor over recorded takes | **DONE** — `app::comping::takesOver` + `AssignCompRangeCommand` (split-and-mute, no new model field), `INCDAWCompingView` lanes with per-take waveforms, one undo entry per assignment | — |
 | C9 | Pre-record buffer on the input side | **DONE** — a second `AudioLogger` on the input, `RecordingSession::keepPreRoll` lands it as a take ending at the playhead; own switch, off by default | — |
 | C10 | Denoise / noise profile | **DONE** — `engine::dsp::Stft` (exact-reconstruction STFT, null-tested), `NoiseProfile` learned per channel, `DenoiseAssetCommand`; Audio → Learn Noise Profile / Denoise… | — |
-| C11 | Spectral view and spectral editing | ◐ analyzer draws a spectrum; the editor has no spectral surface | — |
+| C11 | Spectral view and spectral editing | **DONE** — `dsp::Spectrogram` (peak-held, capped columns), spectral mode in the editor with time×frequency selection, `SpectralEraseCommand` with tapered band edges | — |
 | C12 | VST3 hosting | ✗ format enum only | **§41 — SDK, dual-licensed. Proposal + approval required** |
 | C13 | FLAC export/import | ✗ | **§41 — libFLAC. Proposal + approval required** |
 | C14 | MP3 export | ✗ | **§41 — LAME (LGPL). AAC/ALAC through AudioToolbox is the zero-dependency alternative and should be proposed alongside** |

@@ -49,4 +49,18 @@ namespace incdaw::app     { class CommandRegistry; }
 /// marker the user means" resolves to, without asking them to hit a pixel.
 - (long long)markerIndexNear:(long long)frame within:(long long)tolerance;
 
+/// Spectral mode: the same samples drawn as time against frequency, and a drag
+/// that selects a rectangle of both rather than a span of time.
+///
+/// A mode on this view rather than a window of its own, because the selection
+/// is the same selection: switching to spectral to erase a squeak and back to
+/// the waveform to trim around it should not be two places to be.
+@property (nonatomic, assign) BOOL spectralMode;
+
+/// The frequency band the selection covers, in Hz. Meaningful only while
+/// `spectralMode` is on; a waveform drag selects every frequency there is, and
+/// says so by returning the whole range.
+@property (nonatomic, readonly) double selectionLowHertz;
+@property (nonatomic, readonly) double selectionHighHertz;
+
 @end

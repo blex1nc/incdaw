@@ -3,6 +3,7 @@
 #include "app/Command.h"
 #include "engine/audio/AudioEdits.h"
 #include "engine/dsp/Denoise.h"
+#include "engine/dsp/Spectrogram.h"
 #include "project/Model.h"
 
 #include <string>
@@ -225,6 +226,37 @@ private:
     engine::edits::Region      region_;
     engine::dsp::NoiseProfile  profile_;
     double                     amount_ = 1.0;
+
+    std::vector<std::vector<engine::Sample>> before_;
+    std::vector<std::vector<engine::Sample>> after_;
+    engine::edits::Region                    applied_;
+    bool                                     minted_ = false;
+};
+
+/// Attenuates a band of frequencies across a span — the spectral eraser.
+///
+/// The same snapshot contract denoise has, and for the same reason: an erase
+/// is not invertible, so undo restores the recorded samples rather than trying
+/// to put the band back.
+class SpectralEraseCommand final : public Command {
+public:
+    SpectralEraseCommand(project::EntityId asset, engine::edits::Region region, double lowHertz,
+                         double highHertz, double amount)
+        : asset_(asset), region_(region), lowHertz_(lowHertz), highHertz_(highHertz),
+          amount_(amount) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "audio.spectralErase"; }
+    [[nodiscard]] std::string name() const override { return "Spectral Erase"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    project::EntityId     asset_;
+    engine::edits::Region region_;
+    double                lowHertz_  = 0.0;
+    double                highHertz_ = 0.0;
+    double                amount_    = 1.0;
 
     std::vector<std::vector<engine::Sample>> before_;
     std::vector<std::vector<engine::Sample>> after_;

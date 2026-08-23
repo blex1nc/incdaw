@@ -58,6 +58,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/Fft.cpp
     engine/dsp/Stft.cpp
     engine/dsp/Denoise.cpp
+    engine/dsp/Spectrogram.cpp
     engine/dsp/Resampler.cpp
     engine/dsp/TimeStretch.cpp
     engine/dsp/MixerStripNode.cpp

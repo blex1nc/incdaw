@@ -518,6 +518,52 @@ void DenoiseAssetCommand::undo(Project& project)
     (void)WavFile::write(assetFilePath(*asset), data);
 }
 
+// ── SpectralEraseCommand ──────────────────────────────────────────────────────
+
+bool SpectralEraseCommand::execute(Project& project)
+{
+    const project::AudioAsset* asset = findAsset(project, asset_);
+    if (asset == nullptr)
+        return false;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return false;
+
+    if (!minted_) {
+        applied_ = engine::edits::clampedRegion(data, region_);
+        if (applied_.length() <= 0)
+            return false;
+
+        before_ = snapshotRegion(data, applied_);
+
+        AudioFileData working = data;
+        if (!engine::dsp::spectralErase(working, applied_.from, applied_.to, lowHertz_,
+                                        highHertz_, amount_))
+            return false;
+
+        after_  = snapshotRegion(working, applied_);
+        minted_ = true;
+    }
+
+    restoreRegion(data, applied_, after_);
+    return bool(WavFile::write(assetFilePath(*asset), data));
+}
+
+void SpectralEraseCommand::undo(Project& project)
+{
+    const project::AudioAsset* asset = findAsset(project, asset_);
+    if (asset == nullptr)
+        return;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return;
+
+    restoreRegion(data, applied_, before_);
+    (void)WavFile::write(assetFilePath(*asset), data);
+}
+
 // ── SetAudioMarkersCommand ────────────────────────────────────────────────────
 
 namespace {

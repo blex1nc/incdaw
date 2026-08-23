@@ -8,6 +8,32 @@ public version yet.
 
 ## [Unreleased]
 
+### Audio editor — a spectral view, and an eraser that works in it — 2026-08-23
+
+- **Audio → Spectral View** draws the same samples as time against
+  frequency. A waveform shows when something is loud; this shows what it
+  is made of, which is the only view in which a single squeak, a mains
+  hum or a chair creak is a thing you can point at rather than a smudge
+  in the envelope.
+- **A drag selects a rectangle of time *and* frequency**, and **Spectral
+  Erase** removes what is inside it. The band's edges are tapered over a
+  few bins: a rectangular notch rings in time, and the ringing is a chirp
+  on both sides of the edit more noticeable than whatever was removed.
+- **A mode on the editor, not a window of its own.** The selection is the
+  same selection — switching to spectral to erase a squeak and back to
+  the waveform to trim around it should not be two places to be. Turning
+  the mode on gives the selection the full frequency range rather than
+  silently narrowing it to a band nobody chose.
+- **Only what is on screen is analysed.** A spectrogram of an hour-long
+  file costs the memory of the audio to describe the second the user can
+  see. Columns are capped and combined by peak — a mean hides exactly the
+  short events this view exists to find, which is the same reason the
+  waveform overview keeps min and max rather than an average.
+- Asking for a spectral erase from the waveform view is refused with the
+  reason, rather than erasing every frequency across the span: that is
+  what Silence does, and it does it without a Fourier transform.
+
+
 ### Audio editor — denoise, and the spectral floor under it — 2026-08-23
 
 - **Select silence, Learn, Denoise.** `engine::dsp::NoiseProfile` is the

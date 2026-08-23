@@ -2,6 +2,7 @@
 
 #include "app/CommandRegistry.h"
 #include "engine/audio/WaveformOverview.h"
+#include "engine/dsp/Spectrogram.h"
 #include "project/Model.h"
 #include "ui/macos/Theme.h"
 
@@ -34,6 +35,20 @@ using namespace incdaw;
     /// Where the last click landed. A marker dropped with no selection goes
     /// here rather than at zero.
     long long _caretFrame;
+
+    /// The spectral picture of what is on screen, rebuilt when the view or the
+    /// file changes. Empty in waveform mode, which is what makes that mode
+    /// cost nothing.
+    engine::dsp::Spectrogram _spectrogram;
+    long long                _spectrogramFrom;
+    long long                _spectrogramTo;
+
+    /// The selection's frequency band, as a fraction of the visible range.
+    /// Kept as fractions rather than Hz so a sample-rate change does not move
+    /// the selection.
+    double _selectionLowFraction;
+    double _selectionHighFraction;
+    double _dragFrequencyAnchor;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -52,6 +67,80 @@ using namespace incdaw;
 - (BOOL)acceptsFirstResponder { return YES; }
 
 - (BOOL)hasSelection { return _loaded && _selectionTo > _selectionFrom; }
+
+- (double)nyquist
+{
+    return _overview.sampleRate > 0.0 ? _overview.sampleRate / 2.0 : 24000.0;
+}
+
+- (double)selectionLowHertz
+{
+    // A waveform drag selects every frequency there is, and says so.
+    return _spectralMode ? _selectionLowFraction * [self nyquist] : 0.0;
+}
+
+- (double)selectionHighHertz
+{
+    return _spectralMode ? _selectionHighFraction * [self nyquist] : [self nyquist];
+}
+
+- (void)setSpectralMode:(BOOL)value
+{
+    if (_spectralMode == value)
+        return;
+
+    _spectralMode = value;
+
+    if (_spectralMode) {
+        // A fresh spectral selection covers everything vertically, so that
+        // switching modes with a time selection already made does not silently
+        // narrow it to a band nobody chose.
+        _selectionLowFraction  = 0.0;
+        _selectionHighFraction = 1.0;
+        [self rebuildSpectrogram];
+    } else {
+        _spectrogram = {};
+    }
+
+    [self setNeedsDisplay:YES];
+}
+
+/// Rebuilds the spectral picture for what is on screen.
+///
+/// Only what is visible: a spectrogram of an hour-long file would cost the
+/// memory of the audio to describe a second of it the user can see.
+- (void)rebuildSpectrogram
+{
+    _spectrogram = {};
+
+    if (!_spectralMode || !_loaded)
+        return;
+
+    const project::AudioAsset* asset = [self asset];
+    if (asset == nullptr)
+        return;
+
+    const long long visibleFrames =
+        static_cast<long long>(self.bounds.size.width * _framesPerPoint);
+
+    _spectrogramFrom = std::clamp<long long>(_firstFrame, 0, _overview.frameCount);
+    _spectrogramTo   = std::clamp<long long>(_firstFrame + visibleFrames, _spectrogramFrom,
+                                             _overview.frameCount);
+
+    if (_spectrogramTo <= _spectrogramFrom)
+        return;
+
+    const std::string& path = !asset->absolutePath.empty() ? asset->absolutePath
+                                                           : asset->relativePath;
+
+    engine::AudioFileData data;
+    if (!engine::WavFile::read(path, data))
+        return;
+
+    _spectrogram = engine::dsp::buildSpectrogram(
+        data, _spectrogramFrom, _spectrogramTo,
+        static_cast<std::size_t>(std::max(64.0, self.bounds.size.width)));
+}
 - (long long)caretFrame { return _caretFrame; }
 - (const std::vector<engine::AudioMarker>&)markers { return _markers; }
 
@@ -100,6 +189,9 @@ using namespace incdaw;
     _markers.clear();
     (void)engine::WavFile::readMarkers(path, _markers);
 
+    if (_spectralMode)
+        _spectrogram = {};
+
     if (bool(engine::WaveformOverview::build(path, _overview))) {
         _loaded = YES;
 
@@ -113,6 +205,7 @@ using namespace incdaw;
         _selectionTo    = std::clamp<long long>(_selectionTo, 0, _overview.frameCount);
     }
 
+    [self rebuildSpectrogram];
     [self setNeedsDisplay:YES];
 }
 
@@ -138,6 +231,81 @@ using namespace incdaw;
 }
 
 // ── Drawing ──────────────────────────────────────────────────────────────────
+
+/// Paints the spectral picture: time across, frequency up, loudness as ink.
+///
+/// Drawn as filled rectangles rather than a bitmap, because the picture is
+/// already reduced to about one column per point and one row per few pixels —
+/// building a CGImage to blit the same number of rectangles would be the same
+/// work with an allocation in front of it.
+- (void)drawSpectrogramInRect:(NSRect)rect
+{
+    namespace theme = incdaw::ui::theme;
+    using theme::Ink;
+
+    if (_spectrogram.isEmpty() || rect.size.height <= 1.0) {
+        theme::drawTextCentred(@"Building the spectral view…", rect, theme::ink(Ink::textDim),
+                               theme::labelFont(11.0), theme::Align::centre);
+        return;
+    }
+
+    NSColor* quiet = theme::ink(Ink::panelSunken);
+    NSColor* loud  = theme::ink(Ink::audio);
+
+    const float span = std::max(1.0f, _spectrogram.highestDb - _spectrogram.lowestDb);
+
+    // The vertical resolution the screen can actually show. More rows than
+    // pixels is more work for a picture nobody can see.
+    const auto rows = static_cast<std::size_t>(
+        std::clamp(rect.size.height, 1.0, static_cast<double>(_spectrogram.binCount)));
+
+    const double rowHeight    = rect.size.height / static_cast<double>(rows);
+    const double columnWidth  = rect.size.width / static_cast<double>(_spectrogram.columns);
+
+    for (std::size_t column = 0; column < _spectrogram.columns; ++column) {
+        const double x = NSMinX(rect) + static_cast<double>(column) * columnWidth;
+
+        for (std::size_t row = 0; row < rows; ++row) {
+            // Bins are grouped into rows by peak, the same choice the column
+            // reduction makes: a mean hides the narrow things being looked for.
+            const std::size_t firstBin = row * _spectrogram.binCount / rows;
+            const std::size_t lastBin  = (row + 1) * _spectrogram.binCount / rows;
+
+            float loudest = _spectrogram.lowestDb;
+            for (std::size_t bin = firstBin; bin < lastBin && bin < _spectrogram.binCount; ++bin)
+                loudest = std::max(loudest, _spectrogram.at(column, bin));
+
+            const double weight =
+                std::clamp((static_cast<double>(loudest - _spectrogram.lowestDb)
+                            / static_cast<double>(span)), 0.0, 1.0);
+
+            if (weight <= 0.02)
+                continue;
+
+            // Low frequencies at the bottom, which is how everyone reads a
+            // spectrum and the opposite of this view's flipped coordinates.
+            const double y = NSMaxY(rect) - static_cast<double>(row + 1) * rowHeight;
+
+            NSColor* ink = [quiet blendedColorWithFraction:static_cast<CGFloat>(weight)
+                                                   ofColor:loud];
+            theme::fillRect(NSMakeRect(x, y, std::max(1.0, columnWidth),
+                                       std::max(1.0, rowHeight)), ink);
+        }
+    }
+
+    // The selected band, over the picture.
+    if (self.hasSelection && (_selectionLowFraction > 0.0 || _selectionHighFraction < 1.0)) {
+        const double top    = NSMaxY(rect) - _selectionHighFraction * rect.size.height;
+        const double bottom = NSMaxY(rect) - _selectionLowFraction * rect.size.height;
+
+        const double left  = std::max(0.0, [self xForFrame:_selectionFrom]);
+        const double right = std::min(rect.size.width, [self xForFrame:_selectionTo]);
+
+        if (right > left && bottom > top)
+            theme::strokeRounded(NSMakeRect(left, top, right - left, bottom - top), 2.0,
+                                 theme::ink(Ink::selectionStroke));
+    }
+}
 
 - (void)drawRect:(NSRect)dirty
 {
@@ -180,13 +348,16 @@ using namespace incdaw;
         }
     }
 
-    NSColor* wave   = theme::ink(Ink::audio);
-    NSColor* centre = theme::ink(Ink::gridLineStrong);
-
+    if (_spectralMode) {
+        [self drawSpectrogramInRect:NSMakeRect(0, 22.0, width, self.bounds.size.height - 22.0)];
+    } else
     for (std::size_t channel = 0; channel < _overview.channelCount; ++channel) {
         const double top    = static_cast<double>(channel) * laneHeight;
         const double middle = top + laneHeight / 2.0;
         const double scale  = laneHeight * 0.45;
+
+        NSColor* wave   = theme::ink(Ink::audio);
+        NSColor* centre = theme::ink(Ink::gridLineStrong);
 
         [centre setFill];
         NSRectFill(NSMakeRect(0, middle, width, 1.0));
@@ -308,6 +479,12 @@ using namespace incdaw;
     _caretFrame    = _dragAnchor;
     _selectionFrom = _dragAnchor;
     _selectionTo   = _dragAnchor;
+
+    if (_spectralMode) {
+        _dragFrequencyAnchor   = [self frequencyFractionAtY:point.y];
+        _selectionLowFraction  = _dragFrequencyAnchor;
+        _selectionHighFraction = _dragFrequencyAnchor;
+    }
     [self setNeedsDisplay:YES];
 }
 
@@ -322,7 +499,23 @@ using namespace incdaw;
 
     _selectionFrom = std::min(_dragAnchor, frame);
     _selectionTo   = std::max(_dragAnchor, frame);
+
+    if (_spectralMode) {
+        const double fraction  = [self frequencyFractionAtY:point.y];
+        _selectionLowFraction  = std::min(_dragFrequencyAnchor, fraction);
+        _selectionHighFraction = std::max(_dragFrequencyAnchor, fraction);
+    }
+
     [self setNeedsDisplay:YES];
+}
+
+/// Where a point sits between DC and Nyquist, 0 at the bottom.
+- (double)frequencyFractionAtY:(double)y
+{
+    const double top    = 22.0;
+    const double height = std::max(1.0, self.bounds.size.height - top);
+
+    return std::clamp(1.0 - (y - top) / height, 0.0, 1.0);
 }
 
 - (void)scrollWheel:(NSEvent*)event
@@ -350,6 +543,10 @@ using namespace incdaw;
         _firstFrame,
         -static_cast<long long>(self.bounds.size.width * _framesPerPoint) / 4,
         _overview.frameCount);
+
+    // The spectral picture describes what is on screen, so moving the screen
+    // means building another one.
+    [self rebuildSpectrogram];
 
     [self setNeedsDisplay:YES];
 }

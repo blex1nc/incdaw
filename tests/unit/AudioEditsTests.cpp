@@ -897,3 +897,66 @@ TEST_CASE("denoise with no profile is refused and makes no undo entry")
 
     CHECK(registry.undoDepth() == depth);
 }
+
+// ── C11: spectral erase, undoably ────────────────────────────────────────────
+
+TEST_CASE("a spectral erase rewrites the file and undo restores it bit-exactly")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    // Two tones; the upper one is the squeak to remove.
+    {
+        auto data = fixture.load();
+
+        for (auto& channel : data.channels)
+            for (std::size_t index = 0; index < channel.size(); ++index) {
+                const double phase = 2.0 * M_PI * static_cast<double>(index) / 48000.0;
+                channel[index] = 0.4f * static_cast<float>(std::sin(phase * 500.0))
+                               + 0.4f * static_cast<float>(std::sin(phase * 6000.0));
+            }
+
+        REQUIRE(bool(WavFile::write(fixture.file, data)));
+    }
+
+    const auto before = fixture.load();
+
+    REQUIRE(registry.execute(std::make_unique<app::SpectralEraseCommand>(
+        fixture.assetId, engine::edits::Region{0, 5000}, 5000.0, 7000.0, 1.0)));
+
+    const auto erased = fixture.load();
+    CHECK(erased.frameCount == before.frameCount);
+    CHECK_FALSE(erased.channels == before.channels);
+
+    // Quieter, because a tone was taken out of it — but not silent, because
+    // the other one is still there.
+    double loudBefore = 0.0, loudAfter = 0.0;
+    for (std::size_t index = 1000; index < 4000; ++index) {
+        loudBefore += std::abs(static_cast<double>(before.channels[0][index]));
+        loudAfter  += std::abs(static_cast<double>(erased.channels[0][index]));
+    }
+
+    CHECK(loudAfter < loudBefore * 0.85);
+    CHECK(loudAfter > loudBefore * 0.3);
+
+    registry.undo();
+    CHECK(fixture.load().channels == before.channels);
+
+    registry.redo();
+    CHECK(fixture.load().channels == erased.channels);
+}
+
+TEST_CASE("a spectral erase of an impossible band is refused")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    const std::size_t depth = registry.undoDepth();
+
+    CHECK_FALSE(registry.execute(std::make_unique<app::SpectralEraseCommand>(
+        fixture.assetId, engine::edits::Region{0, 5000}, 3000.0, 3000.0, 1.0)));
+    CHECK_FALSE(registry.execute(std::make_unique<app::SpectralEraseCommand>(
+        fixture.assetId, engine::edits::Region{2000, 2000}, 100.0, 3000.0, 1.0)));
+
+    CHECK(registry.undoDepth() == depth);
+}
