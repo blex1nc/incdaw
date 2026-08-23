@@ -130,12 +130,12 @@ and note tools · a synthesized piano · **automation touch/latch/write modes**
 
 | # | Gap | State | Gate |
 |---|---|---|---|
-| C1 | MIDI **output** to hardware | ✗ `platform::MidiDevice` is input only | — |
-| C2 | MIDI clock / transport sync (send and receive) | ✗ | — |
-| C3 | Controller feedback (LEDs, motorised faders) | ✗ mapping is one-way | — |
-| C4 | MPE input handling | ✗ representation is MPE-ready; nothing decodes it | — |
-| C5 | Device hot-plug re-enumeration | ✗ Settings rescans only when asked | — |
-| C6 | Audio editor: cut / copy / paste between selections | ✗ | — |
+| C1 | MIDI **output** to hardware | **DONE** — `selectOutput`, `engine::MidiOutput` (sender thread, frame→host-time), Settings destination. Channel→external routing needs a `Channel` field (track B) | — |
+| C2 | MIDI clock / transport sync (send and receive) | **DONE** — `MidiClockGenerator` off the tempo map, `MidiClockReceiver` with a jitter filter; start/stop/continue/SPP both ways. Applying the received tempo is an open question (no non-undoable path to project tempo) | — |
+| C3 | Controller feedback (LEDs, motorised faders) | **DONE (faders)** — `engine::MidiFeedback`, applier-level tap so a lane moves the surface; echo-suppressed. Pad lighting needs a note form on `MidiMapping` (track B) | — |
+| C4 | MPE input handling | **DONE (decode)** — `MpeDecoder`, both zones, per-note id, RPN 6/0. Instruments have no per-voice expression input (track `timbre`) | — |
+| C5 | Device hot-plug re-enumeration | **DONE** — `platform::DeviceWatcher` (CoreAudio device list + defaults, CoreMIDI setup); MIDI reopens, audio restarts only when the chosen device returns | — |
+| C6 | Audio editor: cut / copy / paste between selections | **DONE** — was already implemented and menu-wired; now covered by cross-asset and rate-mismatch tests | — |
 | C7 | Audio editor: markers and regions inside the editor | ✗ timeline has them, the editor does not | — |
 | C8 | Comping editor over recorded takes | ✗ takes stack; nothing comps them | — |
 | C9 | Pre-record buffer on the input side | ✗ (the master Audio Logger is not the same thing) | — |

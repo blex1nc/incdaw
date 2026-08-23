@@ -47,6 +47,15 @@ private:
     std::vector<std::vector<engine::Sample>> after_;
     engine::edits::Region                    applied_;   ///< clamped region actually edited
     bool                                     minted_ = false;
+
+    /// The file's markers before the first execute, restored verbatim on undo.
+    ///
+    /// Snapshotted whole rather than reconstructed: the edit verbs move and
+    /// drop markers correctly going forwards, but the drops are not
+    /// invertible — a marker inside a deleted span is gone, and no amount of
+    /// arithmetic on what is left brings it back. The list is a few dozen
+    /// entries; copying it is cheaper than being clever about it.
+    std::vector<engine::AudioMarker> markersBefore_;
 };
 
 /// Keeps only [from, to) of the asset. Clips referencing the asset are not
@@ -74,6 +83,15 @@ private:
     engine::edits::Region                    applied_;
     engine::FrameCount                       previousFrameCount_ = 0;
     bool                                     minted_ = false;
+
+    /// The file's markers before the first execute, restored verbatim on undo.
+    ///
+    /// Snapshotted whole rather than reconstructed: the edit verbs move and
+    /// drop markers correctly going forwards, but the drops are not
+    /// invertible — a marker inside a deleted span is gone, and no amount of
+    /// arithmetic on what is left brings it back. The list is a few dozen
+    /// entries; copying it is cheaper than being clever about it.
+    std::vector<engine::AudioMarker> markersBefore_;
 };
 
 /// Removes [from, to) and closes the gap — the destructive half of Cut, and
@@ -96,6 +114,15 @@ private:
     std::vector<std::vector<engine::Sample>> removed_;
     engine::edits::Region                    applied_;
     bool                                     minted_ = false;
+
+    /// The file's markers before the first execute, restored verbatim on undo.
+    ///
+    /// Snapshotted whole rather than reconstructed: the edit verbs move and
+    /// drop markers correctly going forwards, but the drops are not
+    /// invertible — a marker inside a deleted span is gone, and no amount of
+    /// arithmetic on what is left brings it back. The list is a few dozen
+    /// entries; copying it is cheaper than being clever about it.
+    std::vector<engine::AudioMarker> markersBefore_;
 };
 
 /// Inserts audio at a frame, pushing what follows later — Paste. The piece
@@ -120,6 +147,15 @@ private:
 
     engine::FramePosition insertedAt_ = 0;
     bool                  minted_     = false;
+
+    /// The file's markers before the first execute, restored verbatim on undo.
+    ///
+    /// Snapshotted whole rather than reconstructed: the edit verbs move and
+    /// drop markers correctly going forwards, but the drops are not
+    /// invertible — a marker inside a deleted span is gone, and no amount of
+    /// arithmetic on what is left brings it back. The list is a few dozen
+    /// entries; copying it is cheaper than being clever about it.
+    std::vector<engine::AudioMarker> markersBefore_;
 };
 
 /// Replaces [region) of the asset with a time-stretched and/or pitch-shifted
@@ -151,6 +187,15 @@ private:
     std::vector<std::vector<engine::Sample>> after_;    ///< the rendered replacement
     engine::edits::Region                    applied_;
     bool                                     minted_ = false;
+
+    /// The file's markers before the first execute, restored verbatim on undo.
+    ///
+    /// Snapshotted whole rather than reconstructed: the edit verbs move and
+    /// drop markers correctly going forwards, but the drops are not
+    /// invertible — a marker inside a deleted span is gone, and no amount of
+    /// arithmetic on what is left brings it back. The list is a few dozen
+    /// entries; copying it is cheaper than being clever about it.
+    std::vector<engine::AudioMarker> markersBefore_;
 };
 
 } // namespace incdaw::app

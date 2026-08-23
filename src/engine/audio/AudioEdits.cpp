@@ -101,9 +101,76 @@ void fadeOut(AudioFileData& data, Region region) noexcept
     applyRamp(data, region, false);
 }
 
+void shiftMarkers(AudioFileData& data, FramePosition at, FrameCount delta)
+{
+    std::vector<AudioMarker> kept;
+    kept.reserve(data.markers.size());
+
+    for (AudioMarker marker : data.markers) {
+        if (marker.start >= at)
+            marker.start += delta;
+
+        if (marker.start < 0)
+            continue;
+
+        kept.push_back(marker);
+    }
+
+    data.markers = std::move(kept);
+}
+
+void removeMarkersIn(AudioFileData& data, Region region)
+{
+    const FrameCount removed = region.length();
+    if (removed <= 0)
+        return;
+
+    std::vector<AudioMarker> kept;
+    kept.reserve(data.markers.size());
+
+    for (AudioMarker marker : data.markers) {
+        const FramePosition start = marker.start;
+        const FramePosition end   = marker.end();
+
+        // A point inside the removed span goes with the sound it named.
+        if (!marker.isRegion()) {
+            if (start >= region.from && start < region.to)
+                continue;
+
+            if (start >= region.to)
+                marker.start = start - removed;
+
+            kept.push_back(marker);
+            continue;
+        }
+
+        // A region marker keeps whatever survived. Losing all of it is the
+        // only case where it disappears — a span that lost its middle is
+        // still a span, and silently deleting it would take the user's
+        // annotation along with the audio they meant to remove.
+        const FramePosition overlapFrom = std::max<FramePosition>(start, region.from);
+        const FramePosition overlapTo   = std::min<FramePosition>(end, region.to);
+        const FrameCount    overlap     = std::max<FrameCount>(overlapTo - overlapFrom, 0);
+
+        if (overlap >= marker.length)
+            continue;
+
+        if (start >= region.to)
+            marker.start = start - removed;
+        else if (start > region.from)
+            marker.start = region.from;
+
+        marker.length -= overlap;
+        kept.push_back(marker);
+    }
+
+    data.markers = std::move(kept);
+}
+
 void trimTo(AudioFileData& data, Region region)
 {
-    const Region clamped = clampedRegion(data, region);
+    const Region     clamped  = clampedRegion(data, region);
+    const FrameCount previous = data.frameCount;
 
     for (auto& channel : data.channels) {
         channel.erase(channel.begin() + static_cast<std::ptrdiff_t>(clamped.to), channel.end());
@@ -111,6 +178,12 @@ void trimTo(AudioFileData& data, Region region)
     }
 
     data.frameCount = clamped.length();
+
+    // The tail first, then the head. Removing the head rebases everything
+    // after it, so the tail has to be dealt with while its coordinates still
+    // mean what they said.
+    removeMarkersIn(data, {clamped.to, previous});
+    removeMarkersIn(data, {0, clamped.from});
 }
 
 AudioFileData extractRegion(const AudioFileData& data, Region region)
@@ -139,6 +212,8 @@ void deleteRegion(AudioFileData& data, Region region)
                       channel.begin() + static_cast<std::ptrdiff_t>(clamped.to));
 
     data.frameCount -= clamped.length();
+
+    removeMarkersIn(data, clamped);
 }
 
 bool insertAudio(AudioFileData& data, FramePosition at, const AudioFileData& piece)
@@ -155,6 +230,12 @@ bool insertAudio(AudioFileData& data, FramePosition at, const AudioFileData& pie
             piece.channels[index].begin(), piece.channels[index].end());
 
     data.frameCount += piece.frameCount;
+
+    // Inserted audio pushes everything at or after the insertion point later.
+    // A marker exactly ON the point moves with the sound that follows it,
+    // which is what "insert here" means to the person doing it.
+    shiftMarkers(data, static_cast<FramePosition>(clampedAt), piece.frameCount);
+
     return true;
 }
 

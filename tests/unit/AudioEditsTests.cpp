@@ -354,3 +354,334 @@ TEST_CASE("a trim that would keep nothing, or everything, is refused")
 
     CHECK(fixture.load().frameCount == 5000);
 }
+
+// ── C7: markers and regions live in the file ─────────────────────────────────
+//
+// Stored as RIFF's own cue/adtl chunks rather than in the project, so a file
+// marked up here opens marked up elsewhere — and so INCDAW stops destroying
+// the cues other editors wrote, which it did on every read-edit-write until
+// the writer learned to emit them.
+
+namespace {
+
+engine::AudioMarker marker(std::string name, engine::FramePosition start,
+                           engine::FrameCount length = 0)
+{
+    engine::AudioMarker result;
+    result.name   = std::move(name);
+    result.start  = start;
+    result.length = length;
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("markers survive a write and a read")
+{
+    ScratchDir scratch{"incdaw-markers"};
+    const auto file = scratch.path / "marked.wav";
+
+    auto data = makeAudio(2, 4000);
+    data.markers = {marker("Intro", 0), marker("Verse", 1000, 500), marker("Drop", 3000)};
+
+    REQUIRE(bool(WavFile::write(file, data)));
+
+    AudioFileData reloaded;
+    REQUIRE(bool(WavFile::read(file, reloaded)));
+
+    REQUIRE(reloaded.markers.size() == 3);
+    CHECK(reloaded.markers == data.markers);
+
+    // A region keeps its length; a point keeps its zero.
+    CHECK(reloaded.markers[1].isRegion());
+    CHECK(reloaded.markers[1].end() == 1500);
+    CHECK_FALSE(reloaded.markers[0].isRegion());
+}
+
+TEST_CASE("an odd-length marker name does not shift the chunks after it")
+{
+    ScratchDir scratch{"incdaw-markerpad"};
+    const auto file = scratch.path / "odd.wav";
+
+    // "Hat" is three characters, four with its terminator — an even body — so
+    // the one that must be padded is the five-character name below it. Getting
+    // the pad wrong moves every chunk after it by a byte, which a reader sees
+    // as garbage rather than as a missing label.
+    auto data = makeAudio(1, 100);
+    data.markers = {marker("Hats", 10), marker("Snare", 20), marker("Kick", 30)};
+
+    REQUIRE(bool(WavFile::write(file, data)));
+
+    AudioFileData reloaded;
+    REQUIRE(bool(WavFile::read(file, reloaded)));
+
+    REQUIRE(reloaded.markers.size() == 3);
+    CHECK(reloaded.markers[0].name == "Hats");
+    CHECK(reloaded.markers[1].name == "Snare");
+    CHECK(reloaded.markers[2].name == "Kick");
+}
+
+TEST_CASE("a file with no markers is byte-identical to one written before they existed")
+{
+    ScratchDir scratch{"incdaw-nomarkers"};
+    const auto file = scratch.path / "plain.wav";
+
+    const auto data = makeAudio(2, 256);
+    REQUIRE(bool(WavFile::write(file, data)));
+
+    // No cue chunk is written at all, so the canonical 44-byte header plus the
+    // samples is the whole file — which is what the streaming writer patches
+    // by fixed offset and what every other tool expects.
+    CHECK(fs::file_size(file) == 44u + 256u * 2u * 4u);
+}
+
+TEST_CASE("markers are read back sorted, whatever order they were written in")
+{
+    ScratchDir scratch{"incdaw-markersort"};
+    const auto file = scratch.path / "unsorted.wav";
+
+    auto data = makeAudio(1, 1000);
+    data.markers = {marker("Last", 900), marker("First", 10), marker("Middle", 400)};
+
+    REQUIRE(bool(WavFile::write(file, data)));
+
+    AudioFileData reloaded;
+    REQUIRE(bool(WavFile::read(file, reloaded)));
+
+    REQUIRE(reloaded.markers.size() == 3);
+    CHECK(reloaded.markers[0].name == "First");
+    CHECK(reloaded.markers[1].name == "Middle");
+    CHECK(reloaded.markers[2].name == "Last");
+}
+
+// ── Coherence under the edit verbs ───────────────────────────────────────────
+
+TEST_CASE("inserting audio pushes the markers after it")
+{
+    auto data = makeAudio(1, 100);
+    data.markers = {marker("A", 10), marker("B", 50), marker("C", 90)};
+
+    const auto piece = engine::edits::extractRegion(data, {0, 20});
+    REQUIRE(engine::edits::insertAudio(data, 50, piece));
+
+    REQUIRE(data.markers.size() == 3);
+    CHECK(data.markers[0].start == 10);   // before the insertion: unmoved
+    CHECK(data.markers[1].start == 70);   // exactly on it: moves with the sound after it
+    CHECK(data.markers[2].start == 110);
+}
+
+TEST_CASE("a copied span carries no markers")
+{
+    auto data = makeAudio(1, 100);
+    data.markers = {marker("A", 10), marker("B", 50)};
+
+    // Pasting a span should add sound, not somebody's annotations.
+    const auto piece = engine::edits::extractRegion(data, {0, 60});
+    CHECK(piece.markers.empty());
+}
+
+TEST_CASE("deleting audio takes the markers under it")
+{
+    auto data = makeAudio(1, 100);
+    data.markers = {marker("Before", 10), marker("Inside", 45), marker("After", 80)};
+
+    engine::edits::deleteRegion(data, {40, 60});
+
+    REQUIRE(data.markers.size() == 2);
+    CHECK(data.markers[0].name == "Before");
+    CHECK(data.markers[0].start == 10);
+
+    // The one that named the removed sound went with it; the one after closed
+    // up by exactly what was taken out.
+    CHECK(data.markers[1].name == "After");
+    CHECK(data.markers[1].start == 60);
+}
+
+TEST_CASE("a region marker keeps whatever survived a deletion")
+{
+    auto data = makeAudio(1, 100);
+    data.markers = {marker("Straddles", 30, 40)};   // [30, 70)
+
+    engine::edits::deleteRegion(data, {50, 60});
+
+    REQUIRE(data.markers.size() == 1);
+    CHECK(data.markers[0].start == 30);
+    CHECK(data.markers[0].length == 30);   // lost the ten frames it overlapped
+
+    // Removing all of it is the one case where the annotation goes too.
+    engine::edits::deleteRegion(data, {25, 70});
+    CHECK(data.markers.empty());
+}
+
+TEST_CASE("trim rebases what it kept and drops what it did not")
+{
+    auto data = makeAudio(1, 100);
+    data.markers = {marker("Head", 5), marker("Kept", 40), marker("Span", 45, 20),
+                    marker("Tail", 95)};
+
+    engine::edits::trimTo(data, {30, 70});
+
+    REQUIRE(data.markers.size() == 2);
+    CHECK(data.markers[0].name == "Kept");
+    CHECK(data.markers[0].start == 10);
+
+    CHECK(data.markers[1].name == "Span");
+    CHECK(data.markers[1].start == 15);
+    CHECK(data.markers[1].length == 20);
+}
+
+TEST_CASE("the verbs that do not change length leave markers alone")
+{
+    auto data = makeAudio(1, 100);
+    const std::vector<engine::AudioMarker> before{marker("A", 10), marker("B", 60, 20)};
+    data.markers = before;
+
+    engine::edits::applyGain(data, {0, 100}, 0.5f);
+    engine::edits::reverse(data, {20, 80});
+    engine::edits::fadeIn(data, {0, 10});
+    engine::edits::silence(data, {90, 100});
+
+    // Reversing does NOT mirror the markers inside it: a marker names a moment
+    // in the material, and the material is what was reversed.
+    CHECK(data.markers == before);
+}
+
+// ── Undo ─────────────────────────────────────────────────────────────────────
+
+TEST_CASE("undo restores markers an edit removed")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    {
+        auto data = fixture.load();
+        data.markers = {marker("Before", 100), marker("Inside", 1500), marker("After", 3000)};
+        REQUIRE(bool(WavFile::write(fixture.file, data)));
+    }
+
+    REQUIRE(registry.execute(std::make_unique<app::DeleteAudioRegionCommand>(
+        fixture.assetId, engine::edits::Region{1000, 2000})));
+
+    {
+        const auto data = fixture.load();
+        REQUIRE(data.markers.size() == 2);
+        CHECK(data.markers[1].start == 2000);   // "After", closed up
+    }
+
+    // The marker inside the deleted span cannot be derived from the two that
+    // are left, which is why the command snapshots the list rather than trying
+    // to un-shift it.
+    registry.undo();
+
+    const auto restored = fixture.load();
+    REQUIRE(restored.markers.size() == 3);
+    CHECK(restored.markers[1].name == "Inside");
+    CHECK(restored.markers[1].start == 1500);
+
+    registry.redo();
+    CHECK(fixture.load().markers.size() == 2);
+}
+
+TEST_CASE("a trim's undo brings back the markers outside what it kept")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    {
+        auto data = fixture.load();
+        data.markers = {marker("Head", 10), marker("Kept", 2500), marker("Tail", 4900)};
+        REQUIRE(bool(WavFile::write(fixture.file, data)));
+    }
+
+    REQUIRE(registry.execute(std::make_unique<app::TrimAssetCommand>(
+        fixture.assetId, engine::edits::Region{2000, 3000})));
+
+    CHECK(fixture.load().markers.size() == 1);
+
+    registry.undo();
+
+    const auto restored = fixture.load();
+    REQUIRE(restored.markers.size() == 3);
+    CHECK(restored.markers[0].name == "Head");
+    CHECK(restored.markers[2].name == "Tail");
+}
+
+// ── C6: the clipboard crosses files ──────────────────────────────────────────
+
+TEST_CASE("a span copied from one asset pastes into another")
+{
+    ScratchDir scratch{"incdaw-crossfile"};
+
+    project::Project project;
+
+    const auto sourceFile = scratch.path / "source.wav";
+    const auto targetFile = scratch.path / "target.wav";
+
+    const auto source = makeAudio(2, 2000);
+    auto       target = makeAudio(2, 1000);
+    for (auto& channel : target.channels)
+        std::fill(channel.begin(), channel.end(), 0.0f);
+
+    REQUIRE(bool(WavFile::write(sourceFile, source)));
+    REQUIRE(bool(WavFile::write(targetFile, target)));
+
+    auto& targetAsset       = project.addAudioAsset(targetFile.string());
+    targetAsset.sampleRate  = 48000.0;
+    targetAsset.frameCount  = 1000;
+    targetAsset.channelCount = 2;
+
+    // What the shell's clipboard holds: a span lifted out of one file, with no
+    // tie to the asset it came from. That is what lets it survive a document
+    // switch and land in a different one.
+    const auto clipboard = engine::edits::extractRegion(source, {500, 700});
+    REQUIRE(clipboard.frameCount == 200);
+
+    app::CommandRegistry registry{project};
+    REQUIRE(registry.execute(
+        std::make_unique<app::InsertAudioCommand>(targetAsset.id, 400, clipboard)));
+
+    AudioFileData pasted;
+    REQUIRE(bool(WavFile::read(targetFile, pasted)));
+    CHECK(pasted.frameCount == 1200);
+    CHECK(pasted.channels[0][400] == doctest::Approx(source.channels[0][500]));
+    CHECK(pasted.channels[1][599] == doctest::Approx(source.channels[1][699]));
+
+    // And the target's own audio is intact either side of the seam.
+    CHECK(pasted.channels[0][399] == doctest::Approx(0.0));
+    CHECK(pasted.channels[0][600] == doctest::Approx(0.0));
+
+    registry.undo();
+
+    AudioFileData undone;
+    REQUIRE(bool(WavFile::read(targetFile, undone)));
+    CHECK(undone.frameCount == 1000);
+}
+
+TEST_CASE("a paste from a file at another rate is refused, not resampled")
+{
+    ScratchDir scratch{"incdaw-ratemismatch"};
+
+    project::Project project;
+    const auto file = scratch.path / "target.wav";
+
+    const auto target = makeAudio(2, 500);
+    REQUIRE(bool(WavFile::write(file, target)));
+
+    auto& asset        = project.addAudioAsset(file.string());
+    asset.sampleRate   = 48000.0;
+    asset.frameCount   = 500;
+    asset.channelCount = 2;
+
+    auto clipboard        = engine::edits::extractRegion(target, {0, 100});
+    clipboard.sampleRate  = 44100.0;
+
+    // Silently resampling would change the pitch of the pasted sound; silently
+    // not resampling would change its speed. Refusing says so.
+    app::CommandRegistry registry{project};
+    CHECK_FALSE(registry.execute(
+        std::make_unique<app::InsertAudioCommand>(asset.id, 0, clipboard)));
+
+    AudioFileData unchanged;
+    REQUIRE(bool(WavFile::read(file, unchanged)));
+    CHECK(unchanged.frameCount == 500);
+}

@@ -8,6 +8,47 @@ public version yet.
 
 ## [Unreleased]
 
+### Audio editor — markers and regions, stored in the file — 2026-08-23
+
+- **`AudioMarker` on `AudioFileData`**, read and written as RIFF's own
+  `cue ` and `LIST adtl` chunks. Not in the project, and for a reason
+  that outlasts the convenience: a marker belongs to the sound, not to
+  the song it happens to be used in, so a file marked up in INCDAW opens
+  marked up in every other editor — and one marked up elsewhere arrives
+  here intact.
+- **This fixes a data-loss bug nobody had named.** Every edit command
+  does read → edit → write. The reader skipped `cue ` and the writer
+  never emitted it, so each edit silently destroyed whatever cues another
+  application had put in the file. It had been true since WAV support
+  landed.
+- **The length-changing verbs keep markers coherent.** Audio inserted
+  before a marker pushes it later; audio removed under a point takes the
+  point with it; a region marker that straddles a deletion keeps the part
+  that survived rather than vanishing; a trim rebases what it kept. The
+  verbs that do not change length — gain, fades, reverse, silence — leave
+  markers exactly where they are. Reversing a span deliberately does not
+  mirror the markers inside it: a marker names a moment in the material,
+  and the material is what was reversed.
+- **Undo restores the marker list wholesale.** The verbs move markers
+  correctly going forwards, but the drops are not invertible — a marker
+  inside a deleted span is gone, and no arithmetic on what remains brings
+  it back. Every length-changing command snapshots the list at mint time.
+- A copied span carries no markers. Pasting adds sound, not somebody
+  else's annotations.
+- A file with no markers is written byte-identical to before: no `cue `
+  chunk at all, so the canonical 44-byte header the streaming writer
+  patches by fixed offset is untouched.
+
+**On C6** — cut, copy and paste were already implemented and menu-wired;
+the gap list's row was stale. What was missing was the proof, and it is
+now there: a span copied out of one asset pasted into another, undone,
+and a paste from a file at another sample rate refused rather than
+resampled. Paste lands *at* the selection start without replacing the
+selection; Edison replaces. That is a deliberate choice — Delete then
+Paste is two keystrokes and one undo entry each, and a paste that eats a
+selection is unrecoverable by accident.
+
+
 ### Fixed — a control surface plugged in later stayed blank — 2026-08-23
 
 `MidiFeedback::flush` recorded a value as sent before knowing whether it

@@ -100,6 +100,7 @@ bool EditAssetRegionCommand::execute(Project& project)
 
         after_  = snapshotRegion(data, applied_);
         minted_ = true;
+        markersBefore_ = data.markers;
     } else {
         // Redo: the recorded result, not a re-derivation.
         restoreRegion(data, applied_, after_);
@@ -117,6 +118,10 @@ void EditAssetRegionCommand::undo(Project& project)
     AudioFileData data;
     if (!WavFile::read(assetFilePath(*asset), data))
         return;
+
+    // The markers as they were. Restored rather than un-shifted: a marker the
+    // edit removed cannot be derived from the ones it left behind.
+    data.markers = markersBefore_;
 
     restoreRegion(data, applied_, before_);
     (void)WavFile::write(assetFilePath(*asset), data);
@@ -150,6 +155,7 @@ bool TrimAssetCommand::execute(Project& project)
         head_ = snapshotRegion(data, {0, applied_.from});
         tail_ = snapshotRegion(data, {applied_.to, data.frameCount});
         minted_ = true;
+        markersBefore_ = data.markers;
     }
 
     engine::edits::trimTo(data, applied_);
@@ -196,6 +202,10 @@ void TrimAssetCommand::undo(Project& project)
             std::copy(tail_[channel].begin(), tail_[channel].end(), destination);
     }
 
+    // The markers as they were. Restored rather than un-shifted: a marker the
+    // edit removed cannot be derived from the ones it left behind.
+    restored.markers = markersBefore_;
+
     if (WavFile::write(assetFilePath(*asset), restored))
         asset->frameCount = previousFrameCount_;
 }
@@ -226,6 +236,7 @@ bool DeleteAudioRegionCommand::execute(Project& project)
 
         removed_ = snapshotRegion(data, applied_);
         minted_  = true;
+        markersBefore_ = data.markers;
     }
 
     engine::edits::deleteRegion(data, applied_);
@@ -260,6 +271,10 @@ void DeleteAudioRegionCommand::undo(Project& project)
     if (!engine::edits::insertAudio(data, applied_.from, piece))
         return;
 
+    // The markers as they were. Restored rather than un-shifted: a marker the
+    // edit removed cannot be derived from the ones it left behind.
+    data.markers = markersBefore_;
+
     if (WavFile::write(assetFilePath(*asset), data))
         asset->frameCount = data.frameCount;
 }
@@ -284,6 +299,7 @@ bool InsertAudioCommand::execute(Project& project)
         insertedAt_ = std::min<engine::FramePosition>(
             at_, static_cast<engine::FramePosition>(data.frameCount));
         minted_ = true;
+        markersBefore_ = data.markers;
     }
 
     // Rate or channel mismatch refuses here, before any write.
@@ -314,6 +330,10 @@ void InsertAudioCommand::undo(Project& project)
     engine::edits::deleteRegion(
         data, {static_cast<FrameCount>(insertedAt_),
                static_cast<FrameCount>(insertedAt_) + piece_.frameCount});
+
+    // The markers as they were. Restored rather than un-shifted: a marker the
+    // edit removed cannot be derived from the ones it left behind.
+    data.markers = markersBefore_;
 
     if (WavFile::write(assetFilePath(*asset), data))
         asset->frameCount = data.frameCount;
@@ -354,6 +374,12 @@ AudioFileData withSpanReplaced(const AudioFileData& data, FrameCount from, Frame
                   data.channels[channel].end(), destination);
     }
 
+    // Markers ride along, shifted by however much the span grew or shrank.
+    // Building a fresh AudioFileData and forgetting them is how a stretch
+    // used to silently strip every cue in the file.
+    result.markers = data.markers;
+    engine::edits::shiftMarkers(result, from + spanLength, replacementFrames - spanLength);
+
     return result;
 }
 
@@ -392,6 +418,7 @@ bool StretchAssetCommand::execute(Project& project)
 
         after_  = engine::dsp::timeStretch(regionData, options).channels;
         minted_ = true;
+        markersBefore_ = data.markers;
     }
 
     const AudioFileData spliced =
@@ -421,8 +448,12 @@ void StretchAssetCommand::undo(Project& project)
     const auto renderedFrames =
         after_.empty() ? FrameCount{0} : static_cast<FrameCount>(after_[0].size());
 
-    const AudioFileData restored =
+    AudioFileData restored =
         withSpanReplaced(data, applied_.from, renderedFrames, before_);
+
+    // The markers as they were. Restored rather than un-shifted: a marker the
+    // edit removed cannot be derived from the ones it left behind.
+    restored.markers = markersBefore_;
 
     if (WavFile::write(assetFilePath(*asset), restored))
         asset->frameCount = restored.frameCount;

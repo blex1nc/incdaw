@@ -9,12 +9,40 @@
 
 namespace incdaw::engine {
 
+/// A named point or span inside a file.
+///
+/// Stored IN the audio file, as RIFF's own `cue `/`adtl` chunks, rather than
+/// in the project. Three reasons, and the third is the one that matters most:
+/// a marker belongs to the sound, not to the song it happens to be used in;
+/// every other audio editor reads and writes them there, so a file marked up
+/// in INCDAW opens marked up elsewhere; and INCDAW's own edit commands used to
+/// destroy them — read, edit, write, and every cue another application had
+/// written was silently gone, because the reader skipped the chunk and the
+/// writer never emitted it.
+struct AudioMarker {
+    std::string   name;
+    FramePosition start = 0;
+
+    /// Zero is a point; anything else is a region [start, start + length).
+    FrameCount length = 0;
+
+    [[nodiscard]] bool isRegion() const noexcept { return length > 0; }
+    [[nodiscard]] FramePosition end() const noexcept { return start + length; }
+
+    [[nodiscard]] friend bool operator==(const AudioMarker&, const AudioMarker&) = default;
+};
+
 /// Decoded audio, planar, float — the engine's native shape.
 struct AudioFileData {
     SampleRate                       sampleRate   = 0.0;
     std::size_t                      channelCount = 0;
     FrameCount                       frameCount   = 0;
     std::vector<std::vector<Sample>> channels;    ///< channelCount vectors of frameCount
+
+    /// Sorted by `start`. Kept coherent by the edit verbs: audio inserted
+    /// before a marker pushes it later, audio removed under one takes it with
+    /// it (engine/audio/AudioEdits.h).
+    std::vector<AudioMarker> markers;
 };
 
 /// Reads and writes RIFF/WAVE files.

@@ -48,12 +48,39 @@ void fadeIn(AudioFileData& data, Region region) noexcept;
 /// Linear ramp 1 -> 0 across the region.
 void fadeOut(AudioFileData& data, Region region) noexcept;
 
+// ── Markers ──────────────────────────────────────────────────────────────────
+//
+// The length-changing verbs below keep `data.markers` coherent, because the
+// alternative is markers that quietly stop meaning anything: delete a bar from
+// the middle of a file and every marker after it is now pointing at the wrong
+// sound, with nothing to say so. The rules are the obvious ones written down —
+//
+//   * audio inserted before a marker pushes it later;
+//   * audio removed under a point marker removes the marker with it;
+//   * a region marker that straddles a deletion keeps the part that survived;
+//   * a trim rebases what it kept and drops what it did not.
+//
+// The verbs that do not change length — gain, fades, reverse, silence — leave
+// markers exactly where they are. Reversing a region does NOT mirror the
+// markers inside it: a marker names a moment in the material, and the material
+// is what was reversed.
+
+/// Shifts markers at or after `at` by `delta`, dropping any that would land
+/// before zero. Exposed because the commands need the same arithmetic when
+/// they replay an edit.
+void shiftMarkers(AudioFileData& data, FramePosition at, FrameCount delta);
+
+/// Removes `region` from the marker list, closing the gap the way
+/// `deleteRegion` closes it in the audio.
+void removeMarkersIn(AudioFileData& data, Region region);
+
 /// Keeps only the region: everything before and after is removed and the
 /// audio shrinks to the region's length.
 void trimTo(AudioFileData& data, Region region);
 
 /// The region's samples as their own audio — the clipboard's copy verb.
-/// Metadata (rate, channel count) rides along.
+/// Metadata (rate, channel count) rides along; markers deliberately do not.
+/// Pasting a copied span should add sound, not someone else's annotations.
 [[nodiscard]] AudioFileData extractRegion(const AudioFileData& data, Region region);
 
 /// Removes the region and closes the gap; the audio shrinks by its length.
