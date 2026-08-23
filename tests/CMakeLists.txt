@@ -76,7 +76,8 @@ add_executable(incdaw_tests
     unit/StandardActionsTests.cpp
     unit/ThemePaletteTests.cpp
     unit/ThemeLibraryTests.cpp
-    unit/PresetTests.cpp)
+    unit/PresetTests.cpp
+    unit/WavetableTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.

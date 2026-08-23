@@ -76,6 +76,7 @@ add_library(incdaw_engine STATIC
     engine/instrument/Sampler.cpp
     engine/instrument/SamplerStream.cpp
     engine/instrument/SimpleSynth.cpp
+    engine/instrument/Wavetable.cpp
     engine/instrument/PianoInstrument.cpp
     engine/instrument/InstrumentNode.cpp
     engine/audio/AiffFile.cpp
