@@ -106,6 +106,17 @@ public:
 
     [[nodiscard]] std::size_t trackAtY(const std::vector<Track>& tracks, double y) const noexcept;
 
+    /// Which lane of row `index` a y coordinate lands in.
+    ///
+    /// A row is divided evenly between the lanes its clips use, so lanes cost
+    /// no extra height: a two-lane track is the same row split in two, and the
+    /// user asks for more room by resizing the track. Zero for a row with no
+    /// lanes to speak of, and for a row a collapsed folder is hiding.
+    [[nodiscard]] int laneAtY(const Project& project, std::size_t index, double y) const noexcept;
+
+    /// Height of one lane band on row `index`.
+    [[nodiscard]] double laneHeight(const Project& project, std::size_t index) const noexcept;
+
     /// Screen rectangle for a clip, whether or not it is on screen.
     [[nodiscard]] Rect clipRect(const Project& project, const Clip& clip) const noexcept;
 

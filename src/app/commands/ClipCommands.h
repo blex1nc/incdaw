@@ -77,8 +77,12 @@ private:
 /// started on the same track.
 class MoveClipsCommand final : public Command {
 public:
-    MoveClipsCommand(ClipIds clips, Tick tickDelta, int trackDelta)
-        : clips_(std::move(clips)), tickDelta_(tickDelta), trackDelta_(trackDelta) {}
+    /// `laneDelta` moves the clips between lanes of the track they are on —
+    /// the other half of a vertical drag, and part of the same command so a
+    /// diagonal one is still a single undo entry.
+    MoveClipsCommand(ClipIds clips, Tick tickDelta, int trackDelta, int laneDelta = 0)
+        : clips_(std::move(clips)), tickDelta_(tickDelta), trackDelta_(trackDelta),
+          laneDelta_(laneDelta) {}
 
     [[nodiscard]] const char* id() const noexcept override { return "clip.move"; }
     [[nodiscard]] std::string name() const override { return "Move Clips"; }
@@ -93,11 +97,13 @@ private:
     ClipIds clips_;
     Tick    tickDelta_  = 0;
     int     trackDelta_ = 0;
+    int     laneDelta_  = 0;
 
     /// What was actually applied, which is less than requested when a clip hits
     /// tick zero or the ends of the track list. Undo reverses what happened.
     Tick    appliedTickDelta_  = 0;
     int     appliedTrackDelta_ = 0;
+    int     appliedLaneDelta_  = 0;
 
     /// Audio clips are frame-anchored, and tick->frame conversion does not
     /// invert exactly across tempo changes — so their undo restores a

@@ -76,6 +76,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     Tick         _dragAppliedTicks;
     int          _dragAppliedTracks;
     Tick         _dragAppliedLength;
+    int          _dragAppliedLanes;
     BOOL         _stretchResize;   ///< Option at the handle: stretch, not trim
 
     /// What the last refused gesture was refused for, shown over the timeline
@@ -106,6 +107,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     _dragAppliedTicks  = 0;
     _dragAppliedTracks = 0;
     _dragAppliedLength = 0;
+    _dragAppliedLanes  = 0;
     _playheadTick      = -1;
 
     app::PlaylistModel::Viewport viewport;
@@ -282,6 +284,18 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
         [self drawBarLinesInLaneAt:y height:height - 1.0];
 
+        // A hairline between lanes, so a two-deep track reads as two places
+        // rather than as one row with clips at odd heights.
+        const int lanes = project::trackLaneCount(*_project, track.id);
+        if (lanes > 1) {
+            const CGFloat band = (height - 1.0) / static_cast<CGFloat>(lanes);
+
+            for (int lane = 1; lane < lanes; ++lane)
+                fillRect(NSMakeRect(headerWidth, y + band * static_cast<CGFloat>(lane),
+                                    self.bounds.size.width - headerWidth, 1.0),
+                         theme::withAlpha(theme::ink(Ink::separator), 0.7));
+        }
+
         // ── The track's header ───────────────────────────────────────────────
         const NSRect header = NSMakeRect(2.0 + indent, y + 1.0, headerWidth - 5.0 - indent,
                                          height - 4.0);
@@ -307,6 +321,12 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
                                          track.type == project::TrackType::folder
                                              ? NSFontWeightBold
                                              : NSFontWeightMedium));
+
+        if (lanes > 1)
+            theme::drawText([NSString stringWithFormat:@"%d lanes", lanes],
+                            NSMakeRect(NSMinX(header) + nameLeft, NSMinY(header) + 20.0,
+                                       header.size.width - nameLeft - 4.0, 12.0),
+                            theme::ink(Ink::textDim), theme::labelFont(9.0));
 
         theme::drawToggle([self muteRectForRow:row], @"M", track.muted, theme::ink(Ink::mute), true);
         theme::drawToggle([self soloRectForRow:row], @"S", track.soloed, theme::ink(Ink::solo), true);
@@ -846,6 +866,7 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     _dragAppliedTicks  = 0;
     _dragAppliedTracks = 0;
     _dragAppliedLength = 0;
+    _dragAppliedLanes  = 0;
 
     if (view.y < rulerHeight) {
         if (self.onSeekTick != nil && view.x >= headerWidth)
@@ -971,17 +992,40 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     if (fromRow != app::PlaylistModel::noTrack && toRow != app::PlaylistModel::noTrack)
         trackDelta = static_cast<int>(toRow) - static_cast<int>(fromRow) - _dragAppliedTracks;
 
+    // Vertical motion inside one row is a lane change; crossing the row's edge
+    // is a track change. Measured in lanes rather than in points so a tall
+    // track and a short one feel the same, and only while the pointer stays on
+    // the row the drag began on — mixing the two on one gesture would make a
+    // diagonal drag land somewhere nobody aimed at.
+    int laneDelta = 0;
+    if (trackDelta == 0 && _dragAppliedTracks == 0
+        && fromRow != app::PlaylistModel::noTrack && fromRow == toRow) {
+        const int wantedLane = [self laneOffsetFrom:_dragOrigin.y to:grid.y row:fromRow];
+        laneDelta            = wantedLane - _dragAppliedLanes;
+    }
+
     const Tick tickDelta = wanted - _dragAppliedTicks;
 
-    if (tickDelta == 0 && trackDelta == 0)
+    if (tickDelta == 0 && trackDelta == 0 && laneDelta == 0)
         return;
 
     if (_registry->executeMerging(std::make_unique<app::MoveClipsCommand>(
-            _model->selection(), tickDelta, trackDelta))) {
+            _model->selection(), tickDelta, trackDelta, laneDelta))) {
         _dragAppliedTicks  = wanted;
         _dragAppliedTracks += trackDelta;
+        _dragAppliedLanes  += laneDelta;
         [self changed];
     }
+}
+
+/// How many lane bands the pointer has travelled within one row.
+- (int)laneOffsetFrom:(CGFloat)fromY to:(CGFloat)toY row:(std::size_t)row
+{
+    const double band = _model->laneHeight(*_project, row);
+    if (band <= 0.0)
+        return 0;
+
+    return static_cast<int>(std::floor((toY - fromY) / band + 0.5));
 }
 
 - (void)mouseUp:(NSEvent*)event

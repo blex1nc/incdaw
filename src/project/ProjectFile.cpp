@@ -1,5 +1,6 @@
 #include "project/ProjectFile.h"
 
+#include <algorithm>
 #include <cstdio>
 
 #include "project/Json.h"
@@ -342,6 +343,7 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("muted", clip.muted);
         json.set("locked", clip.locked);
         json.set("group", toJson(clip.group));
+        json.set("lane", static_cast<std::int64_t>(clip.lane));
         json.set("fadeInFrames", static_cast<std::int64_t>(clip.fadeInFrames));
         json.set("fadeOutFrames", static_cast<std::int64_t>(clip.fadeOutFrames));
         json.set("pitchSemitones", clip.pitchSemitones);
@@ -728,6 +730,7 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         clip.muted          = json["muted"].asBool(false);
         clip.locked         = json["locked"].asBool(false);
         clip.group          = idFrom(json["group"]);
+        clip.lane           = std::max(0, static_cast<int>(json["lane"].asInt(0)));
         clip.fadeInFrames   = json["fadeInFrames"].asInt(0);
         clip.fadeOutFrames  = json["fadeOutFrames"].asInt(0);
         clip.pitchSemitones = json["pitchSemitones"].asDouble(0.0);
@@ -948,6 +951,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // and reads back invalid — every clip on its own, which is what those
     // projects had, since 1.7 had no way to group one.
     if (major == 1 && minor == 7) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.8 -> 1.9. Purely additive: `Clip::lane` is absent from a 1.8 document
+    // and reads back zero — one lane per track, which is all those projects
+    // ever had.
+    if (major == 1 && minor == 8) {
         result.succeeded = true;
         return result;
     }

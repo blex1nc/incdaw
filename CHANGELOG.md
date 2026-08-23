@@ -8,6 +8,35 @@ public version yet.
 
 ## [Unreleased]
 
+### Playlist — a track more than one clip deep — 2026-08-23
+
+- **Lanes.** A clip carries which lane of its track it sits on, so two clips
+  that share a span sit beside each other instead of one disappearing behind
+  the other. The audio never needed changing — overlapping placements were
+  always summed, and overlapping patterns always both compiled — what was
+  missing was a way to see and grab each of them.
+- **A track is only as deep as it needs to be.** The lane count is derived
+  from the clips on the track rather than stored, so there is no invariant
+  between a clip and its track for an edit, an undo or a load to break, and
+  deleting the deepest clip takes its lane with it.
+- **Lanes divide the row** rather than growing it: a two-lane track is the
+  same height split in two, drawn with a hairline between them and the count
+  in the header. More room is a track resize, which already exists.
+- **A click lands on the lane it points at**, which is the literal fix for
+  the clip drawn last winning every overlap.
+- **Dragging vertically inside a row changes lane; crossing the row's edge
+  changes track.** Both are the same command, so a diagonal drag is still one
+  undo entry, and the lane clamps for the whole selection at lane zero the
+  way time already clamps at tick zero.
+- **A clip placed or copied on top of another takes the next free lane**, and
+  a clip that overlaps nothing stays on lane zero.
+- **Audio clips now compile in a defined order** — lane, then start, then id.
+  Float addition is not associative, so summing a track's clips in creation
+  order made a render depend on edit history; it is now a function of the
+  arrangement.
+- **Project format 1.9.** Clips gained `lane`. A 1.8 file reads back on lane
+  zero.
+
 ### Playlist — clips that move as one — 2026-08-23
 
 - **Clip groups.** Several clips tie together and then move, resize, copy,

@@ -210,6 +210,15 @@ struct Clip {
     double        pitchSemitones = 0.0;
     double        stretchRatio   = 1.0;
 
+    /// Which lane of its track the clip occupies, counting from zero.
+    ///
+    /// Lanes make a track more than one clip deep: two clips that overlap in
+    /// time sit on different lanes, and both are visible, grabbable and heard
+    /// rather than the last one drawn winning the row. A track's lane count is
+    /// derived from the clips on it rather than stored, so there is no
+    /// invariant between the two for an edit, an undo or a load to break.
+    int           lane = 0;
+
     /// The group this clip belongs to, or an invalid id when it is on its own.
     ///
     /// A group is project state, not a selection: it is saved with the song
@@ -611,6 +620,10 @@ private:
 /// than defended against afterwards: a cycle in the tree is a corrupt project,
 /// and the only honest moment to refuse one is before it exists.
 [[nodiscard]] bool trackWouldCycle(const Project& project, EntityId track, EntityId parent) noexcept;
+
+/// How many lanes a track shows: one more than the highest lane in use, and
+/// never fewer than one.
+[[nodiscard]] int trackLaneCount(const Project& project, EntityId track) noexcept;
 
 /// Every track under `folder`, at any depth, in `tracks()` order.
 [[nodiscard]] std::vector<EntityId> tracksUnder(const Project& project, EntityId folder);

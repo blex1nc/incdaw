@@ -683,9 +683,29 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
             auto node = std::make_unique<engine::AudioClipNode>();
 
-            for (const Clip& clip : project.clips()) {
-                if (clip.type != ClipType::audio || clip.track != track.id || clip.muted)
-                    continue;
+            // Lane, then start. The node sums overlapping clips, and float
+            // addition is not associative — summing them in `project.clips()`
+            // order would make a render depend on the order the clips happened
+            // to be created in, so two projects that look identical could
+            // differ in the last bit. Sorting here makes the render a function
+            // of the arrangement, and gives overlapping clips a defined
+            // stacking order for the fades that sit on top of them.
+            std::vector<const Clip*> ordered;
+            for (const Clip& clip : project.clips())
+                if (clip.type == ClipType::audio && clip.track == track.id && !clip.muted)
+                    ordered.push_back(&clip);
+
+            std::sort(ordered.begin(), ordered.end(),
+                      [](const Clip* a, const Clip* b) {
+                          if (a->lane != b->lane)
+                              return a->lane < b->lane;
+                          if (a->start != b->start)
+                              return a->start < b->start;
+                          return a->id.value() < b->id.value();
+                      });
+
+            for (const Clip* entry : ordered) {
+                const Clip& clip = *entry;
 
                 engine::AudioClipNode::PlacedClip placed;
 

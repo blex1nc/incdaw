@@ -10,6 +10,43 @@ namespace {
 /// which reads to the user as a clip that vanished.
 constexpr Tick minimumClipLength = 1;
 
+/// The first lane of `track` where [start, start + length) is free, starting
+/// at `preferred`.
+///
+/// Placing a clip on top of another used to mean one of them disappeared
+/// behind the other; it now means the new one takes the next lane down. The
+/// search is over the clip's own span rather than the whole track, so a track
+/// stays one lane deep wherever nothing actually overlaps.
+int freeLane(const Project& project, EntityId track, Tick start, Tick length,
+             int preferred, EntityId ignore = {})
+{
+    const engine::TempoMap& tempoMap = project.tempoMap();
+    const Tick              end      = start + std::max<Tick>(length, 1);
+
+    for (int lane = std::max(0, preferred); lane < 1024; ++lane) {
+        bool taken = false;
+
+        for (const Clip& clip : project.clips()) {
+            if (clip.track != track || clip.lane != lane || clip.id == ignore)
+                continue;
+
+            const Tick clipStart = project::clipStartTicks(clip, tempoMap);
+            const Tick clipEnd   = clipStart
+                                 + std::max<Tick>(project::clipLengthTicks(clip, tempoMap), 1);
+
+            if (clipStart < end && clipEnd > start) {
+                taken = true;
+                break;
+            }
+        }
+
+        if (!taken)
+            return lane;
+    }
+
+    return preferred;   // a thousand deep is not a lane problem any more
+}
+
 /// Pulls in every clip that shares a group with one already in the list.
 ///
 /// A group is a decision about the arrangement — these four bars belong
@@ -133,6 +170,8 @@ bool AddPatternClipCommand::execute(Project& project)
         created.lengthTicks = length_ > 0 ? length_ : pattern->length;
         created.name        = pattern->name;
         created.colour      = pattern->colour;
+        created.lane        = freeLane(project, track_, created.startTick,
+                                       created.lengthTicks, 0, created.id);
 
         clip_   = created;
         index_  = project.clips().size() - 1;
@@ -196,7 +235,7 @@ bool MoveClipsCommand::execute(Project& project)
 {
     resolveTargets(project, clips_);
 
-    if (clips_.empty() || (tickDelta_ == 0 && trackDelta_ == 0))
+    if (clips_.empty() || (tickDelta_ == 0 && trackDelta_ == 0 && laneDelta_ == 0))
         return false;
 
     const engine::TempoMap& tempoMap = project.tempoMap();
@@ -207,6 +246,7 @@ bool MoveClipsCommand::execute(Project& project)
     // accessor, so a mixed selection clamps as one.
     Tick tickDelta  = tickDelta_;
     int  trackDelta = trackDelta_;
+    int  laneDelta  = laneDelta_;
 
     for (const EntityId id : clips_) {
         const Clip* clip = project.findClip(id);
@@ -217,9 +257,14 @@ bool MoveClipsCommand::execute(Project& project)
 
         if (trackDelta != 0 && !trackAtOffset(project, clip->track, trackDelta).isValid())
             trackDelta = 0;
+
+        // Lane zero is the floor. There is no ceiling: dragging into the band
+        // below the last used lane is how a lane comes into being, and the
+        // count is derived from what the clips say rather than stored.
+        laneDelta = std::max(laneDelta, -clip->lane);
     }
 
-    if (tickDelta == 0 && trackDelta == 0)
+    if (tickDelta == 0 && trackDelta == 0 && laneDelta == 0)
         return false;
 
     movedAudio_.clear();
@@ -249,10 +294,13 @@ bool MoveClipsCommand::execute(Project& project)
             if (target.isValid())
                 clip->track = target;
         }
+
+        clip->lane = std::max(0, clip->lane + laneDelta);
     }
 
     appliedTickDelta_  = tickDelta;
     appliedTrackDelta_ = trackDelta;
+    appliedLaneDelta_  = laneDelta;
     return true;
 }
 
@@ -271,6 +319,8 @@ void MoveClipsCommand::undo(Project& project)
             if (target.isValid())
                 clip->track = target;
         }
+
+        clip->lane = std::max(0, clip->lane - appliedLaneDelta_);
     }
 
     // Frame positions come back from the snapshot, not from arithmetic:
@@ -291,6 +341,7 @@ void MoveClipsCommand::mergeWith(const Command& next)
     if (const auto* other = dynamic_cast<const MoveClipsCommand*>(&next)) {
         appliedTickDelta_  += other->appliedTickDelta_;
         appliedTrackDelta_ += other->appliedTrackDelta_;
+        appliedLaneDelta_  += other->appliedLaneDelta_;
 
         // The requested deltas must accumulate too: redo re-runs execute(),
         // and an execute that replayed only the gesture's first step would
@@ -298,6 +349,7 @@ void MoveClipsCommand::mergeWith(const Command& next)
         // OUR snapshots — the gesture's starting positions.
         tickDelta_  += other->appliedTickDelta_;
         trackDelta_ += other->appliedTrackDelta_;
+        laneDelta_  += other->appliedLaneDelta_;
     }
 }
 
@@ -435,6 +487,10 @@ bool DuplicateClipsCommand::execute(Project& project)
             copy.id        = added.id;
             copy.track     = track;
             copy.startTick = std::max<Tick>(0, copy.startTick + tickDelta_);
+            copy.lane      = freeLane(project, track,
+                                      project::clipStartTicks(copy, project.tempoMap()),
+                                      project::clipLengthTicks(copy, project.tempoMap()),
+                                      copy.lane, added.id);
             added          = std::move(copy);
 
             created_.push_back(added);

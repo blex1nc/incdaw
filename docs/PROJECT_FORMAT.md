@@ -87,6 +87,7 @@ requires a migration step.
 | 1.6 | FL2026 P3/P5 | The project gained `markers[]` — named musical positions with an optional length — and mixer nodes gained `stereoWidth`. Additive. |
 | 1.7 | TRACK B / B4 | Tracks gained `collapsed`, whether a folder track hides its children. `type` has always serialized as an integer and `parent` has always been written, so folder tracks themselves need no conversion. Additive. |
 | 1.8 | TRACK B / B5 | Clips gained `group`, the clip group they belong to. A group is exactly the set of clips carrying one id; it names no entity of its own. Additive. |
+| 1.9 | TRACK B / B6 | Clips gained `lane`, which lane of their track they occupy. A track's lane count is derived from its clips rather than stored, so nothing else moved. Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -146,6 +147,11 @@ permanently.
 clip on its own, which is what those projects had, since 1.7 had no way to
 group one. `tests/fixtures/v1.8/Fixture.incdaw` (frozen: three pattern clips,
 two of them grouped) is kept permanently.
+
+**Reading a 1.8 file.** Purely additive: no `lane`, read back zero — one lane
+per track, which is all those projects ever had.
+`tests/fixtures/v1.9/Fixture.incdaw` (frozen: two pattern clips sharing a span
+on two lanes of one track) is kept permanently.
 
 ---
 

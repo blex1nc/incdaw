@@ -50,7 +50,12 @@ inline constexpr int projectFormatMajor = 1;
 /// 1.8 (TRACK B / B5): a clip carries the group it belongs to. Additive: a 1.7
 /// file has no `group` and reads back with every clip on its own, which is
 /// what those projects had.
-inline constexpr int projectFormatMinor = 8;
+///
+/// 1.9 (TRACK B / B6): a clip carries which lane of its track it occupies. A
+/// track's lane count is derived from its clips, so nothing else moved.
+/// Additive: a 1.8 file has no `lane` and reads back on lane zero, which is
+/// the single lane those projects had.
+inline constexpr int projectFormatMinor = 9;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

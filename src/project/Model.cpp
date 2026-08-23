@@ -725,6 +725,17 @@ bool trackWouldCycle(const Project& project, EntityId track, EntityId parent) no
                        [track](const Track& node) { return node.id == track; });
 }
 
+int trackLaneCount(const Project& project, EntityId track) noexcept
+{
+    int highest = 0;
+
+    for (const Clip& clip : project.clips())
+        if (clip.track == track)
+            highest = std::max(highest, clip.lane);
+
+    return highest + 1;
+}
+
 std::vector<EntityId> tracksUnder(const Project& project, EntityId folder)
 {
     std::vector<EntityId> under;

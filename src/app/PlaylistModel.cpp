@@ -1,6 +1,7 @@
 #include "app/PlaylistModel.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace incdaw::app {
 
@@ -54,6 +55,33 @@ std::size_t PlaylistModel::trackAtY(const std::vector<Track>& tracks, double y) 
     return noTrack;
 }
 
+double PlaylistModel::laneHeight(const Project& project, std::size_t index) const noexcept
+{
+    const std::vector<Track>& tracks = project.tracks();
+    if (index >= tracks.size())
+        return 0.0;
+
+    const double height = rowHeight(tracks, index);
+    if (height <= 0.0)
+        return 0.0;   // hidden by a collapsed folder: no lanes to divide
+
+    const int lanes = project::trackLaneCount(project, tracks[index].id);
+    return height / static_cast<double>(std::max(1, lanes));
+}
+
+int PlaylistModel::laneAtY(const Project& project, std::size_t index, double y) const noexcept
+{
+    const double band = laneHeight(project, index);
+    if (band <= 0.0)
+        return 0;
+
+    const double top = trackY(project.tracks(), index);
+    const int    lane = static_cast<int>(std::floor((y - top) / band));
+    const int    last = project::trackLaneCount(project, project.tracks()[index].id) - 1;
+
+    return std::clamp(lane, 0, last);
+}
+
 PlaylistModel::Rect PlaylistModel::clipRect(const Project& project, const Clip& clip) const noexcept
 {
     const std::size_t row = project.indexOfTrack(clip.track);
@@ -73,11 +101,16 @@ PlaylistModel::Rect PlaylistModel::clipRect(const Project& project, const Clip& 
 
     // One point of inset top and bottom, so adjacent tracks' clips do not touch
     // and a row boundary stays visible where the timeline is dense.
-    const double height = rowHeight(project.tracks(), row);
-    if (height <= 0.0)
+    const double band = laneHeight(project, row);
+    if (band <= 0.0)
         return {};   // a collapsed folder is hiding this clip's track
 
-    return {x, y + 1.0, width, height - 2.0};
+    // A lane is a band within the row, so a clip that shares its span with
+    // another sits beside it rather than under it.
+    const int lanes = project::trackLaneCount(project, project.tracks()[row].id);
+    const double laneTop = y + band * static_cast<double>(std::clamp(clip.lane, 0, lanes - 1));
+
+    return {x, laneTop + 1.0, width, band - 2.0};
 }
 
 void PlaylistModel::collectVisibleClips(const Project& project, std::vector<VisibleClip>& out) const
@@ -118,8 +151,17 @@ std::size_t PlaylistModel::clipAtPoint(const Project& project, double x, double 
 {
     const std::vector<Clip>& clips = project.clips();
 
+    // The point names a lane, and only that lane's clips are candidates: with
+    // lanes, "the one drawn last wins" is exactly the behaviour the lane is
+    // there to replace.
+    const std::size_t row = trackAtY(project.tracks(), y);
+    const int         lane = row == noTrack ? 0 : laneAtY(project, row, y);
+
     for (std::size_t index = clips.size(); index > 0; --index) {
         const std::size_t position = index - 1;
+
+        if (row != noTrack && clips[position].lane != lane)
+            continue;
 
         if (clipRect(project, clips[position]).contains(x, y))
             return position;
