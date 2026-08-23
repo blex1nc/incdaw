@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/dsp/effects/BuiltinEffect.h"
+#include "engine/transport/TempoMap.h"
 
 #include <memory>
 #include <string>
@@ -28,8 +29,14 @@ struct BuiltinEffectInfo {
 
 /// The effect for `uid`, or nullptr for an unknown one. The node carries its
 /// ParameterSink and StateIO like any insert.
+///
+/// `tempoMap` is for the one effect that syncs to the timeline; it must
+/// outlive the node, which in a compiled project graph the graph's own map
+/// does. Everything else ignores it, and a null map simply means a bar-synced
+/// effect has nothing to sync to and passes the signal through.
 [[nodiscard]] std::unique_ptr<Node> makeBuiltinEffect(const std::string& uid,
-                                                      SampleRate sampleRate);
+                                                      SampleRate      sampleRate,
+                                                      const TempoMap* tempoMap = nullptr);
 
 /// Catalogue entry for `uid`, or nullptr.
 [[nodiscard]] const BuiltinEffectInfo* findBuiltinEffect(const std::string& uid);

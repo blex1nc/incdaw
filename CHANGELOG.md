@@ -8,6 +8,25 @@ public version yet.
 
 ## [Unreleased]
 
+### Effects — Beat Gate — 2026-08-23
+
+- **Two curves over a bar of the timeline.** Volume is the easy half — a gain
+  envelope that repeats every bar, which is a gate, a tremolo, a
+  sidechain-shaped duck or a stutter's silence depending on how it is drawn.
+- **Time is the half that makes it interesting.** The effect keeps the last
+  eight seconds of input and the curve says how far BACK to read at each
+  point in the bar. Holding still replays one instant — a stutter. Walking
+  backwards plays in reverse. Stepping back by an eighth and catching up is
+  the classic repeat.
+- **Bar position comes from the tempo map, not from a tempo knob,** so a
+  gesture written on the sixteenths stays on the sixteenths when the tempo
+  changes — the test drives the same curve at 60 and 120 bpm and checks the
+  gate lands at half the frames.
+- Sixteen points per curve, all thirty-two of them ordinary automatable
+  parameters. Four factory presets: Sixteenth Gate, Pump, End Stutter and
+  Half Speed. An insert in a graph with no tempo map has nothing to sync to
+  and passes the signal through.
+
 ### Effects — Vocoder — 2026-08-23
 
 - **The modulator arrives on a sidechain**, and the wiring that carries it is

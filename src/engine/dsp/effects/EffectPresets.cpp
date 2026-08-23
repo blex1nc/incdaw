@@ -1,6 +1,7 @@
 #include "engine/dsp/effects/EffectPresets.h"
 
 #include "engine/dsp/effects/ConvolutionReverb.h"
+#include "engine/dsp/effects/BeatGate.h"
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/MultibandEffects.h"
@@ -634,6 +635,60 @@ constexpr FactoryPreset vocoderPresets[] = {
     {"Bright Talk", vocoderBright,  std::size(vocoderBright)},
 };
 
+// ── Beat gate ────────────────────────────────────────────────────────────────
+
+using Gate = BeatGateEffect;
+
+/// Sixteenth-note gate: every other step silent.
+constexpr PresetValue gateSixteenths[] = {
+    {Gate::mix, 1.0},
+    {Gate::volumeBase + 1, 0.0},  {Gate::volumeBase + 3, 0.0},
+    {Gate::volumeBase + 5, 0.0},  {Gate::volumeBase + 7, 0.0},
+    {Gate::volumeBase + 9, 0.0},  {Gate::volumeBase + 11, 0.0},
+    {Gate::volumeBase + 13, 0.0}, {Gate::volumeBase + 15, 0.0},
+};
+/// The sidechain-shaped duck: down on every beat, back up before the next.
+constexpr PresetValue gatePump[] = {
+    {Gate::mix, 1.0},
+    {Gate::volumeBase + 0,  0.05}, {Gate::volumeBase + 1,  0.45},
+    {Gate::volumeBase + 2,  0.8},  {Gate::volumeBase + 3,  1.0},
+    {Gate::volumeBase + 4,  0.05}, {Gate::volumeBase + 5,  0.45},
+    {Gate::volumeBase + 6,  0.8},  {Gate::volumeBase + 7,  1.0},
+    {Gate::volumeBase + 8,  0.05}, {Gate::volumeBase + 9,  0.45},
+    {Gate::volumeBase + 10, 0.8},  {Gate::volumeBase + 11, 1.0},
+    {Gate::volumeBase + 12, 0.05}, {Gate::volumeBase + 13, 0.45},
+    {Gate::volumeBase + 14, 0.8},  {Gate::volumeBase + 15, 1.0},
+};
+/// A stutter on the last beat: the read position holds still, so one
+/// sixteenth repeats four times.
+constexpr PresetValue gateStutter[] = {
+    {Gate::mix, 1.0},
+    {Gate::smoothingMs, 1.0},
+    {Gate::timeBase + 13, 0.0625},
+    {Gate::timeBase + 14, 0.125},
+    {Gate::timeBase + 15, 0.1875},
+};
+/// Half-speed: the read position falls behind at half the rate time passes.
+constexpr PresetValue gateHalfSpeed[] = {
+    {Gate::mix, 1.0},
+    {Gate::smoothingMs, 20.0},
+    {Gate::timeBase +  1, 0.03125}, {Gate::timeBase +  2, 0.0625},
+    {Gate::timeBase +  3, 0.09375}, {Gate::timeBase +  4, 0.125},
+    {Gate::timeBase +  5, 0.15625}, {Gate::timeBase +  6, 0.1875},
+    {Gate::timeBase +  7, 0.21875}, {Gate::timeBase +  8, 0.25},
+    {Gate::timeBase +  9, 0.28125}, {Gate::timeBase + 10, 0.3125},
+    {Gate::timeBase + 11, 0.34375}, {Gate::timeBase + 12, 0.375},
+    {Gate::timeBase + 13, 0.40625}, {Gate::timeBase + 14, 0.4375},
+    {Gate::timeBase + 15, 0.46875},
+};
+
+constexpr FactoryPreset beatGatePresets[] = {
+    {"Sixteenth Gate", gateSixteenths, std::size(gateSixteenths)},
+    {"Pump",           gatePump,       std::size(gatePump)},
+    {"End Stutter",    gateStutter,    std::size(gateStutter)},
+    {"Half Speed",     gateHalfSpeed,  std::size(gateHalfSpeed)},
+};
+
 struct Row {
     std::string_view   uid;
     FactoryPresetTable table;
@@ -665,6 +720,7 @@ constexpr Row rows[] = {
     {"incdaw.eqp",            {eqpPresets,        std::size(eqpPresets)}},
     {"incdaw.convolver",      {convolverPresets,  std::size(convolverPresets)}},
     {"incdaw.vocoder",        {vocoderPresets,    std::size(vocoderPresets)}},
+    {"incdaw.beatgate",       {beatGatePresets,   std::size(beatGatePresets)}},
 };
 
 } // namespace

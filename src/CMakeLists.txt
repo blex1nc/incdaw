@@ -58,6 +58,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/Resampler.cpp
     engine/dsp/TimeStretch.cpp
     engine/dsp/MixerStripNode.cpp
+    engine/dsp/effects/BeatGate.cpp
     engine/dsp/effects/BuiltinEffect.cpp
     engine/dsp/effects/BuiltinEffects.cpp
     engine/dsp/effects/ConvolutionReverb.cpp
