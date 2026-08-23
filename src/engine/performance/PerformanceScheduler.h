@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace incdaw::engine {
@@ -111,10 +112,22 @@ public:
 
     // ── Audio thread ────────────────────────────────────────────────────────
 
-    /// Drains the trigger ring and applies everything that has come due at or
-    /// before `frame`. Bounded: at most `triggerCapacity` triggers and one
-    /// state change per track.
+    /// Applies everything that has come due at or before `frame`. Bounded: at
+    /// most `triggerCapacity` triggers and one state change per track.
+    ///
+    /// **Monotonic**, and that is what makes the table usable from several
+    /// nodes without one of them being nominated the driver: a call with a
+    /// frame the table has already passed does nothing, so whichever node
+    /// reaches a frame first does the work and the rest read the result. Node
+    /// order in the graph therefore does not matter, which is the only way
+    /// this could be true without the graph itself being taught about
+    /// performances.
     void advanceTo(FramePosition frame, const TempoMap& tempoMap) noexcept;
+
+    /// Rewinds the table so a seek, a loop wrap or a fresh transport start is
+    /// not swallowed by the monotonic rule. Silences everything, like `reset`,
+    /// but keeps the queued triggers.
+    void rewindTo(FramePosition frame) noexcept;
 
     [[nodiscard]] Voice voiceAt(std::size_t track, FramePosition frame) const noexcept;
 
@@ -180,6 +193,10 @@ private:
     std::atomic<std::size_t>  read_{0};
 
     std::uint64_t random_ = 0x9E3779B97F4A7C15ull;
+
+    /// The furthest frame the table has been advanced to, so a second call at
+    /// the same frame from another node costs a comparison.
+    FramePosition advanced_ = std::numeric_limits<FramePosition>::min();
 };
 
 } // namespace incdaw::engine

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "engine/audio/AudioStream.h"
+#include "engine/performance/PerformanceScheduler.h"
+#include "engine/transport/TempoMap.h"
 #include "engine/audio/WavFile.h"
 #include "engine/graph/Node.h"
 
@@ -58,6 +60,19 @@ public:
     /// Build-time only; never after the graph is running.
     void addClip(PlacedClip clip);
 
+    /// Puts this node under a performance scheduler.
+    ///
+    /// An optional pointer whose absence is exactly today's behaviour — the
+    /// same shape the disk streamer already uses. With one set, the node stops
+    /// playing its clips at their timeline positions and plays whichever the
+    /// scheduler says is triggered, from wherever the scheduler says it is.
+    /// The clips are addressed by the order they were added, which is the
+    /// order the compiler laid them out in.
+    ///
+    /// Build-time only. The tempo map is copied because the node needs one to
+    /// advance the table and the scheduler's quantisation is musical.
+    void setPerformance(PerformanceScheduler* scheduler, std::size_t track, TempoMap tempoMap);
+
     [[nodiscard]] std::size_t clipCount() const noexcept { return clips_.size(); }
 
     /// Sizes the fetch scratch the streamed path copies through.
@@ -68,8 +83,22 @@ public:
     [[nodiscard]] const char* name() const noexcept override { return "AudioClipNode"; }
 
 private:
+    /// Renders one contiguous run of frames of one placed clip. Shared by the
+    /// arrangement path and the performance path so that a triggered clip and
+    /// a placed one are mixed by exactly the same arithmetic.
+    void renderRange(const PlacedClip& clip, const ProcessContext& context,
+                     FramePosition blockStart, FramePosition from, FramePosition to,
+                     FrameCount sourceStart) noexcept;
+
+    void processArrangement(const ProcessContext& context) noexcept;
+    void processPerformance(const ProcessContext& context) noexcept;
+
     std::vector<PlacedClip> clips_;
     std::vector<Sample>     fetchScratch_;   ///< maxBlockSize samples, allocated in prepare
+
+    PerformanceScheduler* performance_ = nullptr;
+    std::size_t           performanceTrack_ = 0;
+    TempoMap              performanceTempo_;
 };
 
 } // namespace incdaw::engine

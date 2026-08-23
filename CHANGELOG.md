@@ -8,6 +8,29 @@ public version yet.
 
 ## [Unreleased]
 
+### Performance Mode — a triggered clip is heard — 2026-08-23
+
+- **`AudioClipNode` plays from the scheduler.** An optional pointer whose
+  absence is exactly the behaviour every existing project has; with one set,
+  the node stops playing its clips at their timeline positions and plays
+  whichever the table says is triggered.
+- **The node splits its own block at the table's boundaries**, so a clip
+  triggered on a beat starts on that frame rather than at the top of the
+  block containing it — which is what turns "quantised" from a frame number
+  into something a listener hears. Asserted sample by sample, along with a
+  motion handover and a release landing mid-block.
+- **`advanceTo` is monotonic**, and that is what lets several nodes read one
+  table with none of them nominated its driver: whichever reaches a frame
+  first does the work and the rest read the result, so node order in the
+  graph does not matter. Teaching the graph itself about performances was
+  the alternative, and would have put a feature-specific concept in the one
+  place that has none.
+- The arrangement path was refactored through the same renderer the
+  performance path uses, so a triggered clip and a placed one are mixed by
+  identical arithmetic. Every existing test still passes unchanged.
+- Still not reachable from a project: the model, the format and the surface
+  are the next increments.
+
 ### Performance Mode — the scheduler — 2026-08-23
 
 - **`engine::PerformanceScheduler`**: the scene table D-041 describes,

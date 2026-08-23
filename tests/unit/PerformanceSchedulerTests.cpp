@@ -545,3 +545,198 @@ TEST_CASE("advancing a block allocates nothing and takes no lock")
     CHECK(engine::rt::allocationViolations() == 0);
     CHECK(engine::rt::deallocationViolations() == 0);
 }
+
+// ── TRACK B (B12, increment 3) — the engine path ─────────────────────────────
+//
+// AudioClipNode gains an optional scheduler, whose absence is exactly the
+// behaviour every existing project has. With one set, the node stops playing
+// its clips at their timeline positions and plays whichever the table says is
+// triggered — splitting its own block at the table's boundaries, which is what
+// turns "quantised" from a frame number into something a listener hears.
+
+#include "engine/audio/AudioClipNode.h"
+#include "engine/core/AudioBufferPool.h"
+
+namespace {
+
+std::shared_ptr<engine::AudioFileData> flat(FrameCount frames, engine::Sample level)
+{
+    auto data = std::make_shared<engine::AudioFileData>();
+    data->sampleRate   = 48000.0;
+    data->channelCount = 1;
+    data->frameCount   = frames;
+    data->channels.assign(1, std::vector<engine::Sample>(
+                                 static_cast<std::size_t>(frames), level));
+    return data;
+}
+
+/// A node holding two flat clips at distinguishable levels, under a scheduler.
+struct NodeFixture {
+    PerformanceScheduler  scheduler;
+    engine::AudioClipNode node;
+
+    NodeFixture(PerformanceScheduler::TrackSetup setup)
+    {
+        scheduler.prepare({std::move(setup)});
+
+        for (int index = 0; index < 2; ++index) {
+            engine::AudioClipNode::PlacedClip clip;
+            clip.audio  = flat(barFrames * 4, index == 0 ? 0.25f : 0.75f);
+            clip.start  = static_cast<FramePosition>(index) * barFrames;
+            clip.length = barFrames * 4;
+            node.addClip(std::move(clip));
+        }
+
+        node.prepare(48000.0, 512);
+        node.setPerformance(&scheduler, 0, makeTempo());
+    }
+
+    /// Renders one block and returns channel 0.
+    std::vector<engine::Sample> render(FramePosition at, FrameCount blockSize = 512)
+    {
+        engine::AudioBufferPool pool;
+        pool.allocate(1, 2, blockSize);
+        pool.buffer(0).clear();
+
+        engine::ProcessContext context;
+        context.output       = pool.buffer(0);
+        context.frameCount   = blockSize;
+        context.sampleRate   = 48000.0;
+        context.playPosition = at;
+        context.playing      = true;
+
+        node.process(context);
+
+        const engine::Sample* out = pool.buffer(0).channel(0);
+        return std::vector<engine::Sample>(out, out + blockSize);
+    }
+};
+
+} // namespace
+
+TEST_CASE("a node with no scheduler plays its clips exactly as it always did")
+{
+    engine::AudioClipNode node;
+
+    engine::AudioClipNode::PlacedClip clip;
+    clip.audio  = flat(1000, 0.5f);
+    clip.start  = 100;
+    clip.length = 1000;
+    node.addClip(std::move(clip));
+
+    node.prepare(48000.0, 512);
+
+    engine::AudioBufferPool pool;
+    pool.allocate(1, 2, 512);
+    pool.buffer(0).clear();
+
+    engine::ProcessContext context;
+    context.output       = pool.buffer(0);
+    context.frameCount   = 512;
+    context.sampleRate   = 48000.0;
+    context.playPosition = 0;
+    context.playing      = true;
+
+    node.process(context);
+
+    CHECK(pool.buffer(0).channel(0)[99] == 0.0f);
+    CHECK(pool.buffer(0).channel(0)[100] == doctest::Approx(0.5f));
+}
+
+TEST_CASE("an untriggered performance track is silent even though its clips are placed")
+{
+    NodeFixture fixture{track(2, barFrames * 4)};
+
+    const auto block = fixture.render(0);
+    for (const engine::Sample sample : block)
+        CHECK(sample == 0.0f);
+}
+
+TEST_CASE("a triggered clip starts on its exact frame, inside the block that contains it")
+{
+    // A one-beat grid: the trigger below lands at 24,000, which sits 100
+    // frames into a block starting at 23,900.
+    NodeFixture fixture{track(2, barFrames * 4, PerformancePress::retrigger,
+                              PerformanceMotion::stay, ticksPerQuarterNote)};
+
+    REQUIRE(fixture.scheduler.postTrigger(0, 1, true, quarter - 3000));
+
+    const auto block = fixture.render(quarter - 100, 512);
+
+    // Silence up to the beat, and the clip's own level from it — in one block,
+    // which is the whole claim the design makes about quantised triggers.
+    for (std::size_t index = 0; index < 100; ++index)
+        CHECK(block[index] == 0.0f);
+
+    for (std::size_t index = 100; index < 512; ++index)
+        CHECK(block[index] == doctest::Approx(0.75f));
+}
+
+TEST_CASE("a clip handing over mid-block does so on the frame, not at the block edge")
+{
+    // Two clips of 300 frames each, marching. Triggered at zero, the second
+    // takes over at frame 300 — a third of the way into the first block.
+    PerformanceScheduler::TrackSetup setup;
+    setup.motion = PerformanceMotion::marchAndWrap;
+    setup.clips  = {{0, 300}, {0, 300}};
+
+    NodeFixture fixture{setup};
+    REQUIRE(fixture.scheduler.postTrigger(0, 0, true, 0));
+
+    const auto block = fixture.render(0, 512);
+
+    for (std::size_t index = 0; index < 300; ++index)
+        CHECK(block[index] == doctest::Approx(0.25f));
+
+    for (std::size_t index = 300; index < 512; ++index)
+        CHECK(block[index] == doctest::Approx(0.75f));
+}
+
+TEST_CASE("a released hold falls silent on its frame")
+{
+    NodeFixture fixture{track(2, barFrames * 4, PerformancePress::hold)};
+
+    REQUIRE(fixture.scheduler.postTrigger(0, 0, true, 0));
+    REQUIRE(fixture.scheduler.postTrigger(0, 0, false, 200));
+
+    const auto block = fixture.render(0, 512);
+
+    for (std::size_t index = 0; index < 200; ++index)
+        CHECK(block[index] == doctest::Approx(0.25f));
+
+    for (std::size_t index = 200; index < 512; ++index)
+        CHECK(block[index] == 0.0f);
+}
+
+TEST_CASE("rendering a performance block allocates nothing and takes no lock")
+{
+    NodeFixture fixture{track(2, quarter, PerformancePress::retrigger,
+                              PerformanceMotion::marchAndWrap, ticksPerQuarterNote)};
+
+    REQUIRE(fixture.scheduler.postTrigger(0, 0, true, 0));
+
+    engine::AudioBufferPool pool;
+    pool.allocate(1, 2, 512);
+
+    engine::rt::resetViolations();
+
+    {
+        const engine::rt::ScopedRealtimeContext section;
+
+        for (FramePosition frame = 0; frame < quarter * 20; frame += 512) {
+            pool.buffer(0).clear();
+
+            engine::ProcessContext context;
+            context.output       = pool.buffer(0);
+            context.frameCount   = 512;
+            context.sampleRate   = 48000.0;
+            context.playPosition = frame;
+            context.playing      = true;
+
+            fixture.node.process(context);
+        }
+    }
+
+    CHECK(engine::rt::allocationViolations() == 0);
+    CHECK(engine::rt::deallocationViolations() == 0);
+}

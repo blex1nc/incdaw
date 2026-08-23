@@ -1,7 +1,8 @@
 # INCDAW — Performance Mode
 
-**Status:** increment 2 implemented (`engine::PerformanceScheduler`, headless and
-tested). Increments 3–6 are still design.
+**Status:** increments 2 and 3 implemented — the scheduler, and `AudioClipNode`
+playing from it. Increments 4–6 (model, format, surface, controllers) are still
+design, so no project can create a performance yet.
 
 TRACK B item B12 asks for a written plan before any code, and names the
 scheduling design as the deliverable of the first increment. This is that
@@ -182,9 +183,25 @@ this one.
    and a realtime-safety case asserting that a block of triggers allocates
    nothing and takes no lock. One design correction came out of it, recorded
    in §4.
-3. **The engine path.** `PerformanceSource` on `AudioClipNode` and the
-   instrument path; a realtime-safety test that a block with triggers pending
-   allocates nothing and takes no lock.
+3. ~~**The engine path.**~~ **Done for audio clips.** `AudioClipNode` takes an
+   optional scheduler — absent, it behaves exactly as every existing project
+   needs it to — and splits its own block at the table's boundaries, so a clip
+   triggered on a beat starts on that frame rather than at the top of the
+   block containing it. Asserted sample by sample, along with a mid-block
+   motion handover, a mid-block release, and the realtime contract.
+
+   The instrument path is **not** done: a triggered *pattern* clip has to start
+   an instrument mid-phrase, which is the note-off question §8 already flags.
+
+   One design point was settled here. `advanceTo` is **monotonic**: a call with
+   a frame the table has already passed does nothing. That is what lets several
+   nodes read one table without any of them being nominated its driver —
+   whichever reaches a frame first does the work and the rest read the result,
+   so node order in the graph does not matter. The alternative was teaching the
+   graph itself about performances, which would have put a feature-specific
+   concept in the one place that has none. `rewindTo` exists for the other side
+   of that rule: a seek or a loop wrap has to be able to move the table
+   backwards.
 4. **The model and format.** The four track enums, the clip key, the bump and
    the migration.
 5. **The surface.** The zone drawn in the playlist, per-track behaviour

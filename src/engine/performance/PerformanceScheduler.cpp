@@ -1,6 +1,7 @@
 #include "engine/performance/PerformanceScheduler.h"
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace incdaw::engine {
@@ -30,6 +31,8 @@ void PerformanceScheduler::reset() noexcept
         slot.sourceOffset = 0;
         slot.exhausted    = false;
     }
+
+    advanced_ = std::numeric_limits<FramePosition>::min();
 
     read_.store(write_.load(std::memory_order_acquire), std::memory_order_release);
 }
@@ -224,8 +227,25 @@ void PerformanceScheduler::apply(Slot& slot, std::size_t clip, bool pressed,
     }
 }
 
+void PerformanceScheduler::rewindTo(FramePosition frame) noexcept
+{
+    advanced_ = frame - 1;
+
+    for (Slot& slot : tracks_) {
+        slot.playing      = false;
+        slot.held         = false;
+        slot.sourceOffset = 0;
+        slot.exhausted    = false;
+    }
+}
+
 void PerformanceScheduler::advanceTo(FramePosition frame, const TempoMap& tempoMap) noexcept
 {
+    if (frame <= advanced_)
+        return;
+
+    advanced_ = frame;
+
     const std::size_t write = write_.load(std::memory_order_acquire);
     std::size_t       read  = read_.load(std::memory_order_relaxed);
 
