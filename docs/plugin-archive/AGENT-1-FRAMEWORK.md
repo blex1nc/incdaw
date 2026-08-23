@@ -7,7 +7,7 @@ You build the layer the other 66 devices stand on. You write **no DSP**.
 
 ---
 
-## Wave 0 — Contract freeze  *(blocks Agents 2 and 3 — do this first, one commit)*
+## Wave 0 — Contract freeze  *(blocks Agents 2 and 3 — do this first, one commit)*  — **DONE 2026-08-23**
 
 Headers and a behaviour-preserving refactor. No features.
 
@@ -26,7 +26,7 @@ Headers and a behaviour-preserving refactor. No features.
    interface over what the compiler already does to decode samples.
 5. `src/app/DevicePreset.h` — the preset object's shape only.
 
-**Exit:** all 637 existing test cases green, zero warnings,
+**Exit:** all 740 existing test cases green, zero warnings,
 `tools/check_layering.py` clean, no behaviour change anywhere. Merge and push
 immediately — two agents are waiting on it.
 

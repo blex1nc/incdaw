@@ -168,4 +168,11 @@ private:
     SampleRate sampleRate_ = 48000.0;
 };
 
+// ── Catalogue registrar ──────────────────────────────────────────────────────
+
+struct EffectCatalogueEntry;
+
+/// Compressor, limiter, gate, lookahead limiter, transient split.
+void registerDynamicsEffects(std::vector<EffectCatalogueEntry>& rows);
+
 } // namespace incdaw::engine::dsp

@@ -1,7 +1,9 @@
 #include "engine/dsp/effects/ToneEffects.h"
+#include "engine/dsp/effects/EffectRegistry.h"
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace incdaw::engine::dsp {
 
@@ -260,6 +262,25 @@ void SaturatorEffect::process(const ProcessContext& context) noexcept
             samples[frame] = static_cast<Sample>(shaped * wetness + dry * (1.0 - wetness));
         }
     }
+}
+
+// ── Registrar ────────────────────────────────────────────────────────────────
+
+void registerToneEffects(std::vector<EffectCatalogueEntry>& rows)
+{
+    addEffect(rows, "incdaw.filter",    "Filter",
+              [](SampleRate) { return std::make_unique<FilterEffect>(); });
+    addEffect(rows, "incdaw.eq",        "EQ 3-Band",
+              [](SampleRate) { return std::make_unique<EqEffect>(); });
+
+    // The same three-band EQ under a mixing-desk face: the shell gives this
+    // uid a Bass/Mid/Treble panel with a response curve instead of seven
+    // sliders. One uid, one DSP class — a second tone stack would be the
+    // same filter written twice (CLAUDE.md §34).
+    addEffect(rows, "incdaw.tone",      "Tone (Bass/Mid/Treble)",
+              [](SampleRate) { return std::make_unique<EqEffect>(); });
+    addEffect(rows, "incdaw.saturator", "Saturator",
+              [](SampleRate) { return std::make_unique<SaturatorEffect>(); });
 }
 
 } // namespace incdaw::engine::dsp

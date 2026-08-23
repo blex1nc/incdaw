@@ -1,7 +1,9 @@
 #include "engine/dsp/effects/ModulationEffects.h"
+#include "engine/dsp/effects/EffectRegistry.h"
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace incdaw::engine::dsp {
 namespace {
@@ -240,6 +242,18 @@ void PhaserEffect::process(const ProcessContext& context) noexcept
         if (phase_ > twoPi)
             phase_ -= twoPi;
     }
+}
+
+// ── Registrar ────────────────────────────────────────────────────────────────
+
+void registerModulationEffects(std::vector<EffectCatalogueEntry>& rows)
+{
+    addEffect(rows, "incdaw.chorus",  "Chorus",
+              [](SampleRate) { return std::make_unique<ChorusEffect>(); });
+    addEffect(rows, "incdaw.flanger", "Flanger",
+              [](SampleRate) { return std::make_unique<FlangerEffect>(); });
+    addEffect(rows, "incdaw.phaser",  "Phaser",
+              [](SampleRate) { return std::make_unique<PhaserEffect>(); });
 }
 
 } // namespace incdaw::engine::dsp

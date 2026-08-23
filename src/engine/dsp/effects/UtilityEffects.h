@@ -168,4 +168,11 @@ private:
     std::atomic<double>        histogramPower_[histogramBins]{};
 };
 
+// ── Catalogue registrar ──────────────────────────────────────────────────────
+
+struct EffectCatalogueEntry;
+
+/// Utility, analyzer, loudness meter.
+void registerUtilityEffects(std::vector<EffectCatalogueEntry>& rows);
+
 } // namespace incdaw::engine::dsp

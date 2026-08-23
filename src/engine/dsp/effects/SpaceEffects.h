@@ -65,4 +65,11 @@ private:
     Allpass allpasses_[maxChannels][allpassCount];
 };
 
+// ── Catalogue registrar ──────────────────────────────────────────────────────
+
+struct EffectCatalogueEntry;
+
+/// Delay, reverb.
+void registerSpaceEffects(std::vector<EffectCatalogueEntry>& rows);
+
 } // namespace incdaw::engine::dsp

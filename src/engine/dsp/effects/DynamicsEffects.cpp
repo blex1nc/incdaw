@@ -1,7 +1,9 @@
 #include "engine/dsp/effects/DynamicsEffects.h"
+#include "engine/dsp/effects/EffectRegistry.h"
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace incdaw::engine::dsp {
 
@@ -378,6 +380,22 @@ void GateEffect::process(const ProcessContext& context) noexcept
             samples[frame]  = static_cast<Sample>(static_cast<double>(samples[frame]) * gain_);
         }
     }
+}
+
+// ── Registrar ────────────────────────────────────────────────────────────────
+
+void registerDynamicsEffects(std::vector<EffectCatalogueEntry>& rows)
+{
+    addEffect(rows, "incdaw.compressor", "Compressor",
+              [](SampleRate) { return std::make_unique<CompressorEffect>(); });
+    addEffect(rows, "incdaw.limiter",    "Limiter",
+              [](SampleRate) { return std::make_unique<LimiterEffect>(); });
+    addEffect(rows, "incdaw.gate",       "Gate",
+              [](SampleRate) { return std::make_unique<GateEffect>(); });
+    addEffect(rows, "incdaw.limiterla",  "Limiter (Lookahead)",
+              [](SampleRate rate) { return std::make_unique<LookaheadLimiterEffect>(rate); });
+    addEffect(rows, "incdaw.transientsplit", "Transient Split",
+              [](SampleRate) { return std::make_unique<TransientSplitEffect>(); });
 }
 
 } // namespace incdaw::engine::dsp

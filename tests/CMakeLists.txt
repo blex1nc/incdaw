@@ -30,6 +30,11 @@ add_executable(incdaw_tests
     unit/InstrumentParameterTests.cpp
     unit/BuiltinEffectTests.cpp
     unit/BuiltinInsertTests.cpp
+    unit/DeviceFrameworkTests.cpp
+    # <<< incdaw:tests:effects — one line per family (Agent 2)
+    # >>> incdaw:tests:effects
+    # <<< incdaw:tests:instruments — one line per instrument (Agent 3)
+    # >>> incdaw:tests:instruments
     unit/FuzzTests.cpp
     unit/MidiMappingTests.cpp
     unit/RenderTests.cpp

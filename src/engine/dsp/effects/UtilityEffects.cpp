@@ -1,6 +1,8 @@
 #include "engine/dsp/effects/UtilityEffects.h"
+#include "engine/dsp/effects/EffectRegistry.h"
 
 #include <cmath>
+#include <memory>
 
 namespace incdaw::engine::dsp {
 
@@ -381,6 +383,18 @@ double LoudnessMeterEffect::integratedLufs() const noexcept
     }
 
     return gatedCount > 0 ? lufsOf(gatedPower / static_cast<double>(gatedCount)) : lufsFloor;
+}
+
+// ── Registrar ────────────────────────────────────────────────────────────────
+
+void registerUtilityEffects(std::vector<EffectCatalogueEntry>& rows)
+{
+    addEffect(rows, "incdaw.utility",  "Utility",
+              [](SampleRate) { return std::make_unique<UtilityEffect>(); });
+    addEffect(rows, "incdaw.analyzer", "Analyzer",
+              [](SampleRate) { return std::make_unique<AnalyzerEffect>(); });
+    addEffect(rows, "incdaw.loudness", "Loudness Meter",
+              [](SampleRate) { return std::make_unique<LoudnessMeterEffect>(); });
 }
 
 } // namespace incdaw::engine::dsp

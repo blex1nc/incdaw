@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/dsp/effects/BuiltinEffect.h"
+#include <vector>
 
 namespace incdaw::engine::dsp {
 
@@ -103,5 +104,12 @@ public:
 
     [[nodiscard]] const char* name() const noexcept override { return "Saturator"; }
 };
+
+// ── Catalogue registrar ──────────────────────────────────────────────────────
+
+struct EffectCatalogueEntry;
+
+/// Filter, 3-band EQ (and its Tone face), saturator.
+void registerToneEffects(std::vector<EffectCatalogueEntry>& rows);
 
 } // namespace incdaw::engine::dsp

@@ -1,7 +1,9 @@
 #include "engine/dsp/effects/SpaceEffects.h"
+#include "engine/dsp/effects/EffectRegistry.h"
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace incdaw::engine::dsp {
 
@@ -178,6 +180,16 @@ void ReverbEffect::process(const ProcessContext& context) noexcept
             samples[frame] = static_cast<Sample>(dry + wet * wetness);
         }
     }
+}
+
+// ── Registrar ────────────────────────────────────────────────────────────────
+
+void registerSpaceEffects(std::vector<EffectCatalogueEntry>& rows)
+{
+    addEffect(rows, "incdaw.delay",  "Delay",
+              [](SampleRate) { return std::make_unique<DelayEffect>(); });
+    addEffect(rows, "incdaw.reverb", "Reverb",
+              [](SampleRate) { return std::make_unique<ReverbEffect>(); });
 }
 
 } // namespace incdaw::engine::dsp

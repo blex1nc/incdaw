@@ -249,9 +249,13 @@ Everything musical is resolved during compilation, never on the audio thread:
 polymetric repeats, swing, and note probability. Probability in particular is
 rolled here from a seed derived from the project, so that a compile is
 reproducible and an offline render produces the same notes as the playback the
-user heard. The instrument itself is supplied by an injected
+user heard. A hosted instrument is supplied by an injected
 `InstrumentFactory`, so plugin hosting (Phase 13) becomes a different factory
-rather than a change to the compiler.
+rather than a change to the compiler; a builtin one is built by the registry
+in `project/InstrumentFactory.h`, whose `AssetResolver` is the compiler's own
+sample decoding and streaming policy behind an interface (D-041). Builtin
+effects reach the mixer the same way, through `EffectRegistry.h`: one
+registrar per family, one marked block of calls in `BuiltinEffects.cpp`.
 
 Since Phase 10 the compiler also builds the mixer: every `MixerNode` becomes a
 `MixerStripNode`, `RoutingConnection`s become edges (a send is an edge carrying

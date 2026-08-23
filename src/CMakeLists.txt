@@ -65,6 +65,8 @@ add_library(incdaw_engine STATIC
     engine/dsp/effects/SpaceEffects.cpp
     engine/dsp/effects/ToneEffects.cpp
     engine/dsp/effects/UtilityEffects.cpp
+    # <<< incdaw:sources:engine-effects — one line per family (Agent 2)
+    # >>> incdaw:sources:engine-effects
     engine/dsp/MetronomeNode.cpp
     engine/midi/MidiInput.cpp
     engine/midi/SmfFile.cpp
@@ -77,6 +79,8 @@ add_library(incdaw_engine STATIC
     engine/instrument/SimpleSynth.cpp
     engine/instrument/PianoInstrument.cpp
     engine/instrument/InstrumentNode.cpp
+    # <<< incdaw:sources:engine-instruments — one line per instrument (Agent 3)
+    # >>> incdaw:sources:engine-instruments
     engine/audio/AiffFile.cpp
     engine/audio/SampleCache.cpp
     engine/audio/WavFile.cpp
@@ -134,6 +138,10 @@ add_library(incdaw_project STATIC
     project/MidiFile.cpp
     project/OfflineRender.cpp
     project/ProjectGraphCompiler.cpp
+    project/InstrumentFactory.cpp
+    project/instruments/CoreInstrumentFactory.cpp
+    # <<< incdaw:sources:project-instruments — one line per family (Agent 3)
+    # >>> incdaw:sources:project-instruments
     project/RecordingSession.cpp)
 target_include_directories(incdaw_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(incdaw_project
@@ -156,6 +164,9 @@ add_library(incdaw_app STATIC
     app/ChannelRackModel.cpp
     app/PluginPickerModel.cpp
     app/PlaylistModel.cpp
+    app/devices/DeviceUiCatalogue.cpp
+    # <<< incdaw:sources:app-panels — one line per family (Agents 2 and 3)
+    # >>> incdaw:sources:app-panels
     app/commands/NoteCommands.cpp
     app/commands/TempoCommands.cpp
     app/commands/ChordCommands.cpp

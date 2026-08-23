@@ -8,6 +8,29 @@ public version yet.
 
 ## [Unreleased]
 
+### Plugin archive, Wave 0 — the contract freeze — 2026-08-23
+
+- **Three registries, no new devices.** Builtin effects register through
+  one registrar per family (`registerDynamicsEffects` & co., each in its
+  family's own file) into `EffectRegistry.h`'s catalogue; builtin
+  instruments construct through `project/InstrumentFactory.h` — the
+  compiler's sampler if-chain became `registerCoreInstruments()`, with the
+  asset decoding and streaming policy behind an `AssetResolver` the compiler
+  implements and a test can fake. `app/devices/DeviceUiSpec.h` is the
+  declarative widget vocabulary device editors will be written in;
+  `deviceUiSpec(uid)` returns nullptr for every device today, which is the
+  generic slider panel. `app/DevicePreset.h` is the preset's shape.
+- **Behaviour unchanged, by test.** All 740 existing cases pass untouched;
+  nine new ones pin the catalogue's seventeen uids, the instrument
+  registry's three, the resolver's memoised loads and warnings, and that
+  the vocabulary can express the whole Tone panel as data. One visible
+  difference: the mixer's insert menu now lists effects by family
+  (docs/DECISIONS.md D-041).
+- **Marked blocks for the other two agents** in `BuiltinEffects.cpp`,
+  `InstrumentFactory.cpp`, `DeviceUiCatalogue.cpp` and both CMake lists
+  (`<<< incdaw:… / >>> incdaw:…`), so a new family is one line in each and
+  never a conflict.
+
 ### UI — the mixer gets a dock, and the desk gets a plugin picker — 2026-08-23
 
 - **The selected strip's whole chain, down the right edge.** The strips

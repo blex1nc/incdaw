@@ -1521,3 +1521,57 @@ what it can play.
 
 **Date:** 2026-08-23
 **Status:** ACCEPTED
+
+## D-041 — Devices register through family registrars; the shell dispatches editors by spec
+
+**Context:** The plugin archive (docs/plugin-archive/) takes INCDAW from 20
+builtin devices to 68, built by three agents in parallel. Until now every
+builtin effect was a line in one catalogue in `BuiltinEffects.cpp`, every
+builtin instrument a branch of an if-chain in `ProjectGraphCompiler.cpp`, and
+every bespoke editor a case in `main.mm`'s "Open Editor" dispatch. Three
+files that three agents would all have to edit, every day, for six weeks.
+
+**Options:**
+
+1. Keep the single catalogue and the if-chain; serialize the agents through
+   merge conflicts on three files.
+2. A registry per layer, filled by one registrar per device family, each
+   living in the family's own translation unit; the shared files carry only a
+   marked block of one-line registrar calls. Editors become declarative
+   `DeviceUiSpec` data in `app/`, rendered by one shell view.
+3. Runtime self-registration (static initializers that push into a global).
+
+**Chosen:** 2.
+
+**Reason:** A family file is something one agent owns outright; a marked
+block is something several can append to without reading each other's
+lines. Option 3 hides the registration order (and with it the order menus
+list devices in) inside link order, and static-initialization-order bugs are
+exactly the kind of thing §34 forbids creating on purpose. Option 2 keeps the
+catalogue an explicit, readable list while moving the rows to where the code
+is.
+
+Three registries, one shape each:
+
+- `engine::dsp::EffectCatalogueEntry` (`EffectRegistry.h`) — the family's
+  `registerXxxEffects()` appends rows through `addEffect()`, which still
+  borrows the parameter table from a throwaway probe so the catalogue cannot
+  drift from the code.
+- `project::BuiltinInstrumentEntry` (`InstrumentFactory.h`) — construction
+  only; the parameter table stays in `engine::BuiltinInstrumentInfo`. A
+  factory receives an `InstrumentBuildContext` whose `AssetResolver` is what
+  the compiler already did to decode and stream samples, behind an interface
+  a test can implement over fixture audio.
+- `app::DeviceUiSpec` (`DeviceUiCatalogue.h`) — a tree of widgets naming
+  parameter ids, no AppKit, no engine; `deviceUiSpec(uid)` is nullptr for a
+  device that has not written one, and the generic slider panel applies.
+
+**Tradeoffs:** The catalogue order is now family order rather than the order
+effects were added in, so the mixer's insert menu lists Dynamics, Tone,
+Space, Modulation, Utility rather than the historical sequence — the one
+observable change of the refactor. `DeviceUiSpec.h` is frozen by contract:
+extending it is additive and published; renaming a member breaks sixty
+panels written in parallel.
+
+**Date:** 2026-08-23
+**Status:** ACCEPTED

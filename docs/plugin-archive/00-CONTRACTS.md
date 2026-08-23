@@ -30,6 +30,11 @@ freeze** on `main`. Wave 0 is headers only — no DSP, no panels, no presets:
 Wave 0 is small and must be one commit. After it is on `main`, all three
 agents run concurrently.
 
+> **Status (2026-08-23): Wave 0 is on `main`.** The exact API that landed is
+> what §3–§5 below now describe; where it differs from the original sketch
+> (`addEffect()` is a header template, registrars are declared in family
+> headers, `AssetResolver` has four members), the landed form is the contract.
+
 ---
 
 ## 2. Layering — where each half of a device lives
@@ -59,42 +64,102 @@ struct EffectCatalogueEntry {
     std::function<std::unique_ptr<BuiltinEffect>(SampleRate)> make;
 };
 using EffectRegistrar = void (*)(std::vector<EffectCatalogueEntry>&);
+
+template <class Factory>
+void addEffect(std::vector<EffectCatalogueEntry>& rows, const char* uid,
+               const char* displayName, Factory factory);   // the probe trick lives here
 ```
 
-`BuiltinEffects.cpp` keeps its `add()` helper (it still borrows the parameter
-table from a throwaway probe — do not change that) and calls one registrar per
-family inside a marked block. A family owns its own `registerXxxEffects()`.
+A family owns its own registrar, **declared in its own header** and defined
+in its own `.cpp`:
+
+```cpp
+// engine/dsp/effects/DistortionEffects.h
+struct EffectCatalogueEntry;
+void registerDistortionEffects(std::vector<EffectCatalogueEntry>& rows);
+
+// engine/dsp/effects/DistortionEffects.cpp
+#include "engine/dsp/effects/EffectRegistry.h"
+void registerDistortionEffects(std::vector<EffectCatalogueEntry>& rows)
+{
+    addEffect(rows, "incdaw.waveshaper", "Waveshaper",
+              [](SampleRate) { return std::make_unique<WaveshaperEffect>(); });
+}
+```
+
+`addEffect()` borrows the parameter table from a throwaway probe so the
+catalogue cannot drift from the code — do not bypass it. `BuiltinEffects.cpp`
+has **two** marked blocks, and a new family adds one line to each:
+
+```
+// <<< incdaw:registrars:effects:include   →  #include "engine/dsp/effects/DistortionEffects.h"
+// <<< incdaw:registrars:effects           →  registerDistortionEffects(rows);
+```
+
+Catalogue order is registrar-call order; it is also the order the mixer's
+insert menu lists effects in, so append your family at the end.
 
 ### 3.2 Instruments — `project/InstrumentFactory.h`
 
-The uid if-chain in `ProjectGraphCompiler.cpp` does not scale to 20
-instruments. It becomes a registry:
+The uid if-chain in `ProjectGraphCompiler.cpp` is gone; the compiler calls
+`makeBuiltinInstrument()` and warns on nullptr.
 
 ```cpp
+class AssetResolver {                      // implemented by the compiler; fake it in tests
+public:
+    virtual const std::string* assetPath(EntityId asset) const = 0;     // nullptr: no such asset
+    virtual std::shared_ptr<const engine::AudioFileData> loadAsset(EntityId asset) = 0;
+                                           // decoded whole, memoised per compile, warned once if missing
+    virtual std::shared_ptr<engine::SamplerZoneStream> streamAsset(EntityId asset) = 0;
+                                           // nullptr when the file may not stream → preload instead
+    virtual void warn(std::string message) = 0;
+};
 struct InstrumentBuildContext {
-    const Channel&   channel;
-    SampleRate       sampleRate;
-    AssetResolver&   assets;      // sample/wavetable/IR decode, off the audio thread
+    const Channel&     channel;
+    engine::SampleRate sampleRate;
+    AssetResolver&     assets;
 };
 struct BuiltinInstrumentEntry {
     const char* uid;
     std::function<std::unique_ptr<engine::Instrument>(const InstrumentBuildContext&)> make;
 };
+using InstrumentRegistrar = void (*)(std::vector<BuiltinInstrumentEntry>&);
+
+const std::vector<BuiltinInstrumentEntry>& builtinInstrumentEntries();
+const BuiltinInstrumentEntry* findBuiltinInstrumentEntry(std::string_view uid);
+std::unique_ptr<engine::Instrument> makeBuiltinInstrument(const InstrumentBuildContext&);
 ```
 
-`engine::BuiltinInstrumentInfo` (parameter table) stays where it is — the
-registry only adds construction.
+`engine::BuiltinInstrumentInfo` (parameter table, `BuiltinInstruments.cpp`)
+stays where it is — the registry only adds construction, and a test holds
+the two lists to the same uid set. A family is
+`project/instruments/<Family>Factory.{h,cpp}` declaring
+`void registerXxxInstruments(std::vector<BuiltinInstrumentEntry>&)`; see
+`CoreInstrumentFactory.cpp` for the sampler, which is the worked example of
+resolving zones through `context.assets`. `InstrumentFactory.cpp` has two
+marked blocks (`incdaw:registrars:instruments:include`,
+`incdaw:registrars:instruments`).
+
+Whether a *zone* may stream (forward, unlooped) is the instrument's
+decision; whether the *file* may (streamer present, long enough, ≤ 2
+channels) is the resolver's. Wave 4 adds wavetable/IR/drum-set resolution
+as further members — additive.
 
 ### 3.3 UI specs — `app/devices/DeviceUiCatalogue.h`
 
 ```cpp
+using DeviceUiRegistrar = void (*)(std::vector<const DeviceUiSpec*>&);
+const std::vector<const DeviceUiSpec*>& deviceUiSpecs();
 const DeviceUiSpec* deviceUiSpec(std::string_view uid);   // nullptr -> generic slider panel
 ```
 
+A family is `app/devices/<Family>Panels.{h,cpp}` declaring
+`void registerXxxPanels(std::vector<const DeviceUiSpec*>&)`, which pushes
+pointers to function-local statics. `DeviceUiCatalogue.cpp` has two marked
+blocks (`incdaw:registrars:panels:include`, `incdaw:registrars:panels`).
+
 A missing spec is legal and falls back to `INCDAWInsertParameterPanel`. Ship
 DSP first, spec second, if a wave runs long.
-
----
 
 ## 4. `DeviceUiSpec` widget vocabulary
 
@@ -107,6 +172,37 @@ consume them.
 `waveform` · `label` · `section` · `row` · `grid` · `tab`
 
 Each widget names: parameter id(s), range/skew, unit, label, theme token.
+
+**As landed** (`app/devices/DeviceUiSpec.h` — read the header, it is short):
+
+```cpp
+enum class DeviceWidget : std::uint8_t { knob, slider, faderWall, toggle, combo, xyPad,
+    drawableCurve, envelope, stepGrid, padGrid, keyboard, zoneMap, matrix,
+    scope, spectrum, goniometer, meter, waveform, label, section, row, grid, tab };
+enum class DeviceSkew : std::uint8_t { linear, logarithmic };
+struct DeviceUiRange  { double min, max; DeviceSkew skew; double step; };   // optional per widget
+struct DeviceUiWidget {
+    DeviceWidget kind;  std::string label;  std::vector<std::uint32_t> parameters;
+    std::optional<DeviceUiRange> range;  std::string unit, tint, plot;
+    std::vector<std::string> choices;  std::uint16_t columns, rows;
+    bool bipolar, collapsed;  std::vector<DeviceUiWidget> children;
+    // chainable: withRange, withUnit, withTint, withPlot, asBipolar, startCollapsed
+};
+struct DeviceUiSpec { std::string uid, title; double preferredWidth, preferredHeight;
+                      std::vector<DeviceUiWidget> root; std::string customView; };
+namespace widgets { knob, slider, toggle, combo, drawn, meter, label,
+                    section, row, grid, tab, leaf, container }   // constructors
+```
+
+Conventions: `parameters` order is widget-defined (`xyPad` = {x, y},
+`envelope` = {a, d, s, r}, `faderWall` = one per fader). Widgets that carry
+more than scalars (`stepGrid`, `zoneMap`, `matrix`, extra envelope points)
+serialize through the device's `StateIO` blob, not a parameter per cell.
+`tint` is a theme ink token by name (`"accent"`, `"midi"`, `"audio"`, …);
+`plot` is what a drawn widget shows (`"eq-response"`, `"transfer"`,
+`"gate"`, `"sample"`) and is interpreted by the renderer, never by `app/`.
+Adjacent `tab` siblings form one tab strip. The Tone panel is expressed as
+data in `tests/unit/DeviceFrameworkTests.cpp` — copy its shape.
 
 **Existence proof for the spec (Agent 1, Wave 1):** the spec must be able to
 express the whole of today's `TonePanel.mm` (three bands, response curve,
@@ -135,12 +231,13 @@ only**, never reorder another agent's lines.
 | `src/ui/macos/main.mm` (5020 lines) | **owner** | ✗ never | ✗ never |
 | `src/ui/macos/DevicePanel.{h,mm}` | **owner** | ✗ | ✗ |
 | `src/app/devices/DeviceUiSpec.h` | **owner** | ✗ | ✗ |
-| `src/app/devices/DeviceUiCatalogue.cpp` | owner | append block | append block |
-| `src/engine/dsp/effects/BuiltinEffects.cpp` | owner | append block | ✗ |
-| `src/project/InstrumentFactory.cpp` | owner | ✗ | append block |
+| `src/app/devices/DeviceUiCatalogue.cpp` | owner | append block (×2) | append block (×2) |
+| `src/engine/dsp/effects/EffectRegistry.h` | **owner** | ✗ | ✗ |
+| `src/engine/dsp/effects/BuiltinEffects.cpp` | owner | append block (×2) | ✗ |
+| `src/project/InstrumentFactory.{h,cpp}` | owner | ✗ | append block (×2, .cpp only) |
 | `src/project/ProjectGraphCompiler.cpp` | **owner** | ✗ | ✗ |
-| `src/CMakeLists.txt` | owner | append block | append block |
-| `tests/CMakeLists.txt` | owner | append block | append block |
+| `src/CMakeLists.txt` | owner | `incdaw:sources:engine-effects`, `incdaw:sources:app-panels` | `incdaw:sources:engine-instruments`, `incdaw:sources:project-instruments`, `incdaw:sources:app-panels` |
+| `tests/CMakeLists.txt` | owner | `incdaw:tests:effects` | `incdaw:tests:instruments` |
 | new family files under your own package | — | yours | yours |
 
 `main.mm` is deliberately closed to Agents 2 and 3: once the panel dispatch is

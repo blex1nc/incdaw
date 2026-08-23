@@ -11,6 +11,7 @@
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/InstrumentNode.h"
 #include "engine/transport/TempoMap.h"
+#include "project/InstrumentFactory.h"
 #include "project/Model.h"
 #include "project/ParameterRegistry.h"
 
@@ -45,17 +46,8 @@ enum class PlaybackSource : std::uint8_t {
     arrangement,
 };
 
-/// Builds the instrument for a channel.
-///
-/// Injected rather than hardcoded so that plugin hosting (Phase 13) becomes a
-/// different factory instead of a change to this file. Returning nullptr leaves
-/// the channel silent, which is the correct behaviour for a channel whose
-/// plugin is missing.
-using InstrumentFactory = std::function<std::unique_ptr<engine::Instrument>(const Channel&)>;
-
-/// The built-in factory: every channel gets a SimpleSynth, the only instrument
-/// INCDAW currently has.
-[[nodiscard]] InstrumentFactory defaultInstrumentFactory();
+// `InstrumentFactory` (the hosted-plugin seam) and the builtin instrument
+// registry live in project/InstrumentFactory.h, included above.
 
 /// Builds the render-graph node for one insert slot.
 ///

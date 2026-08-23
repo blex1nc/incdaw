@@ -81,4 +81,11 @@ private:
     SampleRate sampleRate_                 = 48000.0;
 };
 
+// ── Catalogue registrar ──────────────────────────────────────────────────────
+
+struct EffectCatalogueEntry;
+
+/// Chorus, flanger, phaser.
+void registerModulationEffects(std::vector<EffectCatalogueEntry>& rows);
+
 } // namespace incdaw::engine::dsp
