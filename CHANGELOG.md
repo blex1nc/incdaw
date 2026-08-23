@@ -8,6 +8,41 @@ public version yet.
 
 ## [Unreleased]
 
+### Recording — the comping editor — 2026-08-23
+
+Loop recording has stacked passes since Phase 12 and nothing chose
+between them: one file, one clip per pass, every pass but the last muted.
+That is a pile of takes, and a pile is where the workflow stopped.
+
+- **Audio → Comp Takes…** opens the stack as lanes — one per pass, each
+  drawing the window of the recording it maps onto the span, so three
+  passes of one file look like three different performances rather than
+  three copies of the same picture. Drag across a lane to use that take
+  over that range.
+- **No new project field.** "Which take is audible here" was already
+  expressible: split the stack at the range boundaries and mute all but
+  the chosen take. The composite is therefore what plays — there is no
+  second representation of the comp to keep in step with the clips, and
+  the arrangement shows the result without knowing comping exists.
+- **Takes are identified by `sourceOffset - start`**, not by clip id.
+  Assigning a range splits one clip into two clips of the *same* take, so
+  an identity that survives the splitting is the only kind that works —
+  and it orders the lanes by the order the passes were played, because
+  each pass starts one loop later in the same file.
+- **One undo entry per assignment.** That is the unit a comp is built in:
+  drag, listen, drag again, and Cmd+Z peels exactly the last decision
+  rather than the whole comp. Two assignments compose — comping one bar
+  never undoes the bar beside it.
+- Choosing the take that is already audible over a range makes no undo
+  entry. Exactly one take is audible at every frame of a comped range;
+  the test walks the range and asserts it, because two audible takes is
+  two vocals at once, which is the thing comping exists to stop.
+- **Its own window, not lanes in the Playlist.** A comp is made by
+  listening to one span over and over, which wants the takes big and side
+  by side; the arrangement wants them collapsed to the line the comp
+  produces. Same clips, two views.
+
+
 ### Recording — the take nobody armed — 2026-08-23
 
 - **An input-side pre-record buffer.** The last minute of whatever is

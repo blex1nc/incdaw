@@ -27,6 +27,7 @@
 #include "app/commands/ChannelCommands.h"
 #include "app/commands/MidiMappingCommands.h"
 #include "app/commands/RecordingCommands.h"
+#import "ui/macos/CompingView.h"
 #include "app/commands/SamplerCommands.h"
 #include "engine/instrument/BuiltinInstruments.h"
 #include "engine/AudioEngine.h"
@@ -324,6 +325,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// What the audio device list looked like when it was last examined. A
     /// notification says "something changed", not what — this is how the
     /// difference is worked out.
+    /// The comping window and its view, kept so a second invocation raises
+    /// the one that is open rather than stacking another.
+    NSWindow*         _compWindow;
+    INCDAWCompingView* _compView;
+
     NSString* _hardwareMessage;
     BOOL      _chosenOutputWasPresent;
 
@@ -1514,6 +1520,117 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     _lastRecordError = nil;
     [self audioAssetChanged];
+}
+
+/// Opens the comping editor over the densest stack of takes it can find.
+///
+/// "Densest" rather than "selected" because a comp follows a recording: the
+/// user has just loop-recorded four passes and wants to choose between them,
+/// and asking them to select the right one of four identical overlapping clips
+/// first is asking them to do the editor's job.
+- (void)showComping:(id)sender
+{
+    (void)sender;
+
+    // The span: the loop, if there is one — that is what was recorded over.
+    // Otherwise the widest stack on any track.
+    project::EntityId     bestTrack;
+    engine::FramePosition bestFrom  = 0;
+    engine::FramePosition bestTo    = 0;
+    std::size_t           bestCount = 1;
+
+    for (const project::Track& track : _project->tracks()) {
+        engine::FramePosition from = std::numeric_limits<engine::FramePosition>::max();
+        engine::FramePosition to   = std::numeric_limits<engine::FramePosition>::min();
+
+        for (const project::Clip& clip : _project->clips()) {
+            if (clip.track != track.id || clip.type != project::ClipType::audio)
+                continue;
+
+            from = std::min(from, clip.start);
+            to   = std::max(to, clip.start + clip.length);
+        }
+
+        if (to <= from)
+            continue;
+
+        const auto takes = app::comping::takesOver(*_project, track.id, from, to);
+
+        // One take is not a stack, and a comping editor showing a single lane
+        // would be a window that can do nothing.
+        if (takes.size() > bestCount) {
+            bestCount = takes.size();
+            bestTrack = track.id;
+            bestFrom  = from;
+            bestTo    = to;
+        }
+    }
+
+    if (bestTrack.value() == 0) {
+        _lastRecordError = @"nothing to comp — record over a loop first";
+        [self refreshStatus];
+        return;
+    }
+
+    if (_compWindow != nil) {
+        _compView.trackIdValue = bestTrack.value();
+        _compView.spanFrom     = bestFrom;
+        _compView.spanTo       = bestTo;
+        [_compView reload];
+        [_compWindow makeKeyAndOrderFront:nil];
+        return;
+    }
+
+    NSWindow* window = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(0, 0, 760, 420)
+                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                            | NSWindowStyleMaskResizable
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    window.releasedWhenClosed = NO;
+    window.title              = @"Comp Takes";
+
+    INCDAWCompingView* view =
+        [[INCDAWCompingView alloc] initWithFrame:NSMakeRect(0, 0, 760, 420)
+                                         project:_project.get()
+                                        registry:_registry.get()];
+
+    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    view.trackIdValue     = bestTrack.value();
+    view.spanFrom         = bestFrom;
+    view.spanTo           = bestTo;
+
+    __weak INCDAWAppDelegate* weakCompSelf = self;
+    view.onCompChanged = ^{
+        INCDAWAppDelegate* strongSelf = weakCompSelf;
+        if (strongSelf == nil)
+            return;
+
+        // The composite is what plays. Anything less and the editor is a
+        // diagram of a decision rather than the decision.
+        [strongSelf rebuildGraph];
+        [strongSelf audioAssetChanged];
+    };
+
+    window.contentView = view;
+
+    _compWindow = window;
+    _compView   = view;
+
+    [window center];
+    [window makeKeyAndOrderFront:nil];
+
+    __weak INCDAWAppDelegate* weakSelf = self;
+    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification
+                                                    object:window
+                                                     queue:nil
+                                                usingBlock:^(NSNotification*) {
+                                                    INCDAWAppDelegate* strongSelf = weakSelf;
+                                                    if (strongSelf != nil) {
+                                                        strongSelf->_compWindow = nil;
+                                                        strongSelf->_compView   = nil;
+                                                    }
+                                                }];
 }
 
 - (void)grabAudioLog:(id)sender
@@ -5308,6 +5425,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                      action:@selector(keepInputBuffer:)
                                               keyEquivalent:@""];
     keepInputItem.target = self;
+
+    NSMenuItem* compItem = [audioMenu addItemWithTitle:@"Comp Takes…"
+                                                action:@selector(showComping:)
+                                         keyEquivalent:@""];
+    compItem.target = self;
 
     [audioMenu addItem:[NSMenuItem separatorItem]];
 

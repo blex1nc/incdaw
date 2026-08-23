@@ -1,5 +1,7 @@
 #include "app/commands/RecordingCommands.h"
 
+#include <algorithm>
+
 namespace incdaw::app {
 
 bool InsertRecordedTakeCommand::execute(Project& project)
@@ -86,6 +88,174 @@ void InsertRecordedTakeCommand::undo(Project& project)
 
     if (trackCreated_)
         (void)project.removeTrack(track_.id);
+}
+
+// ── Comping ───────────────────────────────────────────────────────────────────
+
+namespace comping {
+namespace {
+
+using engine::FrameCount;
+using engine::FramePosition;
+
+[[nodiscard]] bool isAudioClipOn(const project::Clip& clip, project::EntityId track) noexcept
+{
+    return clip.track == track && clip.type == project::ClipType::audio && clip.length > 0;
+}
+
+/// `sourceOffset - start`: the constant that maps a timeline frame onto a
+/// frame of the recording, and therefore identifies a take across the splits
+/// comping makes.
+[[nodiscard]] FrameCount anchorOf(const project::Clip& clip) noexcept
+{
+    return clip.sourceOffset - static_cast<FrameCount>(clip.start);
+}
+
+[[nodiscard]] bool overlaps(const project::Clip& clip, FramePosition from, FramePosition to) noexcept
+{
+    return clip.start < to && clip.start + clip.length > from;
+}
+
+} // namespace
+
+std::vector<Take> takesOver(const Project& project, project::EntityId track,
+                            FramePosition from, FramePosition to)
+{
+    std::vector<Take> takes;
+
+    for (const project::Clip& clip : project.clips()) {
+        if (!isAudioClipOn(clip, track) || !overlaps(clip, from, to))
+            continue;
+
+        const FrameCount anchor = anchorOf(clip);
+
+        Take* existing = nullptr;
+        for (Take& candidate : takes)
+            if (candidate.source == clip.source && candidate.anchor == anchor)
+                existing = &candidate;
+
+        if (existing == nullptr) {
+            Take take;
+            take.source  = clip.source;
+            take.anchor  = anchor;
+            take.start   = clip.start;
+            take.end     = clip.start + clip.length;
+            take.audible = !clip.muted;
+            takes.push_back(take);
+            continue;
+        }
+
+        existing->start = std::min(existing->start, clip.start);
+        existing->end   = std::max(existing->end, clip.start + clip.length);
+
+        // Audible if ANY of its pieces inside the range is: a take that has
+        // been comped in for half the range is not silent.
+        existing->audible = existing->audible || !clip.muted;
+    }
+
+    // By anchor, which for loop recording is the order the passes were played
+    // — each pass starts one loop later in the same file. Any other order
+    // renumbers the lanes as soon as a take is muted.
+    std::stable_sort(takes.begin(), takes.end(), [](const Take& left, const Take& right) {
+        if (left.source.value() != right.source.value())
+            return left.source.value() < right.source.value();
+
+        return left.anchor < right.anchor;
+    });
+
+    return takes;
+}
+
+} // namespace comping
+
+// ── AssignCompRangeCommand ────────────────────────────────────────────────────
+
+bool AssignCompRangeCommand::execute(Project& project)
+{
+    if (!minted_) {
+        if (to_ <= from_)
+            return false;
+
+        const auto takes = comping::takesOver(project, track_, from_, to_);
+        if (takeIndex_ >= takes.size())
+            return false;
+
+        const auto& chosen = takes[takeIndex_];
+
+        before_ = project.clips();
+
+        std::vector<project::Clip> result;
+        result.reserve(before_.size() + 4);
+
+        bool changed = false;
+
+        for (const project::Clip& clip : before_) {
+            const bool mine = clip.track == track_ && clip.type == project::ClipType::audio
+                           && clip.length > 0 && clip.start < to_
+                           && clip.start + clip.length > from_;
+
+            if (!mine) {
+                result.push_back(clip);
+                continue;
+            }
+
+            const engine::FramePosition clipEnd = clip.start + clip.length;
+            const engine::FrameCount    anchor  = clip.sourceOffset
+                                               - static_cast<engine::FrameCount>(clip.start);
+
+            const bool isChosen = clip.source == chosen.source && anchor == chosen.anchor;
+
+            // Three pieces at most: before the range, inside it, after it. The
+            // outside pieces keep whatever the previous assignments decided —
+            // comping one bar must not undo the bar beside it.
+            const engine::FramePosition cuts[] = {clip.start, std::max(clip.start, from_),
+                                                  std::min(clipEnd, to_), clipEnd};
+
+            for (std::size_t index = 0; index + 1 < 4; ++index) {
+                const engine::FramePosition pieceStart = cuts[index];
+                const engine::FramePosition pieceEnd   = cuts[index + 1];
+
+                if (pieceEnd <= pieceStart)
+                    continue;
+
+                project::Clip piece = clip;
+                piece.start        = pieceStart;
+                piece.length       = pieceEnd - pieceStart;
+                piece.sourceOffset = anchor + static_cast<engine::FrameCount>(pieceStart);
+
+                const bool inside = pieceStart >= from_ && pieceEnd <= to_;
+
+                if (inside)
+                    piece.muted = !isChosen;
+
+                // A split piece is a new clip and needs its own id; the first
+                // piece keeps the original's so an id held elsewhere still
+                // resolves to something.
+                if (pieceStart != clip.start)
+                    piece.id = project.ids().next();
+
+                if (piece.muted != clip.muted || piece.length != clip.length)
+                    changed = true;
+
+                result.push_back(piece);
+            }
+        }
+
+        if (!changed)
+            return false;   // the chosen take was already the audible one here
+
+        after_  = std::move(result);
+        minted_ = true;
+    }
+
+    project.clips() = after_;
+    return true;
+}
+
+void AssignCompRangeCommand::undo(Project& project)
+{
+    if (minted_)
+        project.clips() = before_;
 }
 
 } // namespace incdaw::app

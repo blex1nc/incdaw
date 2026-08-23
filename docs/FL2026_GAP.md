@@ -137,7 +137,7 @@ and note tools · a synthesized piano · **automation touch/latch/write modes**
 | C5 | Device hot-plug re-enumeration | **DONE** — `platform::DeviceWatcher` (CoreAudio device list + defaults, CoreMIDI setup); MIDI reopens, audio restarts only when the chosen device returns | — |
 | C6 | Audio editor: cut / copy / paste between selections | **DONE** — was already implemented and menu-wired; now covered by cross-asset and rate-mismatch tests | — |
 | C7 | Audio editor: markers and regions inside the editor | **DONE** — `AudioMarker` stored in the file as RIFF `cue `/`adtl`, coherent under every edit verb, restored by undo; drawn in the editor with add/rename/delete verbs | — |
-| C8 | Comping editor over recorded takes | ✗ takes stack; nothing comps them | — |
+| C8 | Comping editor over recorded takes | **DONE** — `app::comping::takesOver` + `AssignCompRangeCommand` (split-and-mute, no new model field), `INCDAWCompingView` lanes with per-take waveforms, one undo entry per assignment | — |
 | C9 | Pre-record buffer on the input side | **DONE** — a second `AudioLogger` on the input, `RecordingSession::keepPreRoll` lands it as a take ending at the playhead; own switch, off by default | — |
 | C10 | Denoise / noise profile | ✗ | — |
 | C11 | Spectral view and spectral editing | ◐ analyzer draws a spectrum; the editor has no spectral surface | — |
