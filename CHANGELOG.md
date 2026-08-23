@@ -8,6 +8,24 @@ public version yet.
 
 ## [Unreleased]
 
+### Performance Mode — the design, not the feature — 2026-08-23
+
+- **`docs/PERFORMANCE_MODE.md`**: the scheduling design TRACK B asks for as
+  B12's first deliverable, and **D-041** recording the decision behind it.
+  No code has been written against either.
+- The decision in one line: a trigger drives a small realtime-safe **scene
+  table**, not a graph rebuild. The compiler builds one graph holding every
+  clip in the performance zone, all silent; a fixed-capacity slot per track
+  decides per block which are sounding and from which frame; triggers reach
+  it through a single-producer ring drained at the top of each block,
+  quantised forward to the track's sync boundary and landed on the exact
+  frame by splitting the block there — the same mechanism the transport
+  already uses for loop wraps.
+- The document is explicit about what it does **not** answer: recording a
+  performance back into the arrangement, triggered pattern clips starting an
+  instrument mid-phrase, and compensating a trigger for a track's plugin
+  latency.
+
 ### Arrangements — several timelines in one project — 2026-08-23
 
 - **A project can hold more than one arrangement** — a song, an alternative

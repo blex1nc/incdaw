@@ -1521,3 +1521,50 @@ what it can play.
 
 **Date:** 2026-08-23
 **Status:** ACCEPTED
+
+---
+
+## D-041 — Performance Mode triggers a scene table; it does not rebuild the graph
+
+**Context:** TRACK B item B12 asks for FL Studio's Performance Mode: the region
+before the start marker becomes a performance zone whose clips are triggered
+live, one per track, from a pad controller or the typing keyboard, at quantised
+beat boundaries. The transport today plays a *compiled arrangement from a
+position*. Performance Mode asks it to start and stop clips from a live input
+while the graph is running. The full design is docs/PERFORMANCE_MODE.md.
+
+**Options:**
+- Recompile the project graph on every trigger and swap it in.
+- Precompile one graph per possible combination of sounding clips.
+- Express every trigger as mute automation on the clips.
+- Compile one graph containing every clip in the zone, all silent, and let a
+  small realtime-safe scene table decide per block which are sounding.
+
+**Chosen:** The scene table. `engine::PerformanceScheduler` holds a
+fixed-capacity slot per track — armed clip, playing clip, start frame,
+behaviour — and the clip-playing nodes ask it what to sound instead of reading
+the transport position. Triggers reach it through a single-producer ring buffer
+drained at the top of each block, are quantised forward to the track's sync
+boundary, and land on the exact frame by splitting the block there — the same
+segment mechanism `Transport::processBlock` already uses for loop wraps.
+
+**Reason:** A compile allocates, loads assets and walks the whole project; even
+performed off-thread with an atomic swap it arrives tens of milliseconds late,
+and Performance Mode is played to a beat. Precompiled scenes are
+combinatorially hopeless — eight tracks of eight clips is 16.7 million graphs.
+Mute automation is the scene table in disguise, routed through a system that is
+per-parameter and tick-based rather than per-clip and trigger-based, and it
+would make every performance an undoable edit, which is the wrong model: a
+performance is played, not authored. The scene table is the only option that is
+allocation-free, bounded per block, and sample-accurate at the boundary.
+
+**Tradeoffs:** The clip-playing nodes gain an optional dependency they did not
+have — mitigated by making it an optional pointer whose absence is exactly
+today's behaviour, the same shape the disk streamer already uses. The scheduler
+is fixed-capacity, so a zone larger than the compiled capacity is refused at
+compile time rather than growing on the audio thread. A full trigger ring drops
+the oldest trigger rather than blocking, because a dropped pad hit is
+recoverable and a blocked audio thread is not.
+
+**Date:** 2026-08-23
+**Status:** PROPOSED — no code has been written against this decision.
