@@ -8,6 +8,26 @@ public version yet.
 
 ## [Unreleased]
 
+### Instruments — INCDAW Drum — 2026-08-23
+
+- **Sixteen pads, every voice synthesised.** Kick, snare, hat, clap, tom and
+  rim engines, each with its own tuning, decay, tone, snap, level, pan and
+  choke group — 128 parameters, all automatable. Nothing is recorded and
+  nothing is bundled, and a synthesised kick has a property a sample does
+  not: its pitch drop and its click are parameters, so they automate.
+- **The gap this fills is pad-shaped, not sampler-shaped.** The Sampler
+  already has zones and key ranges, so sixteen samples across sixteen keys
+  was already possible; what was missing was a per-pad voice with a choke
+  group. Per-pad output ROUTING is not here: sending a pad to its own mixer
+  track needs a project-model field, which belongs to another track's half
+  of the tree.
+- **Choking and retriggering are the same gesture,** and neither clicks: the
+  old voice fades over four milliseconds rather than stopping dead. A pad's
+  settings are captured at the hit, so turning a pad down does not duck a
+  drum already ringing.
+- **Pads sit on keys 36 upward** — what the Channel Rack's step grid writes
+  into.
+
 ### Instruments — INCDAW FM — 2026-08-23
 
 - **Six operators and a modulation matrix, not a list of algorithms.** A

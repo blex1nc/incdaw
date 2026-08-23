@@ -1,5 +1,6 @@
 #include "engine/instrument/BuiltinInstruments.h"
 
+#include "engine/instrument/DrumMachine.h"
 #include "engine/instrument/FmSynth.h"
 #include "engine/instrument/PianoInstrument.h"
 #include "engine/instrument/Sampler.h"
@@ -160,6 +161,69 @@ constexpr PresetValue pianoBar[] = {
     {static_cast<std::uint32_t>(PianoParam::hammerNoise), 0.5},
 };
 
+constexpr PresetValue drumTight[] = {
+    {DrumParam::forPad(0, DrumParam::decay), 0.28},
+    {DrumParam::forPad(0, DrumParam::snap), 0.9},
+    {DrumParam::forPad(2, DrumParam::decay), 0.11},
+    {DrumParam::forPad(2, DrumParam::tone), 0.7},
+    {DrumParam::forPad(4, DrumParam::decay), 0.16},
+    {DrumParam::forPad(6, DrumParam::decay), 0.035},
+    {DrumParam::forPad(7, DrumParam::decay), 0.22},
+    {DrumParam::forPad(8, DrumParam::decay), 0.2},
+    {DrumParam::forPad(9, DrumParam::decay), 0.26},
+    {DrumParam::forPad(10, DrumParam::decay), 0.34},
+};
+constexpr PresetValue drumBoom[] = {
+    {DrumParam::forPad(0, DrumParam::tune), -5.0},
+    {DrumParam::forPad(0, DrumParam::decay), 1.1},
+    {DrumParam::forPad(0, DrumParam::snap), 0.45},
+    {DrumParam::forPad(1, DrumParam::tune), -8.0},
+    {DrumParam::forPad(1, DrumParam::decay), 1.4},
+    {DrumParam::forPad(2, DrumParam::decay), 0.4},
+    {DrumParam::forPad(2, DrumParam::tone), 0.4},
+    {DrumParam::forPad(10, DrumParam::tune), -9.0},
+    {DrumParam::forPad(10, DrumParam::decay), 0.95},
+};
+constexpr PresetValue drumLoFi[] = {
+    {DrumParam::forPad(2, DrumParam::tone), 0.25},
+    {DrumParam::forPad(3, DrumParam::tone), 0.3},
+    {DrumParam::forPad(6, DrumParam::tone), 0.3},
+    {DrumParam::forPad(6, DrumParam::tune), -6.0},
+    {DrumParam::forPad(7, DrumParam::tone), 0.35},
+    {DrumParam::forPad(7, DrumParam::tune), -6.0},
+    {DrumParam::forPad(4, DrumParam::tone), 0.3},
+    {DrumParam::forPad(0, DrumParam::tone), 0.2},
+};
+constexpr PresetValue drumWide[] = {
+    {DrumParam::forPad(4, DrumParam::pan), -0.55},
+    {DrumParam::forPad(5, DrumParam::pan), 0.55},
+    {DrumParam::forPad(6, DrumParam::pan), 0.3},
+    {DrumParam::forPad(7, DrumParam::pan), 0.3},
+    {DrumParam::forPad(8, DrumParam::pan), 0.7},
+    {DrumParam::forPad(9, DrumParam::pan), 0.0},
+    {DrumParam::forPad(10, DrumParam::pan), -0.7},
+    {DrumParam::forPad(11, DrumParam::pan), 0.8},
+    {DrumParam::forPad(12, DrumParam::pan), -0.8},
+    {DrumParam::forPad(14, DrumParam::pan), 0.6},
+};
+constexpr PresetValue drumHatPair[] = {
+    // Both hats in one choke group, which is the only way an open hat can be
+    // cut by a closed one.
+    {DrumParam::forPad(6, DrumParam::chokeGroup), 1.0},
+    {DrumParam::forPad(7, DrumParam::chokeGroup), 1.0},
+    {DrumParam::forPad(6, DrumParam::decay), 0.05},
+    {DrumParam::forPad(7, DrumParam::decay), 0.7},
+    {DrumParam::forPad(7, DrumParam::tone), 0.85},
+};
+
+constexpr FactoryPreset drumPresets[] = {
+    {"Tight Kit",  drumTight,   std::size(drumTight)},
+    {"Boom Kit",   drumBoom,    std::size(drumBoom)},
+    {"Lo-Fi Kit",  drumLoFi,    std::size(drumLoFi)},
+    {"Wide Kit",   drumWide,    std::size(drumWide)},
+    {"Hat Pair",   drumHatPair, std::size(drumHatPair)},
+};
+
 constexpr PresetValue fmElectricPiano[] = {
     {FmParam::forOperator(0, FmParam::ratio), 1.0},
     {FmParam::forOperator(0, FmParam::outLevel), 1.0},
@@ -310,6 +374,8 @@ const std::vector<BuiltinInstrumentInfo>& builtinInstruments()
          wavetableParameterCount(), {wavetablePresets, std::size(wavetablePresets)}},
         {"incdaw.fm", "INCDAW FM", fmParameters(), fmParameterCount(),
          {fmPresets, std::size(fmPresets)}},
+        {"incdaw.drum", "INCDAW Drum", drumParameters(), drumParameterCount(),
+         {drumPresets, std::size(drumPresets)}},
     };
 
     return infos;

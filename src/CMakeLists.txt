@@ -79,6 +79,7 @@ add_library(incdaw_engine STATIC
     engine/instrument/Wavetable.cpp
     engine/instrument/WavetableSynth.cpp
     engine/instrument/FmSynth.cpp
+    engine/instrument/DrumMachine.cpp
     engine/instrument/PianoInstrument.cpp
     engine/instrument/InstrumentNode.cpp
     engine/audio/AiffFile.cpp
