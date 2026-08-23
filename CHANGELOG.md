@@ -8,6 +8,26 @@ public version yet.
 
 ## [Unreleased]
 
+### Automation — the editor's model — 2026-08-23
+
+- **A model for editing lanes**, the fourth of its shape after the Channel
+  Rack, the Piano Roll and the playlist: geometry, hit testing, selection
+  and edits, with no drawing in it and therefore testable without a window.
+- **Every edit is a pure function** from one point vector to the next, so
+  draw, erase, drag, curve, tension, time scale, value scale, copy and
+  paste all go through the one `SetAutomationPointsCommand` the subsystem
+  already had. One undo path, not eight.
+- **The curve it draws is the curve that plays.** Values come from
+  `engine::AutomationSequence`, the class the audio thread reads; a second
+  interpolation in the editor would drift from the one being heard and the
+  difference would be invisible until it was audible.
+- Points that would land on the same tick collapse to one, because a
+  segment of zero length is not something an evaluator can read. A dragged
+  group clamps as one at tick zero and at the ends of the lane, so it keeps
+  its shape. A copied selection is rebased to zero, which is what makes
+  pasting into a *different* lane a translation and nothing more — a lane
+  is a list of normalised points and nothing else.
+
 ### Playlist — consolidate a selection down to one clip — 2026-08-23
 
 - **Consolidate** renders the clips selected on one track into a single
