@@ -740,3 +740,379 @@ TEST_CASE("rendering a performance block allocates nothing and takes no lock")
     CHECK(engine::rt::allocationViolations() == 0);
     CHECK(engine::rt::deallocationViolations() == 0);
 }
+
+// ── TRACK B (B12, increment 4) — the project side ────────────────────────────
+//
+// The settings are arrangement data like any other: undoable, saved, shared
+// with nothing. The load-bearing test is the last one — a start marker, a mode
+// flag and a trigger produce a sound through the whole compiled graph, which
+// is the first point at which any of this is reachable from a project.
+
+#include "app/CommandRegistry.h"
+#include "app/commands/MarkerCommands.h"
+#include "app/commands/PerformanceCommands.h"
+#include "engine/audio/WavFile.h"
+#include "project/ProjectFile.h"
+#include "project/ProjectGraphCompiler.h"
+
+#include <atomic>
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
+namespace {
+
+struct ScratchDir {
+    explicit ScratchDir(const std::string& name)
+        : path(fs::temp_directory_path() / ("incdaw-perf-" + name + "-"
+                                            + std::to_string(nextSerial())))
+    {
+        std::error_code code;
+        fs::remove_all(path, code);
+        fs::create_directories(path, code);
+    }
+
+    ~ScratchDir()
+    {
+        std::error_code code;
+        fs::remove_all(path, code);
+    }
+
+    fs::path path;
+
+private:
+    static int nextSerial()
+    {
+        static std::atomic<int> counter{0};
+        return ++counter;
+    }
+};
+
+} // namespace
+
+TEST_CASE("a project has no performance zone until a marker is made the start marker")
+{
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    app::CommandRegistry registry{project};
+
+    CHECK(project::performanceZoneEnd(project) == 0);
+
+    REQUIRE(registry.execute(std::make_unique<app::AddMarkerCommand>(
+        ticksPerQuarterNote * 16, std::string{"Song"})));
+
+    const project::EntityId marker = project.markers()[0].id;
+    CHECK(project::performanceZoneEnd(project) == 0);   // a marker is not a start marker
+
+    REQUIRE(registry.execute(std::make_unique<app::SetStartMarkerCommand>(marker)));
+    CHECK(project::performanceZoneEnd(project) == ticksPerQuarterNote * 16);
+
+    REQUIRE(registry.undo());
+    CHECK(project::performanceZoneEnd(project) == 0);
+}
+
+TEST_CASE("only one marker is the start marker")
+{
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddMarkerCommand>(
+        ticksPerQuarterNote * 8, std::string{"A"})));
+    REQUIRE(registry.execute(std::make_unique<app::AddMarkerCommand>(
+        ticksPerQuarterNote * 16, std::string{"B"})));
+
+    const project::EntityId first  = project.markers()[0].id;
+    const project::EntityId second = project.markers()[1].id;
+
+    REQUIRE(registry.execute(std::make_unique<app::SetStartMarkerCommand>(first)));
+    REQUIRE(registry.execute(std::make_unique<app::SetStartMarkerCommand>(second)));
+
+    CHECK_FALSE(project.findMarker(first)->isStart);
+    CHECK(project.findMarker(second)->isStart);
+    CHECK(project::performanceZoneEnd(project) == ticksPerQuarterNote * 16);
+
+    // Setting the one that is already the start marker changes nothing.
+    CHECK_FALSE(registry.execute(std::make_unique<app::SetStartMarkerCommand>(second)));
+
+    // Undo puts the previous one back rather than leaving none.
+    REQUIRE(registry.undo());
+    CHECK(project.findMarker(first)->isStart);
+    CHECK_FALSE(project.findMarker(second)->isStart);
+
+    // And an invalid id clears it outright.
+    REQUIRE(registry.execute(std::make_unique<app::SetStartMarkerCommand>(project::EntityId{})));
+    CHECK(project::performanceZoneEnd(project) == 0);
+}
+
+TEST_CASE("a track's performance behaviour is one undoable setting")
+{
+    project::Project project;
+    const project::EntityId track =
+        project.addTrack(project::TrackType::audio, "Audio").id;
+
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetTrackPerformanceCommand>(
+        track, engine::PerformancePress::latch, engine::PerformanceMotion::marchAndWrap,
+        ticksPerQuarterNote * 4, true)));
+
+    const project::Track& after = *project.findTrack(track);
+    CHECK(after.performancePress == engine::PerformancePress::latch);
+    CHECK(after.performanceMotion == engine::PerformanceMotion::marchAndWrap);
+    CHECK(after.triggerSyncTicks == ticksPerQuarterNote * 4);
+    CHECK(after.positionSync);
+
+    // Setting what it already is is not an undo entry.
+    CHECK_FALSE(registry.execute(std::make_unique<app::SetTrackPerformanceCommand>(
+        track, engine::PerformancePress::latch, engine::PerformanceMotion::marchAndWrap,
+        ticksPerQuarterNote * 4, true)));
+
+    REQUIRE(registry.undo());
+    CHECK(project.findTrack(track)->performancePress == engine::PerformancePress::retrigger);
+    CHECK(project.findTrack(track)->triggerSyncTicks == 0);
+}
+
+TEST_CASE("a pad answers one clip per track")
+{
+    project::Project project;
+
+    const project::EntityId track =
+        project.addTrack(project::TrackType::audio, "Audio").id;
+    const project::EntityId other =
+        project.addTrack(project::TrackType::audio, "Other").id;
+
+    auto& asset = project.addAudioAsset("/tmp/incdaw-perf.wav");
+
+    const auto place = [&](project::EntityId on) {
+        project::Clip& clip = project.addClip(project::ClipType::audio, on, asset.id);
+        clip.length = 1000;
+        return clip.id;
+    };
+
+    const project::EntityId first  = place(track);
+    const project::EntityId second = place(track);
+    const project::EntityId across = place(other);
+
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetClipPerformanceKeyCommand>(first, 7)));
+    REQUIRE(registry.execute(std::make_unique<app::SetClipPerformanceKeyCommand>(across, 7)));
+
+    // The same pad on a DIFFERENT track is fine: one pad drives one clip per
+    // track, which is what "one clip at a time per track" means.
+    CHECK(project.findClip(first)->performanceKey == 7);
+    CHECK(project.findClip(across)->performanceKey == 7);
+
+    // On the same track it moves rather than doubling up.
+    REQUIRE(registry.execute(std::make_unique<app::SetClipPerformanceKeyCommand>(second, 7)));
+    CHECK(project.findClip(second)->performanceKey == 7);
+    CHECK(project.findClip(first)->performanceKey == -1);
+
+    REQUIRE(registry.undo());
+    CHECK(project.findClip(first)->performanceKey == 7);
+    CHECK(project.findClip(second)->performanceKey == -1);
+}
+
+TEST_CASE("performance settings round-trip through the project file")
+{
+    ScratchDir scratch{"roundtrip"};
+
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    const project::EntityId track =
+        project.addTrack(project::TrackType::audio, "Audio").id;
+
+    auto& asset       = project.addAudioAsset("/tmp/incdaw-perf.wav");
+    project::Clip& clip = project.addClip(project::ClipType::audio, track, asset.id);
+    clip.length         = 1000;
+
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddMarkerCommand>(
+        ticksPerQuarterNote * 16, std::string{"Song"})));
+    REQUIRE(registry.execute(
+        std::make_unique<app::SetStartMarkerCommand>(project.markers()[0].id)));
+    REQUIRE(registry.execute(std::make_unique<app::SetTrackPerformanceCommand>(
+        track, engine::PerformancePress::hold, engine::PerformanceMotion::random,
+        ticksPerQuarterNote * 2, true)));
+    REQUIRE(registry.execute(std::make_unique<app::SetClipPerformanceKeyCommand>(clip.id, 3)));
+
+    const fs::path file = scratch.path / "Performance.incdaw";
+    REQUIRE(bool(project::ProjectFile::save(project, file)));
+
+    project::Project reloaded;
+    REQUIRE(bool(project::ProjectFile::load(reloaded, file)));
+
+    CHECK(project::performanceZoneEnd(reloaded) == ticksPerQuarterNote * 16);
+
+    const project::Track& back = *reloaded.findTrack(track);
+    CHECK(back.performancePress == engine::PerformancePress::hold);
+    CHECK(back.performanceMotion == engine::PerformanceMotion::random);
+    CHECK(back.triggerSyncTicks == ticksPerQuarterNote * 2);
+    CHECK(back.positionSync);
+
+    CHECK(reloaded.findClip(clip.id)->performanceKey == 3);
+    CHECK(reloaded == project);
+}
+
+TEST_CASE("a start marker changes nothing until Performance Mode is switched on")
+{
+    ScratchDir scratch{"compile"};
+
+    // A flat clip inside what will become the zone.
+    auto data = flat(4000, 0.5f);
+    REQUIRE(bool(engine::WavFile::write(scratch.path / "flat.wav", *data)));
+
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    const project::EntityId track =
+        project.addTrack(project::TrackType::audio, "Audio").id;
+
+    auto& asset      = project.addAudioAsset((scratch.path / "flat.wav").string());
+    asset.sampleRate = 48000.0;
+    asset.frameCount = 4000;
+
+    project::Clip& clip = project.addClip(project::ClipType::audio, track, asset.id);
+    clip.start          = 0;
+    clip.length         = 4000;
+
+    project::TimelineMarker& marker = project.addMarker(ticksPerQuarterNote * 16, "Song");
+    marker.isStart                  = true;
+
+    const auto render = [&](bool performanceMode) {
+        project::GraphCompileOptions options;
+        options.source          = project::PlaybackSource::arrangement;
+        options.masterGain      = 1.0f;
+        options.performanceMode = performanceMode;
+
+        auto compiled = project::compileProjectGraph(project, project.tempoMap(), options);
+        REQUIRE(bool(compiled));
+
+        engine::AudioBufferPool pool;
+        pool.allocate(1, 2, 512);
+        pool.buffer(0).clear();
+        compiled.graph->process(pool.buffer(0), 512, 0);
+
+        struct Rendered {
+            engine::Sample                 first;
+            engine::PerformanceScheduler*  scheduler;
+        };
+
+        return Rendered{pool.buffer(0).channel(0)[10], compiled.performance.get()};
+    };
+
+    // Off: the clip plays where it is placed, exactly as it always did.
+    CHECK(render(false).first != 0.0f);
+
+    // On: the same clip is in the zone, so it waits to be triggered.
+    CHECK(render(true).first == 0.0f);
+}
+
+TEST_CASE("a trigger sounds through the whole compiled graph")
+{
+    ScratchDir scratch{"trigger"};
+
+    auto data = flat(4000, 0.5f);
+    REQUIRE(bool(engine::WavFile::write(scratch.path / "flat.wav", *data)));
+
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    const project::EntityId track =
+        project.addTrack(project::TrackType::audio, "Audio").id;
+
+    auto& asset      = project.addAudioAsset((scratch.path / "flat.wav").string());
+    asset.sampleRate = 48000.0;
+    asset.frameCount = 4000;
+
+    project::Clip& clip  = project.addClip(project::ClipType::audio, track, asset.id);
+    clip.start           = 0;
+    clip.length          = 4000;
+    clip.performanceKey  = 0;
+
+    project::TimelineMarker& marker = project.addMarker(ticksPerQuarterNote * 16, "Song");
+    marker.isStart                  = true;
+
+    project::GraphCompileOptions options;
+    options.source          = project::PlaybackSource::arrangement;
+    options.masterGain      = 1.0f;
+    options.performanceMode = true;
+
+    auto compiled = project::compileProjectGraph(project, project.tempoMap(), options);
+    REQUIRE(bool(compiled));
+
+    // The scheduler exists, and knows which playlist track its slot is.
+    REQUIRE(compiled.performance != nullptr);
+    REQUIRE(compiled.performanceTracks.size() == 1);
+    CHECK(compiled.performanceTracks[0] == track);
+
+    engine::AudioBufferPool pool;
+    pool.allocate(1, 2, 512);
+
+    // Silent until something asks for it.
+    pool.buffer(0).clear();
+    compiled.graph->process(pool.buffer(0), 512, 0);
+    CHECK(pool.buffer(0).channel(0)[10] == 0.0f);
+
+    REQUIRE(compiled.performance->postTrigger(0, 0, true, 600));
+
+    pool.buffer(0).clear();
+    compiled.graph->process(pool.buffer(0), 512, 512);
+
+    // Frame 600 is 88 frames into this block: silence before it, sound from it.
+    CHECK(pool.buffer(0).channel(0)[87] == 0.0f);
+    CHECK(pool.buffer(0).channel(0)[88] != 0.0f);
+}
+
+TEST_CASE("the v1.12 fixture still loads")
+{
+    const fs::path fixture = fs::path{INCDAW_FIXTURE_DIR} / "v1.12" / "Fixture.incdaw";
+    REQUIRE(fs::exists(fixture));
+
+    project::Project project;
+    const auto result = project::ProjectFile::load(project, fixture);
+    REQUIRE(result.succeeded);
+
+    CHECK(project.metadata().title == "Format v1.12 fixture");
+
+    REQUIRE(project.markers().size() == 1);
+    CHECK(project.markers()[0].isStart);
+    CHECK(project::performanceZoneEnd(project) == ticksPerQuarterNote * 16);
+
+    REQUIRE(project.tracks().size() == 1);
+    const project::Track& track = project.tracks()[0];
+    CHECK(track.performancePress == engine::PerformancePress::latch);
+    CHECK(track.performanceMotion == engine::PerformanceMotion::marchAndWrap);
+    CHECK(track.triggerSyncTicks == ticksPerQuarterNote * 4);
+    CHECK(track.positionSync);
+
+    REQUIRE(project.clips().size() == 2);
+    CHECK(project.clips()[0].performanceKey == 0);
+    CHECK(project.clips()[1].performanceKey == 1);
+    CHECK(project::clipInPerformanceZone(project, project.clips()[0]));
+}
+
+TEST_CASE("a 1.11 project has no performance zone")
+{
+    const fs::path fixture = fs::path{INCDAW_FIXTURE_DIR} / "v1.11" / "Fixture.incdaw";
+    REQUIRE(fs::exists(fixture));
+
+    project::Project project;
+    const auto result = project::ProjectFile::load(project, fixture);
+    REQUIRE(result.succeeded);
+    CHECK(result.migrated);
+    CHECK(result.migratedFrom == "1.11");
+
+    CHECK(project::performanceZoneEnd(project) == 0);
+
+    for (const project::Track& track : project.tracks()) {
+        CHECK(track.performancePress == engine::PerformancePress::retrigger);
+        CHECK(track.triggerSyncTicks == 0);
+    }
+
+    for (const project::Clip& clip : project.clips())
+        CHECK(clip.performanceKey == -1);
+}

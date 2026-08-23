@@ -670,6 +670,19 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         const bool anyTrackSoloed = std::any_of(project.tracks().begin(), project.tracks().end(),
                                                 [](const Track& track) { return track.soloed; });
 
+        // Performance Mode: the clips before the start marker are triggered
+        // rather than played in sequence (docs/PERFORMANCE_MODE.md, D-041).
+        // One graph holds all of them and the scene table says which sound, so
+        // a trigger never rebuilds anything.
+        const Tick zoneEnd = options.performanceMode ? performanceZoneEnd(project) : 0;
+
+        std::vector<engine::PerformanceScheduler::TrackSetup> performanceSetups;
+        std::vector<engine::AudioClipNode*>                   performanceNodes;
+
+        const auto inZone = [&](const Clip& clip) {
+            return zoneEnd > 0 && clipStartTicks(clip, tempoMap) < zoneEnd;
+        };
+
         for (const Track& track : project.tracks()) {
             if (track.type != TrackType::audio)
                 continue;
@@ -690,10 +703,26 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             // differ in the last bit. Sorting here makes the render a function
             // of the arrangement, and gives overlapping clips a defined
             // stacking order for the fades that sit on top of them.
+            // A track with anything in the zone is a performance track: its
+            // node plays what the table says, and only its zone clips are
+            // loaded into it. A track with nothing there is untouched.
+            const bool performing =
+                zoneEnd > 0 && std::any_of(project.clips().begin(), project.clips().end(),
+                                           [&](const Clip& clip) {
+                                               return clip.type == ClipType::audio
+                                                   && clip.track == track.id && inZone(clip);
+                                           });
+
             std::vector<const Clip*> ordered;
-            for (const Clip& clip : project.clips())
-                if (clip.type == ClipType::audio && clip.track == track.id && !clip.muted)
-                    ordered.push_back(&clip);
+            for (const Clip& clip : project.clips()) {
+                if (clip.type != ClipType::audio || clip.track != track.id || clip.muted)
+                    continue;
+
+                if (zoneEnd > 0 && inZone(clip) != performing)
+                    continue;
+
+                ordered.push_back(&clip);
+            }
 
             std::sort(ordered.begin(), ordered.end(),
                       [](const Clip* a, const Clip* b) {
@@ -859,11 +888,42 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             if (node->clipCount() == 0)
                 continue;   // an empty node would render nothing at some cost
 
+            if (performing) {
+                // The slot's clips are the node's clips, in the same order —
+                // the order `ordered` laid them out in — so `voiceAt`'s clip
+                // index and `addClip`'s are the same number.
+                engine::PerformanceScheduler::TrackSetup setup;
+                setup.press        = track.performancePress;
+                setup.motion       = track.performanceMotion;
+                setup.syncTicks    = track.triggerSyncTicks;
+                setup.positionSync = track.positionSync;
+
+                for (const Clip* entry : ordered)
+                    setup.clips.push_back({entry->start, entry->length});
+
+                performanceSetups.push_back(std::move(setup));
+                compiled.performanceTracks.push_back(track.id);
+                performanceNodes.push_back(node.get());
+            }
+
             const auto source      = builder.addNode(std::move(node));
             const auto destination = stripInputIndices.find(track.outputMixerNode);
 
             builder.connect(source, destination != stripInputIndices.end() ? destination->second
                                                                            : masterInput);
+        }
+
+        // The table is built once every performance track has been laid out,
+        // so a slot's index is its track's place in `performanceTracks` and
+        // the nodes can be pointed at it.
+        if (!performanceSetups.empty()) {
+            compiled.performance = std::make_unique<engine::PerformanceScheduler>();
+            compiled.performance->prepare(std::move(performanceSetups));
+            compiled.performance->setRandomSeed(options.randomSeed);
+
+            for (std::size_t slot = 0; slot < performanceNodes.size(); ++slot)
+                performanceNodes[slot]->setPerformance(compiled.performance.get(), slot,
+                                                       tempoMap);
         }
     }
 

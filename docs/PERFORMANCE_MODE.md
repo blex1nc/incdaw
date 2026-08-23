@@ -1,8 +1,10 @@
 # INCDAW — Performance Mode
 
-**Status:** increments 2 and 3 implemented — the scheduler, and `AudioClipNode`
-playing from it. Increments 4–6 (model, format, surface, controllers) are still
-design, so no project can create a performance yet.
+**Status:** increments 2, 3 and 4 implemented — the scheduler, `AudioClipNode`
+playing from it, and the project state and format behind both. Increments 5 and
+6 (the surface, and controller triggering) are still design, so a performance
+can be built and heard from code and from a saved project but not yet played
+from the window.
 
 TRACK B item B12 asks for a written plan before any code, and names the
 scheduling design as the deliverable of the first increment. This is that
@@ -160,16 +162,21 @@ track's un-due trigger block another track's due one.
 
 Performance settings are project state, so they are saved:
 
-- `Track::performancePress`, `Track::performanceMotion`, `Track::triggerSync`,
-  `Track::positionSync` — four small enums on the track.
+- `Track::performancePress`, `Track::performanceMotion`,
+  `Track::triggerSyncTicks`, `Track::positionSync`. These reuse the ENGINE's
+  own enums rather than mirroring them: `project/` can see `engine/` — it
+  already does for the tempo map — so there is nothing to translate and
+  nothing to keep in step. (`AutomationCurve` is mirrored because the
+  dependency runs the other way there.)
 - `Clip::performanceKey` — the pad or key that triggers this clip, so a layout
-  survives reopening.
-- The performance zone itself needs no field: it is the region before the
-  arrangement's start marker, and markers are already per-arrangement.
+  survives reopening. -1 means nothing triggers it.
+- `TimelineMarker::isStart` — the performance zone needs no field of its own,
+  because it is the region before the arrangement's start marker and markers
+  are already per-arrangement. At most one per arrangement, which the command
+  enforces the way "one current arrangement" is enforced.
 
-That is **one format bump, additive**, with every default meaning "behaves as
-it does today". It should be spent in the first implementing increment, not
-this one.
+That is **one format bump, additive** (1.12), with every default meaning
+"behaves as it does today".
 
 ---
 
@@ -202,8 +209,13 @@ this one.
    concept in the one place that has none. `rewindTo` exists for the other side
    of that rule: a seek or a loop wrap has to be able to move the table
    backwards.
-4. **The model and format.** The four track enums, the clip key, the bump and
-   the migration.
+4. ~~**The model and format.**~~ **Done.** The four track settings, the clip's
+   pad, and `TimelineMarker::isStart` — the start marker being what makes the
+   region before it a zone, so the zone needed no field of its own. Format
+   1.12, additive, with the migration and a frozen fixture. The compiler
+   builds the scene table from all of it and points the nodes at it, behind
+   `GraphCompileOptions::performanceMode`, which is off by default: a start
+   marker alone changes nothing until the mode is switched on.
 5. **The surface.** The zone drawn in the playlist, per-track behaviour
    controls, and the typing-keyboard map.
 6. **Controller triggering**, through the existing MIDI mapping system, which

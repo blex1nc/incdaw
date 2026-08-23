@@ -8,6 +8,7 @@
 #include "engine/graph/StateIO.h"
 #include "engine/instrument/Instrument.h"
 #include "engine/automation/AutomationNode.h"
+#include "engine/performance/PerformanceScheduler.h"
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/InstrumentNode.h"
 #include "engine/transport/TempoMap.h"
@@ -132,6 +133,15 @@ struct GraphCompileOptions {
     /// The parameter system automation resolves keys against. Null uses the
     /// built-ins ("volume", "pan"); tests and later phases register more.
     const ParameterRegistry* parameters = nullptr;
+
+    /// Whether the clips before the arrangement's start marker are TRIGGERED
+    /// rather than played in sequence (docs/PERFORMANCE_MODE.md).
+    ///
+    /// Off by default and therefore off for every project that has not asked
+    /// for it: a start marker on its own changes nothing until the mode is
+    /// switched on, which is what keeps this feature out of the way of songs
+    /// that will never use it.
+    bool               performanceMode = false;
 };
 
 /// A compiled graph plus the handles needed to drive it.
@@ -160,6 +170,19 @@ struct CompiledProjectGraph {
 
     /// Channel strips, in the same order as `channels`.
     std::vector<engine::dsp::MixerStripNode*> channelStrips;
+
+    /// The performance scene table, or nullptr when the graph was not compiled
+    /// for Performance Mode. Owned here rather than by `graph` because the UI
+    /// posts triggers into it and therefore needs to reach it.
+    ///
+    /// The nodes hold a raw pointer to it, so it must outlive them: it is
+    /// declared before `graph` above only in reading order — destruction order
+    /// within a struct is reverse declaration order, and `graph` is declared
+    /// first, so it is destroyed first. That is the order this needs.
+    std::unique_ptr<engine::PerformanceScheduler> performance;
+
+    /// The playlist tracks the scheduler's slots correspond to, in slot order.
+    std::vector<EntityId> performanceTracks;
 
     /// The automation evaluator, or nullptr when no lane compiled. Owned by
     /// `graph`, like everything else here.

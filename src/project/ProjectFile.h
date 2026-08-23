@@ -66,7 +66,13 @@ inline constexpr int projectFormatMajor = 1;
 /// and markers live inside them. A 1.10 document has one timeline written at
 /// the top level; the reader wraps it into a single arrangement named
 /// "Arrangement 1", which is the whole of that migration.
-inline constexpr int projectFormatMinor = 11;
+///
+/// 1.12 (TRACK B / B12): tracks carry their Performance Mode press, motion,
+/// trigger sync and position sync; a clip carries the pad that triggers it;
+/// and a marker can be the arrangement's start marker, which is what makes the
+/// region before it a performance zone. Additive: a 1.11 file has none of
+/// them and reads back as a project with no performance zone.
+inline constexpr int projectFormatMinor = 12;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

@@ -1,0 +1,151 @@
+{
+  "metadata": {
+    "title": "Format v1.12 fixture",
+    "artist": "INCDAW",
+    "comment": ""
+  },
+  "tempo": {
+    "events": [
+      {
+        "tick": 0,
+        "bpm": 120
+      }
+    ],
+    "timeSignatures": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "masterMixerNode": 1,
+  "nextEntityId": 8,
+  "mixerNodes": [
+    {
+      "id": 1,
+      "type": 2,
+      "name": "Master",
+      "colour": 4287141030,
+      "volume": 1,
+      "pan": 0,
+      "muted": false,
+      "soloed": false,
+      "polarityFlip": false,
+      "stereoSeparation": 0,
+      "inserts": []
+    }
+  ],
+  "tracks": [
+    {
+      "id": 3,
+      "type": 1,
+      "name": "Pads",
+      "colour": 4282034687,
+      "parent": 0,
+      "outputMixerNode": 1,
+      "muted": false,
+      "soloed": false,
+      "height": 64,
+      "collapsed": false,
+      "performancePress": 4,
+      "performanceMotion": 2,
+      "triggerSyncTicks": 3840,
+      "positionSync": true
+    }
+  ],
+  "channels": [],
+  "automation": [],
+  "audioAssets": [
+    {
+      "id": 4,
+      "relativePath": "",
+      "absolutePath": "/Users/toprak/INCDAW X/.claude/worktrees/arrange/tests/fixtures/v1.12/Fixture.incdaw/flat.wav",
+      "contentHash": "",
+      "embedded": false,
+      "sampleRate": 48000,
+      "frameCount": 4000,
+      "channelCount": 0
+    }
+  ],
+  "midiMappings": [],
+  "arrangements": [
+    {
+      "id": 2,
+      "name": "Arrangement 1",
+      "clips": [
+        {
+          "id": 5,
+          "type": 0,
+          "track": 3,
+          "source": 4,
+          "startTick": 0,
+          "lengthTicks": 0,
+          "sourceOffsetTicks": 0,
+          "start": 0,
+          "length": 4000,
+          "sourceOffset": 0,
+          "gain": 1,
+          "pan": 0,
+          "normalize": false,
+          "reversed": false,
+          "muted": false,
+          "locked": false,
+          "group": 0,
+          "lane": 0,
+          "performanceKey": 0,
+          "crossfadeIn": false,
+          "crossfadeOut": false,
+          "fadeInFrames": 0,
+          "fadeOutFrames": 0,
+          "pitchSemitones": 0,
+          "stretchRatio": 1,
+          "name": "Pad A",
+          "colour": 4284914124
+        },
+        {
+          "id": 6,
+          "type": 0,
+          "track": 3,
+          "source": 4,
+          "startTick": 0,
+          "lengthTicks": 0,
+          "sourceOffsetTicks": 0,
+          "start": 4000,
+          "length": 4000,
+          "sourceOffset": 0,
+          "gain": 1,
+          "pan": 0,
+          "normalize": false,
+          "reversed": false,
+          "muted": false,
+          "locked": false,
+          "group": 0,
+          "lane": 0,
+          "performanceKey": 1,
+          "crossfadeIn": false,
+          "crossfadeOut": false,
+          "fadeInFrames": 0,
+          "fadeOutFrames": 0,
+          "pitchSemitones": 0,
+          "stretchRatio": 1,
+          "name": "Pad B",
+          "colour": 4284914124
+        }
+      ],
+      "markers": [
+        {
+          "id": 7,
+          "tick": 15360,
+          "length": 0,
+          "name": "Song",
+          "colour": 4291594308,
+          "isStart": true
+        }
+      ]
+    }
+  ],
+  "currentArrangement": 2,
+  "routing": [],
+  "patterns": []
+}

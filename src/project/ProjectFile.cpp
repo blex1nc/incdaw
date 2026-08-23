@@ -196,6 +196,7 @@ Json clipToJson(const Clip& clip)
     json.set("locked", clip.locked);
     json.set("group", toJson(clip.group));
     json.set("lane", static_cast<std::int64_t>(clip.lane));
+    json.set("performanceKey", static_cast<std::int64_t>(clip.performanceKey));
     json.set("crossfadeIn", clip.crossfadeIn);
     json.set("crossfadeOut", clip.crossfadeOut);
     json.set("fadeInFrames", static_cast<std::int64_t>(clip.fadeInFrames));
@@ -219,6 +220,7 @@ Json markerToJson(const TimelineMarker& marker)
     json.set("length", static_cast<std::int64_t>(marker.length));
     json.set("name", marker.name);
     json.set("colour", static_cast<std::int64_t>(marker.colour));
+    json.set("isStart", marker.isStart);
     return json;
 }
 
@@ -322,6 +324,10 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("soloed", track.soloed);
         json.set("height", static_cast<std::int64_t>(track.height));
         json.set("collapsed", track.collapsed);
+        json.set("performancePress", static_cast<std::int64_t>(track.performancePress));
+        json.set("performanceMotion", static_cast<std::int64_t>(track.performanceMotion));
+        json.set("triggerSyncTicks", static_cast<std::int64_t>(track.triggerSyncTicks));
+        json.set("positionSync", track.positionSync);
         tracks.append(std::move(json));
     }
     document.set("tracks", std::move(tracks));
@@ -593,6 +599,7 @@ Clip clipFrom(const Json& json, bool legacyClipTiming,
     clip.locked         = json["locked"].asBool(false);
     clip.group          = idFrom(json["group"]);
     clip.lane           = std::max(0, static_cast<int>(json["lane"].asInt(0)));
+    clip.performanceKey = static_cast<int>(json["performanceKey"].asInt(-1));
     clip.crossfadeIn    = json["crossfadeIn"].asBool(false);
     clip.crossfadeOut   = json["crossfadeOut"].asBool(false);
     clip.fadeInFrames   = json["fadeInFrames"].asInt(0);
@@ -612,6 +619,7 @@ TimelineMarker markerFrom(const Json& json)
     marker.length = json["length"].asInt(0);
     marker.name   = json["name"].asString();
     marker.colour = static_cast<std::uint32_t>(json["colour"].asInt(0xFFCC8844));
+    marker.isStart = json["isStart"].asBool(false);
     return marker;
 }
 
@@ -743,6 +751,12 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         track.soloed          = json["soloed"].asBool(false);
         track.height          = static_cast<int>(json["height"].asInt(64));
         track.collapsed       = json["collapsed"].asBool(false);
+        track.performancePress = static_cast<engine::PerformancePress>(
+            json["performancePress"].asInt(0));
+        track.performanceMotion = static_cast<engine::PerformanceMotion>(
+            json["performanceMotion"].asInt(0));
+        track.triggerSyncTicks = json["triggerSyncTicks"].asInt(0);
+        track.positionSync     = json["positionSync"].asBool(false);
         project.tracks().push_back(std::move(track));
     }
 
@@ -1068,6 +1082,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // it needs the tempo map; this hook remains the single place that decides
     // whether a path exists at all.
     if (major == 1 && minor == 10) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.11 -> 1.12. Purely additive: no track has performance settings, no
+    // clip has a pad, and no marker is a start marker — which reads back as a
+    // project with no performance zone, exactly what those projects were.
+    if (major == 1 && minor == 11) {
         result.succeeded = true;
         return result;
     }

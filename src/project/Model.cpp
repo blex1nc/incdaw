@@ -901,6 +901,24 @@ ClipFades clipFades(const Project& project, const Clip& clip) noexcept
     return fades;
 }
 
+Tick performanceZoneEnd(const Project& project) noexcept
+{
+    for (const TimelineMarker& marker : project.markers())
+        if (marker.isStart)
+            return marker.tick;
+
+    return 0;
+}
+
+bool clipInPerformanceZone(const Project& project, const Clip& clip) noexcept
+{
+    const Tick end = performanceZoneEnd(project);
+    if (end <= 0)
+        return false;
+
+    return clipStartTicks(clip, project.tempoMap()) < end;
+}
+
 int trackLaneCount(const Project& project, EntityId track) noexcept
 {
     int highest = 0;

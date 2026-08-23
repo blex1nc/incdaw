@@ -8,6 +8,30 @@ public version yet.
 
 ## [Unreleased]
 
+### Performance Mode — a project can hold one — 2026-08-23
+
+- **The zone is the region before the arrangement's start marker.** A marker
+  can now *be* the start marker — at most one per arrangement — so the zone
+  needed no field of its own. An arrangement without one has no zone, which
+  is every project until someone asks for one.
+- **Per-track behaviour**: press, motion, trigger sync and position sync, as
+  one undoable setting rather than four, because a user changing two of them
+  has made one decision. **Per-clip pad**, which moves off whatever else on
+  the same track was holding it — two clips answering one pad is a layout
+  that cannot be played.
+- **The compiler builds the scene table** from all of it and points the
+  nodes at it, behind `GraphCompileOptions::performanceMode`. That flag is
+  off by default, so a start marker on its own changes nothing at all until
+  the mode is switched on — asserted by rendering the same project both ways.
+- **A trigger sounds through the whole compiled graph**, on its own frame
+  rather than at the top of the block. That is the first point at which any
+  of this is reachable from a project.
+- **Project format 1.12**, additive. A 1.11 project reads back with no
+  performance zone.
+- Still to come: the surface (increment 5) and controller triggering
+  (increment 6). The behaviour can be built, saved and heard from code; it
+  cannot yet be played from the window.
+
 ### Performance Mode — a triggered clip is heard — 2026-08-23
 
 - **`AudioClipNode` plays from the scheduler.** An optional pointer whose

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/core/Time.h"
+#include "engine/performance/PerformanceScheduler.h"
 #include "engine/transport/TempoMap.h"
 #include "plugins/PluginIdentifier.h"
 #include "project/Identity.h"
@@ -220,6 +221,14 @@ struct Clip {
     double        pitchSemitones = 0.0;
     double        stretchRatio   = 1.0;
 
+    /// The pad or key that triggers this clip in Performance Mode, or -1 when
+    /// nothing does.
+    ///
+    /// Stored on the clip rather than in a side table so that a layout the
+    /// player built survives a reopen, a duplicate and an undo without any
+    /// bookkeeping of its own — the same reasoning as `lane` and `group`.
+    int           performanceKey = -1;
+
     /// Which lane of its track the clip occupies, counting from zero.
     ///
     /// Lanes make a track more than one clip deep: two clips that overlap in
@@ -267,6 +276,24 @@ struct Track {
     bool          muted    = false;
     bool          soloed   = false;
     int           height   = 64;   ///< UI row height, persisted with the project
+
+    /// How this track answers a pad in Performance Mode.
+    ///
+    /// The engine's own enums rather than a mirrored pair: `project/` can see
+    /// `engine/` (it already does for the tempo map), so there is nothing to
+    /// translate and nothing to keep in step. Defaults are the behaviour a
+    /// track that has never been performed has.
+    engine::PerformancePress  performancePress =
+        engine::PerformancePress::retrigger;
+    engine::PerformanceMotion performanceMotion =
+        engine::PerformanceMotion::stay;
+
+    /// The grid a trigger on this track is rounded forward to, in ticks. Zero
+    /// means the frame the pad was hit — "off".
+    Tick          triggerSyncTicks = 0;
+
+    /// Whether a clip joins in phase rather than from its own start.
+    bool          positionSync = false;
 
     /// Whether a folder track hides its children.
     ///
@@ -443,6 +470,14 @@ struct TimelineMarker {
     Tick          length = 0;        ///< 0 = point marker, > 0 = region
     std::string   name;
     std::uint32_t colour = 0xFFCC8844u;
+
+    /// The arrangement's start marker, of which there is at most one.
+    ///
+    /// Performance Mode's zone is everything before it (docs/PERFORMANCE_MODE.md
+    /// §6): the clips there are triggered rather than played in sequence. An
+    /// arrangement with no start marker has no performance zone, which is what
+    /// every project has today.
+    bool          isStart = false;
 
     [[nodiscard]] friend bool operator==(const TimelineMarker&, const TimelineMarker&) = default;
 };
@@ -707,6 +742,14 @@ struct ClipFades {
 /// The clip `clip` crossfades with on the named edge, or null.
 [[nodiscard]] const Clip* crossfadePartner(const Project& project, const Clip& clip,
                                            bool incoming) noexcept;
+
+/// The end of the arrangement's performance zone, in ticks, or 0 when it has
+/// no start marker and therefore no zone.
+[[nodiscard]] Tick performanceZoneEnd(const Project& project) noexcept;
+
+/// True when `clip` lies inside the current arrangement's performance zone —
+/// it starts before the start marker.
+[[nodiscard]] bool clipInPerformanceZone(const Project& project, const Clip& clip) noexcept;
 
 /// How many lanes a track shows: one more than the highest lane in use, and
 /// never fewer than one.

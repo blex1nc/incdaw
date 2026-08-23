@@ -167,6 +167,7 @@ add_library(incdaw_app STATIC
     app/commands/SamplerCommands.cpp
     app/commands/ImportCommands.cpp
     app/commands/PatternCommands.cpp
+    app/commands/PerformanceCommands.cpp
     app/commands/StepCommands.cpp
     app/commands/TrackCommands.cpp
     app/commands/ArrangementCommands.cpp
