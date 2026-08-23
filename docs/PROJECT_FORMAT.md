@@ -89,6 +89,7 @@ requires a migration step.
 | 1.8 | TRACK B / B5 | Clips gained `group`, the clip group they belong to. A group is exactly the set of clips carrying one id; it names no entity of its own. Additive. |
 | 1.9 | TRACK B / B6 | Clips gained `lane`, which lane of their track they occupy. A track's lane count is derived from its clips rather than stored, so nothing else moved. Additive. |
 | 1.10 | TRACK B / B7 | Clips gained `crossfadeIn` / `crossfadeOut`, whether each edge crossfades with the clip it overlaps on its lane. Per edge, so three chained clips can keep one crossfade and lose the other. The fade lengths stay derived from the overlap. Additive. |
+| 1.11 | TRACK B / B11 | The project gained `arrangements[]` and `currentArrangement`. Clips and markers moved from the top level into an arrangement; patterns, channels, tracks, the mixer and automation stay shared. **Shape change**, converted at the read site. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -158,6 +159,17 @@ on two lanes of one track) is kept permanently.
 false — those clips play the manual fades they always did.
 `tests/fixtures/v1.10/Fixture.incdaw` (frozen: two audio clips overlapping by
 1,000 frames with the pair crossfaded) is kept permanently.
+
+**Reading a 1.10 file.** The one shape change since 1.1. A 1.10 document has
+`clips` and `markers` at the top level, because a 1.10 project was one
+timeline; the reader wraps them into a single arrangement named
+"Arrangement 1" and makes it current. Converted at the read site rather than
+in `migrate`, for the same reason 1.0's clip timing was: it needs the tempo
+map, which exists only once the document has been read that far. The
+arrangement is minted at the document's `nextEntityId` and the generator is
+told about it, or the next entity created in the session would be handed the
+same number. `tests/fixtures/v1.11/Fixture.incdaw` (frozen: two arrangements,
+a marker on the first and the second current) is kept permanently.
 
 ---
 

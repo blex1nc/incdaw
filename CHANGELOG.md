@@ -8,6 +8,33 @@ public version yet.
 
 ## [Unreleased]
 
+### Arrangements — several timelines in one project — 2026-08-23
+
+- **A project can hold more than one arrangement** — a song, an alternative
+  layout, a live version — each with its own clips and markers, all of them
+  sharing the patterns, channels, tracks, mixer and automation lanes. That
+  sharing is the point: a second arrangement is another way of laying out
+  the same material, not a second project.
+- **Neither compiler was told about any of this.** Clips and markers live
+  inside an arrangement and `Project::clips()` hands back the current one's
+  list, so the arrangement compiler, the graph compiler, the playlist and
+  every command go on meaning exactly what they meant. An arrangement id on
+  each clip would have needed the filter applied at every one of those
+  sites, and one missed site is a clip from another timeline playing over
+  this one.
+- **Switching is a command**, which is load-bearing rather than tidy: the
+  undo stack is one stack across timelines, so an edit, a switch and an
+  undo walk back through the switch before reaching the edit.
+- **Duplicating an arrangement** copies its layout with fresh clip ids, so
+  editing the copy leaves the original alone while both still play the same
+  patterns.
+- The switcher sits in the playlist's top-left corner rather than on the
+  toolbar the brief names: `ControlBarView` is not this track's file. It
+  lists the arrangements, and creates, duplicates, renames and removes them;
+  the last one cannot be removed.
+- **Project format 1.11**, the first shape change since 1.1. A 1.10 project
+  opens as one arrangement holding what it always held.
+
 ### Patterns — colour, length, and which ones are in the song — 2026-08-23
 
 - **Colour** on the pattern's context menu, from the same nine hues a track

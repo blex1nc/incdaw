@@ -1,0 +1,161 @@
+{
+  "metadata": {
+    "title": "Format v1.11 fixture",
+    "artist": "INCDAW",
+    "comment": ""
+  },
+  "tempo": {
+    "events": [
+      {
+        "tick": 0,
+        "bpm": 120
+      }
+    ],
+    "timeSignatures": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "masterMixerNode": 1,
+  "nextEntityId": 10,
+  "mixerNodes": [
+    {
+      "id": 1,
+      "type": 2,
+      "name": "Master",
+      "colour": 4287141030,
+      "volume": 1,
+      "pan": 0,
+      "muted": false,
+      "soloed": false,
+      "polarityFlip": false,
+      "stereoSeparation": 0,
+      "inserts": []
+    }
+  ],
+  "tracks": [
+    {
+      "id": 5,
+      "type": 0,
+      "name": "A",
+      "colour": 4282034687,
+      "parent": 0,
+      "outputMixerNode": 1,
+      "muted": false,
+      "soloed": false,
+      "height": 64,
+      "collapsed": false
+    }
+  ],
+  "channels": [
+    {
+      "id": 3,
+      "name": "Lead",
+      "colour": 4282034687,
+      "outputMixerNode": 1,
+      "volume": 1,
+      "pan": 0,
+      "muted": false,
+      "soloed": false,
+      "stepKey": 60,
+      "instrument": "",
+      "instrumentStateFile": "",
+      "samplerZones": [],
+      "instrumentParameters": []
+    }
+  ],
+  "automation": [],
+  "audioAssets": [],
+  "midiMappings": [],
+  "arrangements": [
+    {
+      "id": 2,
+      "name": "Arrangement 1",
+      "clips": [
+        {
+          "id": 6,
+          "type": 1,
+          "track": 5,
+          "source": 4,
+          "startTick": 0,
+          "lengthTicks": 3840,
+          "sourceOffsetTicks": 0,
+          "start": 0,
+          "length": 0,
+          "sourceOffset": 0,
+          "gain": 1,
+          "pan": 0,
+          "normalize": false,
+          "reversed": false,
+          "muted": false,
+          "locked": false,
+          "group": 0,
+          "lane": 0,
+          "crossfadeIn": false,
+          "crossfadeOut": false,
+          "fadeInFrames": 0,
+          "fadeOutFrames": 0,
+          "pitchSemitones": 0,
+          "stretchRatio": 1,
+          "name": "P1",
+          "colour": 4282034687
+        }
+      ],
+      "markers": [
+        {
+          "id": 7,
+          "tick": 7680,
+          "length": 0,
+          "name": "Drop",
+          "colour": 4291594308
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Live",
+      "clips": [
+        {
+          "id": 9,
+          "type": 1,
+          "track": 5,
+          "source": 4,
+          "startTick": 15360,
+          "lengthTicks": 3840,
+          "sourceOffsetTicks": 0,
+          "start": 0,
+          "length": 0,
+          "sourceOffset": 0,
+          "gain": 1,
+          "pan": 0,
+          "normalize": false,
+          "reversed": false,
+          "muted": false,
+          "locked": false,
+          "group": 0,
+          "lane": 0,
+          "crossfadeIn": false,
+          "crossfadeOut": false,
+          "fadeInFrames": 0,
+          "fadeOutFrames": 0,
+          "pitchSemitones": 0,
+          "stretchRatio": 1,
+          "name": "P1",
+          "colour": 4282034687
+        }
+      ],
+      "markers": []
+    }
+  ],
+  "currentArrangement": 8,
+  "routing": [],
+  "patterns": [
+    {
+      "id": 4,
+      "file": "4.pat"
+    }
+  ]
+}

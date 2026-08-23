@@ -63,6 +63,7 @@ add_executable(incdaw_tests
     unit/CrossfadeTests.cpp
     unit/ConsolidateTests.cpp
     unit/AutomationEditorTests.cpp
+    unit/ArrangementTests.cpp
     unit/AutomationClipTests.cpp
     unit/InputMonitorTests.cpp
     unit/LoopRecordingTests.cpp

@@ -60,7 +60,13 @@ inline constexpr int projectFormatMajor = 1;
 /// with the clip it overlaps. The fade lengths stay derived from the overlap,
 /// so nothing else moved. Additive: a 1.9 file has neither flag and plays the
 /// manual fades it always did.
-inline constexpr int projectFormatMinor = 10;
+///
+/// 1.11 (TRACK B / B11): a project holds several arrangements — timelines that
+/// share the patterns, channels, tracks, mixer and automation — and the clips
+/// and markers live inside them. A 1.10 document has one timeline written at
+/// the top level; the reader wraps it into a single arrangement named
+/// "Arrangement 1", which is the whole of that migration.
+inline constexpr int projectFormatMinor = 11;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

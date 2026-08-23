@@ -173,6 +173,57 @@ std::string projectFormatVersionString()
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 
+namespace {
+
+Json clipToJson(const Clip& clip)
+{
+    Json json = Json::object();
+    json.set("id", toJson(clip.id));
+    json.set("type", static_cast<std::int64_t>(clip.type));
+    json.set("track", toJson(clip.track));
+    json.set("source", toJson(clip.source));
+    json.set("startTick", static_cast<std::int64_t>(clip.startTick));
+    json.set("lengthTicks", static_cast<std::int64_t>(clip.lengthTicks));
+    json.set("sourceOffsetTicks", static_cast<std::int64_t>(clip.sourceOffsetTicks));
+    json.set("start", static_cast<std::int64_t>(clip.start));
+    json.set("length", static_cast<std::int64_t>(clip.length));
+    json.set("sourceOffset", static_cast<std::int64_t>(clip.sourceOffset));
+    json.set("gain", clip.gain);
+    json.set("pan", clip.pan);
+    json.set("normalize", clip.normalize);
+    json.set("reversed", clip.reversed);
+    json.set("muted", clip.muted);
+    json.set("locked", clip.locked);
+    json.set("group", toJson(clip.group));
+    json.set("lane", static_cast<std::int64_t>(clip.lane));
+    json.set("crossfadeIn", clip.crossfadeIn);
+    json.set("crossfadeOut", clip.crossfadeOut);
+    json.set("fadeInFrames", static_cast<std::int64_t>(clip.fadeInFrames));
+    json.set("fadeOutFrames", static_cast<std::int64_t>(clip.fadeOutFrames));
+    json.set("pitchSemitones", clip.pitchSemitones);
+    json.set("stretchRatio", clip.stretchRatio);
+    json.set("name", clip.name);
+    json.set("colour", static_cast<std::int64_t>(clip.colour));
+    return json;
+}
+
+} // namespace
+
+namespace {
+
+Json markerToJson(const TimelineMarker& marker)
+{
+    Json json = Json::object();
+    json.set("id", toJson(marker.id));
+    json.set("tick", static_cast<std::int64_t>(marker.tick));
+    json.set("length", static_cast<std::int64_t>(marker.length));
+    json.set("name", marker.name);
+    json.set("colour", static_cast<std::int64_t>(marker.colour));
+    return json;
+}
+
+} // namespace
+
 ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& path)
 {
     Result result;
@@ -323,38 +374,6 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
     }
     document.set("channels", std::move(channels));
 
-    Json clips = Json::array();
-    for (const Clip& clip : project.clips()) {
-        Json json = Json::object();
-        json.set("id", toJson(clip.id));
-        json.set("type", static_cast<std::int64_t>(clip.type));
-        json.set("track", toJson(clip.track));
-        json.set("source", toJson(clip.source));
-        json.set("startTick", static_cast<std::int64_t>(clip.startTick));
-        json.set("lengthTicks", static_cast<std::int64_t>(clip.lengthTicks));
-        json.set("sourceOffsetTicks", static_cast<std::int64_t>(clip.sourceOffsetTicks));
-        json.set("start", static_cast<std::int64_t>(clip.start));
-        json.set("length", static_cast<std::int64_t>(clip.length));
-        json.set("sourceOffset", static_cast<std::int64_t>(clip.sourceOffset));
-        json.set("gain", clip.gain);
-        json.set("pan", clip.pan);
-        json.set("normalize", clip.normalize);
-        json.set("reversed", clip.reversed);
-        json.set("muted", clip.muted);
-        json.set("locked", clip.locked);
-        json.set("group", toJson(clip.group));
-        json.set("lane", static_cast<std::int64_t>(clip.lane));
-        json.set("crossfadeIn", clip.crossfadeIn);
-        json.set("crossfadeOut", clip.crossfadeOut);
-        json.set("fadeInFrames", static_cast<std::int64_t>(clip.fadeInFrames));
-        json.set("fadeOutFrames", static_cast<std::int64_t>(clip.fadeOutFrames));
-        json.set("pitchSemitones", clip.pitchSemitones);
-        json.set("stretchRatio", clip.stretchRatio);
-        json.set("name", clip.name);
-        json.set("colour", static_cast<std::int64_t>(clip.colour));
-        clips.append(std::move(json));
-    }
-    document.set("clips", std::move(clips));
 
     Json automation = Json::array();
     for (const AutomationLane& lane : project.automation()) {
@@ -401,17 +420,30 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
     }
     document.set("midiMappings", std::move(mappings));
 
-    Json markers = Json::array();
-    for (const TimelineMarker& marker : project.markers()) {
+    // Arrangements carry the clips and the markers, and there is always at
+    // least one. A 1.10 file wrote both at the top level; the reader still
+    // takes them from there when it finds no `arrangements`, which is the whole
+    // of that migration.
+    Json arrangements = Json::array();
+    for (const Arrangement& arrangement : project.arrangements()) {
         Json json = Json::object();
-        json.set("id", toJson(marker.id));
-        json.set("tick", static_cast<std::int64_t>(marker.tick));
-        json.set("length", static_cast<std::int64_t>(marker.length));
-        json.set("name", marker.name);
-        json.set("colour", static_cast<std::int64_t>(marker.colour));
-        markers.append(std::move(json));
+        json.set("id", toJson(arrangement.id));
+        json.set("name", arrangement.name);
+
+        Json clips = Json::array();
+        for (const Clip& clip : arrangement.clips)
+            clips.append(clipToJson(clip));
+        json.set("clips", std::move(clips));
+
+        Json markers = Json::array();
+        for (const TimelineMarker& marker : arrangement.markers)
+            markers.append(markerToJson(marker));
+        json.set("markers", std::move(markers));
+
+        arrangements.append(std::move(json));
     }
-    document.set("markers", std::move(markers));
+    document.set("arrangements", std::move(arrangements));
+    document.set("currentArrangement", toJson(project.currentArrangement()));
 
     Json routing = Json::array();
     for (const RoutingConnection& connection : project.routing()) {
@@ -525,6 +557,62 @@ void bindUnassignedContent(Project& project)
             }
         }
     }
+}
+
+} // namespace
+
+namespace {
+
+Clip clipFrom(const Json& json, bool legacyClipTiming,
+              const engine::TempoMap& tempoMap)
+{
+    Clip clip;
+    clip.id             = idFrom(json["id"]);
+    clip.type           = static_cast<ClipType>(json["type"].asInt(0));
+    clip.track          = idFrom(json["track"]);
+    clip.source         = idFrom(json["source"]);
+    clip.start          = json["start"].asInt(0);
+    clip.length         = json["length"].asInt(0);
+    clip.sourceOffset   = json["sourceOffset"].asInt(0);
+
+    if (legacyClipTiming) {
+        const engine::TempoMap& tempo = tempoMap;
+        clip.startTick         = tempo.tickForFrame(clip.start);
+        clip.lengthTicks       = tempo.tickForFrame(clip.length);
+        clip.sourceOffsetTicks = tempo.tickForFrame(clip.sourceOffset);
+    } else {
+        clip.startTick         = json["startTick"].asInt(0);
+        clip.lengthTicks       = json["lengthTicks"].asInt(0);
+        clip.sourceOffsetTicks = json["sourceOffsetTicks"].asInt(0);
+    }
+    clip.gain           = json["gain"].asDouble(1.0);
+    clip.pan            = json["pan"].asDouble(0.0);
+    clip.normalize      = json["normalize"].asBool(false);
+    clip.reversed       = json["reversed"].asBool(false);
+    clip.muted          = json["muted"].asBool(false);
+    clip.locked         = json["locked"].asBool(false);
+    clip.group          = idFrom(json["group"]);
+    clip.lane           = std::max(0, static_cast<int>(json["lane"].asInt(0)));
+    clip.crossfadeIn    = json["crossfadeIn"].asBool(false);
+    clip.crossfadeOut   = json["crossfadeOut"].asBool(false);
+    clip.fadeInFrames   = json["fadeInFrames"].asInt(0);
+    clip.fadeOutFrames  = json["fadeOutFrames"].asInt(0);
+    clip.pitchSemitones = json["pitchSemitones"].asDouble(0.0);
+    clip.stretchRatio   = json["stretchRatio"].asDouble(1.0);
+    clip.name           = json["name"].asString();
+    clip.colour         = static_cast<std::uint32_t>(json["colour"].asInt(0xFF6699CC));
+    return clip;
+}
+
+TimelineMarker markerFrom(const Json& json)
+{
+    TimelineMarker marker;
+    marker.id     = idFrom(json["id"]);
+    marker.tick   = json["tick"].asInt(0);
+    marker.length = json["length"].asInt(0);
+    marker.name   = json["name"].asString();
+    marker.colour = static_cast<std::uint32_t>(json["colour"].asInt(0xFFCC8844));
+    return marker;
 }
 
 } // namespace
@@ -705,43 +793,46 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
     // only once the document has been read this far.
     const bool legacyClipTiming = major == 1 && minor < 1;
 
-    for (const Json& json : document["clips"].elements()) {
-        Clip clip;
-        clip.id             = idFrom(json["id"]);
-        clip.type           = static_cast<ClipType>(json["type"].asInt(0));
-        clip.track          = idFrom(json["track"]);
-        clip.source         = idFrom(json["source"]);
-        clip.start          = json["start"].asInt(0);
-        clip.length         = json["length"].asInt(0);
-        clip.sourceOffset   = json["sourceOffset"].asInt(0);
+    // Arrangements, or the single one a pre-1.11 document implies.
+    //
+    // Done here rather than in `migrate` for the reason 1.0's clip timing was:
+    // the conversion needs the tempo map, and the tempo map only exists once
+    // the document has been read this far.
+    project.arrangements().clear();
 
-        if (legacyClipTiming) {
-            const engine::TempoMap& tempo = project.tempoMap();
-            clip.startTick         = tempo.tickForFrame(clip.start);
-            clip.lengthTicks       = tempo.tickForFrame(clip.length);
-            clip.sourceOffsetTicks = tempo.tickForFrame(clip.sourceOffset);
-        } else {
-            clip.startTick         = json["startTick"].asInt(0);
-            clip.lengthTicks       = json["lengthTicks"].asInt(0);
-            clip.sourceOffsetTicks = json["sourceOffsetTicks"].asInt(0);
+    if (document["arrangements"].isArray() && !document["arrangements"].elements().empty()) {
+        for (const Json& json : document["arrangements"].elements()) {
+            Arrangement arrangement;
+            arrangement.id   = idFrom(json["id"]);
+            arrangement.name = json["name"].asString();
+
+            for (const Json& clip : json["clips"].elements())
+                arrangement.clips.push_back(clipFrom(clip, legacyClipTiming, project.tempoMap()));
+
+            for (const Json& marker : json["markers"].elements())
+                arrangement.markers.push_back(markerFrom(marker));
+
+            (void)project.insertArrangement(project.arrangements().size(),
+                                            std::move(arrangement));
         }
-        clip.gain           = json["gain"].asDouble(1.0);
-        clip.pan            = json["pan"].asDouble(0.0);
-        clip.normalize      = json["normalize"].asBool(false);
-        clip.reversed       = json["reversed"].asBool(false);
-        clip.muted          = json["muted"].asBool(false);
-        clip.locked         = json["locked"].asBool(false);
-        clip.group          = idFrom(json["group"]);
-        clip.lane           = std::max(0, static_cast<int>(json["lane"].asInt(0)));
-        clip.crossfadeIn    = json["crossfadeIn"].asBool(false);
-        clip.crossfadeOut   = json["crossfadeOut"].asBool(false);
-        clip.fadeInFrames   = json["fadeInFrames"].asInt(0);
-        clip.fadeOutFrames  = json["fadeOutFrames"].asInt(0);
-        clip.pitchSemitones = json["pitchSemitones"].asDouble(0.0);
-        clip.stretchRatio   = json["stretchRatio"].asDouble(1.0);
-        clip.name           = json["name"].asString();
-        clip.colour         = static_cast<std::uint32_t>(json["colour"].asInt(0xFF6699CC));
-        project.clips().push_back(std::move(clip));
+
+        if (!project.setCurrentArrangement(idFrom(document["currentArrangement"])))
+            (void)project.setCurrentArrangement(project.arrangements().front().id);
+    } else {
+        // Up to 1.10 a project was one timeline, written at the top level.
+        Arrangement arrangement;
+        arrangement.id =
+            EntityId{static_cast<EntityId::Value>(document["nextEntityId"].asInt(1))};
+        arrangement.name = "Arrangement 1";
+
+        for (const Json& clip : document["clips"].elements())
+            arrangement.clips.push_back(clipFrom(clip, legacyClipTiming, project.tempoMap()));
+
+        for (const Json& marker : document["markers"].elements())
+            arrangement.markers.push_back(markerFrom(marker));
+
+        (void)project.insertArrangement(0, std::move(arrangement));
+        (void)project.setCurrentArrangement(project.arrangements().front().id);
     }
 
     for (const Json& json : document["automation"].elements()) {
@@ -781,15 +872,6 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         project.midiMappings().push_back(std::move(mapping));
     }
 
-    for (const Json& json : document["markers"].elements()) {
-        TimelineMarker marker;
-        marker.id     = idFrom(json["id"]);
-        marker.tick   = json["tick"].asInt(0);
-        marker.length = json["length"].asInt(0);
-        marker.name   = json["name"].asString();
-        marker.colour = static_cast<std::uint32_t>(json["colour"].asInt(0xFFCC8844));
-        project.markers().push_back(std::move(marker));
-    }
 
     for (const Json& json : document["routing"].elements()) {
         RoutingConnection connection;
@@ -856,6 +938,12 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
 
     // The generator must not mint an id that already exists in the file.
     project.ids() = IdGenerator{static_cast<EntityId::Value>(document["nextEntityId"].asInt(1)) - 1};
+
+    // A pre-1.11 document names no arrangement, so the loader mints one at
+    // `nextEntityId`; the generator has to be told, or the next entity created
+    // in the session would be handed the same number.
+    for (const Arrangement& arrangement : project.arrangements())
+        project.ids().observe(arrangement.id);
 
     for (const auto& track : project.tracks())      project.ids().observe(track.id);
     for (const auto& channel : project.channels())  project.ids().observe(channel.id);
@@ -971,6 +1059,15 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // from a 1.9 document and read back false — the manual fades those clips
     // carried are exactly what they play, which is what they always did.
     if (major == 1 && minor == 9) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.10 -> 1.11. The clips and markers move from the top level into an
+    // arrangement. Performed at the read site, like 1.0's clip timing, because
+    // it needs the tempo map; this hook remains the single place that decides
+    // whether a path exists at all.
+    if (major == 1 && minor == 10) {
         result.succeeded = true;
         return result;
     }

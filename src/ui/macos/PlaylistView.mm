@@ -5,6 +5,7 @@
 #include "app/AutomationEditorModel.h"
 #include "app/PlaylistModel.h"
 #include "app/commands/ClipCommands.h"
+#include "app/commands/ArrangementCommands.h"
 #include "app/commands/AutomationCommands.h"
 #include "app/commands/ConsolidateCommands.h"
 #include "app/commands/ImportCommands.h"
@@ -177,6 +178,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     if (_project == nullptr)
         return;
 
+    [self drawArrangementChip];
     [self drawRuler];
     [self drawTracks];
     [self drawClips];
@@ -269,6 +271,158 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         fillRect(NSMakeRect(x, 0, 2.0, rulerHeight), theme::fromArgb(marker.colour));
         theme::drawText(@(marker.name.c_str()), NSMakeRect(x + 4.0, 4.0, 90.0, 14.0),
                         theme::fromArgb(marker.colour, 1.2), theme::labelFont(9.0));
+    }
+}
+
+/// The current timeline's name, in the corner the ruler and the headers leave
+/// empty. The brief asks for the switcher on the toolbar; the toolbar is
+/// ControlBarView, which this track does not own, so it sits here — over the
+/// clips it decides the contents of, which is arguably where it belongs.
+- (NSRect)arrangementChipRect
+{
+    return NSMakeRect(3.0, 3.0, headerWidth - 8.0, rulerHeight - 6.0);
+}
+
+- (void)drawArrangementChip
+{
+    const NSRect chip = [self arrangementChipRect];
+    theme::drawPanel(chip, theme::metrics::radiusControl, false, true);
+
+    const project::Arrangement* current =
+        _project->findArrangement(_project->currentArrangement());
+
+    NSString* label = current != nullptr ? @(current->name.c_str()) : @"—";
+
+    if (_project->arrangements().size() > 1)
+        label = [NSString stringWithFormat:@"%@  \u25be", label];
+
+    theme::drawTextCentred(label, chip, theme::ink(Ink::textPrimary),
+                           theme::labelFont(11.0, NSFontWeightSemibold));
+}
+
+- (void)showArrangementMenuWithEvent:(NSEvent*)event
+{
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    for (const project::Arrangement& arrangement : _project->arrangements()) {
+        NSMenuItem* item = [menu addItemWithTitle:@(arrangement.name.c_str())
+                                           action:@selector(switchArrangementFromMenu:)
+                                    keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @(arrangement.id.value());
+
+        if (arrangement.id == _project->currentArrangement())
+            item.state = NSControlStateValueOn;
+    }
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* add = [menu addItemWithTitle:@"New Arrangement"
+                                      action:@selector(addArrangementFromMenu:)
+                               keyEquivalent:@""];
+    add.target = self;
+
+    NSMenuItem* duplicate = [menu addItemWithTitle:@"Duplicate Arrangement"
+                                            action:@selector(duplicateArrangementFromMenu:)
+                                     keyEquivalent:@""];
+    duplicate.target = self;
+
+    NSMenuItem* rename = [menu addItemWithTitle:@"Rename Arrangement\u2026"
+                                         action:@selector(renameArrangementFromMenu:)
+                                  keyEquivalent:@""];
+    rename.target = self;
+
+    if (_project->arrangements().size() > 1) {
+        [menu addItem:[NSMenuItem separatorItem]];
+
+        NSMenuItem* remove = [menu addItemWithTitle:@"Remove Arrangement"
+                                             action:@selector(removeArrangementFromMenu:)
+                                      keyEquivalent:@""];
+        remove.target = self;
+    }
+
+    [NSMenu popUpContextMenu:menu withEvent:event forView:self];
+}
+
+/// Every switch goes through the command stack, which is what keeps one undo
+/// history honest across two timelines: an edit, a switch and an undo walk
+/// back through the switch before reaching the edit.
+- (void)switchArrangementFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId id{[item.representedObject unsignedLongLongValue]};
+
+    if (_registry->execute(std::make_unique<app::SetCurrentArrangementCommand>(id))) {
+        _model->clearSelection();
+        [self invalidateWaveformCache];
+        [self changed];
+    }
+}
+
+- (void)addArrangementFromMenu:(id)sender
+{
+    (void)sender;
+
+    const std::string name = "Arrangement "
+                           + std::to_string(_project->arrangements().size() + 1);
+
+    if (_registry->execute(std::make_unique<app::AddArrangementCommand>(name))) {
+        _model->clearSelection();
+        [self changed];
+    }
+}
+
+- (void)duplicateArrangementFromMenu:(id)sender
+{
+    (void)sender;
+
+    const project::Arrangement* current =
+        _project->findArrangement(_project->currentArrangement());
+    if (current == nullptr)
+        return;
+
+    if (_registry->execute(std::make_unique<app::AddArrangementCommand>(
+            current->name + " copy", current->id))) {
+        _model->clearSelection();
+        [self changed];
+    }
+}
+
+- (void)renameArrangementFromMenu:(id)sender
+{
+    (void)sender;
+
+    const project::Arrangement* current =
+        _project->findArrangement(_project->currentArrangement());
+    if (current == nullptr)
+        return;
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Rename arrangement";
+    [alert addButtonWithTitle:@"Rename"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 220, 24)];
+    field.stringValue = @(current->name.c_str());
+    alert.accessoryView = field;
+
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return;
+
+    [self commit:std::make_unique<app::RenameArrangementCommand>(
+                     current->id, field.stringValue.UTF8String)];
+}
+
+- (void)removeArrangementFromMenu:(id)sender
+{
+    (void)sender;
+
+    if (_registry->execute(std::make_unique<app::RemoveArrangementCommand>(
+            _project->currentArrangement()))) {
+        _model->clearSelection();
+        [self invalidateWaveformCache];
+        [self changed];
+    } else {
+        [self refuse:@"A project keeps at least one arrangement."];
     }
 }
 
@@ -943,6 +1097,11 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     _dragAppliedLanes  = 0;
 
     if (view.y < rulerHeight) {
+        if (NSPointInRect(view, [self arrangementChipRect])) {
+            [self showArrangementMenuWithEvent:event];
+            return;
+        }
+
         if (self.onSeekTick != nil && view.x >= headerWidth)
             self.onSeekTick(static_cast<long long>(std::max<Tick>(0, _model->xToTick(grid.x))));
 

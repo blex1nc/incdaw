@@ -42,6 +42,119 @@ Project::Project()
     // one would have a window between creation and first edit in which nothing
     // could be routed anywhere.
     master_ = addMixerNode(MixerNodeType::master, "Master").id;
+
+    // And one timeline, for the same reason: a project with nowhere to put a
+    // clip has a window between creation and first edit in which the playlist
+    // is not a place.
+    current_ = addArrangement("Arrangement 1").id;
+}
+
+// ── Arrangements ─────────────────────────────────────────────────────────────
+
+std::vector<Clip>& Project::clips() noexcept
+{
+    return const_cast<std::vector<Clip>&>(std::as_const(*this).clips());
+}
+
+const std::vector<Clip>& Project::clips() const noexcept
+{
+    if (const Arrangement* arrangement = findArrangement(current_))
+        return arrangement->clips;
+
+    // Unreachable while `current_` is kept valid, and cheaper to answer than
+    // to assert: a caller holding an empty list behaves, a caller holding a
+    // dangling reference does not.
+    static const std::vector<Clip> none;
+    return none;
+}
+
+std::vector<TimelineMarker>& Project::markers() noexcept
+{
+    return const_cast<std::vector<TimelineMarker>&>(std::as_const(*this).markers());
+}
+
+const std::vector<TimelineMarker>& Project::markers() const noexcept
+{
+    if (const Arrangement* arrangement = findArrangement(current_))
+        return arrangement->markers;
+
+    static const std::vector<TimelineMarker> none;
+    return none;
+}
+
+bool Project::setCurrentArrangement(EntityId id) noexcept
+{
+    if (findArrangement(id) == nullptr)
+        return false;
+
+    current_ = id;
+    return true;
+}
+
+Arrangement& Project::addArrangement(std::string name)
+{
+    Arrangement arrangement;
+    arrangement.id   = ids_.next();
+    arrangement.name = std::move(name);
+
+    arrangements_.push_back(std::move(arrangement));
+    return arrangements_.back();
+}
+
+Arrangement& Project::insertArrangement(std::size_t index, Arrangement arrangement)
+{
+    ids_.observe(arrangement.id);
+
+    for (const Clip& clip : arrangement.clips)
+        ids_.observe(clip.id);
+    for (const TimelineMarker& marker : arrangement.markers)
+        ids_.observe(marker.id);
+
+    const std::size_t position = std::min(index, arrangements_.size());
+    return *arrangements_.insert(arrangements_.begin() + static_cast<std::ptrdiff_t>(position),
+                                 std::move(arrangement));
+}
+
+bool Project::removeArrangement(EntityId id) noexcept
+{
+    if (arrangements_.size() < 2)
+        return false;
+
+    const std::size_t index = indexOfArrangement(id);
+    if (index == notFound)
+        return false;
+
+    arrangements_.erase(arrangements_.begin() + static_cast<std::ptrdiff_t>(index));
+
+    // The current one going means the neighbour becomes current, rather than
+    // `clips()` answering with the static empty list.
+    if (current_ == id)
+        current_ = arrangements_[std::min(index, arrangements_.size() - 1)].id;
+
+    return true;
+}
+
+const Arrangement* Project::findArrangement(EntityId id) const noexcept
+{
+    for (const Arrangement& arrangement : arrangements_)
+        if (arrangement.id == id)
+            return &arrangement;
+
+    return nullptr;
+}
+
+Arrangement* Project::findArrangement(EntityId id) noexcept
+{
+    return const_cast<Arrangement*>(std::as_const(*this).findArrangement(id));
+}
+
+std::size_t Project::indexOfArrangement(EntityId id) const noexcept
+{
+    for (std::size_t index = 0; index < arrangements_.size(); ++index)
+        if (arrangements_[index].id == id)
+            return index;
+
+    return notFound;
 }
 
 Track& Project::addTrack(TrackType type, std::string name)
@@ -100,8 +213,8 @@ Clip& Project::insertClip(std::size_t index, Clip clip)
 {
     ids_.observe(clip.id);
 
-    const std::size_t position = std::min(index, clips_.size());
-    return *clips_.insert(clips_.begin() + static_cast<std::ptrdiff_t>(position), std::move(clip));
+    const std::size_t position = std::min(index, clips().size());
+    return *clips().insert(clips().begin() + static_cast<std::ptrdiff_t>(position), std::move(clip));
 }
 
 MixerNode& Project::insertMixerNode(std::size_t index, MixerNode node)
@@ -157,7 +270,7 @@ bool Project::removeClip(EntityId id) noexcept
     if (index == notFound)
         return false;
 
-    clips_.erase(clips_.begin() + static_cast<std::ptrdiff_t>(index));
+    clips().erase(clips().begin() + static_cast<std::ptrdiff_t>(index));
     return true;
 }
 
@@ -234,16 +347,16 @@ TimelineMarker& Project::addMarker(Tick tick, std::string name)
     marker.tick = tick;
     marker.name = std::move(name);
 
-    markers_.push_back(std::move(marker));
-    return markers_.back();
+    markers().push_back(std::move(marker));
+    return markers().back();
 }
 
 TimelineMarker& Project::insertMarker(std::size_t index, TimelineMarker marker)
 {
     ids_.observe(marker.id);
 
-    const std::size_t position = std::min(index, markers_.size());
-    return *markers_.insert(markers_.begin() + static_cast<std::ptrdiff_t>(position),
+    const std::size_t position = std::min(index, markers().size());
+    return *markers().insert(markers().begin() + static_cast<std::ptrdiff_t>(position),
                             std::move(marker));
 }
 
@@ -253,7 +366,7 @@ bool Project::removeMarker(EntityId id) noexcept
     if (index == notFound)
         return false;
 
-    markers_.erase(markers_.begin() + static_cast<std::ptrdiff_t>(index));
+    markers().erase(markers().begin() + static_cast<std::ptrdiff_t>(index));
     return true;
 }
 
@@ -311,8 +424,8 @@ std::size_t Project::indexOfTrack(EntityId id) const noexcept
 
 std::size_t Project::indexOfClip(EntityId id) const noexcept
 {
-    for (std::size_t index = 0; index < clips_.size(); ++index)
-        if (clips_[index].id == id)
+    for (std::size_t index = 0; index < clips().size(); ++index)
+        if (clips()[index].id == id)
             return index;
 
     return notFound;
@@ -338,8 +451,8 @@ std::size_t Project::indexOfMidiMapping(EntityId id) const noexcept
 
 std::size_t Project::indexOfMarker(EntityId id) const noexcept
 {
-    for (std::size_t index = 0; index < markers_.size(); ++index)
-        if (markers_[index].id == id)
+    for (std::size_t index = 0; index < markers().size(); ++index)
+        if (markers()[index].id == id)
             return index;
 
     return notFound;
@@ -398,8 +511,8 @@ Clip& Project::addClip(ClipType type, EntityId track, EntityId source)
     clip.track  = track;
     clip.source = source;
 
-    clips_.push_back(std::move(clip));
-    return clips_.back();
+    clips().push_back(std::move(clip));
+    return clips().back();
 }
 
 AutomationLane& Project::addAutomationLane(EntityId target, std::string parameterKey)
@@ -500,7 +613,7 @@ Track* Project::findTrack(EntityId id) noexcept
 
 const Clip* Project::findClip(EntityId id) const noexcept
 {
-    for (const Clip& clip : clips_)
+    for (const Clip& clip : clips())
         if (clip.id == id)
             return &clip;
 
@@ -570,7 +683,7 @@ RoutingConnection* Project::findRouting(EntityId id) noexcept
 
 const TimelineMarker* Project::findMarker(EntityId id) const noexcept
 {
-    for (const TimelineMarker& marker : markers_)
+    for (const TimelineMarker& marker : markers())
         if (marker.id == id)
             return &marker;
 
@@ -609,15 +722,15 @@ bool operator==(const Project& a, const Project& b)
         && a.metadata_.comment == b.metadata_.comment
         && a.tempoMap_.tempoEvents() == b.tempoMap_.tempoEvents()
         && a.tempoMap_.timeSignatureEvents() == b.tempoMap_.timeSignatureEvents()
+        && a.arrangements_ == b.arrangements_
+        && a.current_ == b.current_
         && a.tracks_ == b.tracks_
         && a.channels_ == b.channels_
         && a.mixerNodes_ == b.mixerNodes_
         && a.patterns_ == b.patterns_
-        && a.clips_ == b.clips_
         && a.automation_ == b.automation_
         && a.audioAssets_ == b.audioAssets_
         && a.midiMappings_ == b.midiMappings_
-        && a.markers_ == b.markers_
         && a.routing_ == b.routing_
         && a.master_ == b.master_;
 }

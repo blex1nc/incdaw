@@ -168,6 +168,7 @@ add_library(incdaw_app STATIC
     app/commands/PatternCommands.cpp
     app/commands/StepCommands.cpp
     app/commands/TrackCommands.cpp
+    app/commands/ArrangementCommands.cpp
     app/commands/ClipCommands.cpp
     app/commands/ConsolidateCommands.cpp
     app/commands/MarkerCommands.cpp

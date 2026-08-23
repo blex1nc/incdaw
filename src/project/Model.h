@@ -447,6 +447,28 @@ struct TimelineMarker {
     [[nodiscard]] friend bool operator==(const TimelineMarker&, const TimelineMarker&) = default;
 };
 
+/// One timeline: its clips and its markers, and nothing else.
+///
+/// A project can hold several — a song, an alternative arrangement, a live
+/// version — and they SHARE the patterns, channels, tracks, mixer and
+/// automation lanes. That sharing is the point: an arrangement is a different
+/// way of laying out the same material, not a second project.
+///
+/// The clips live inside the arrangement rather than carrying an arrangement
+/// id, so `Project::clips()` can hand back the current one's list and every
+/// existing caller — the compilers, the playlist, every command — keeps
+/// meaning exactly what it meant. A flag on each clip would have needed the
+/// filter applied at every one of those sites, and one missed site is a clip
+/// from another arrangement playing over this one.
+struct Arrangement {
+    EntityId                    id;
+    std::string                 name;
+    std::vector<Clip>           clips;
+    std::vector<TimelineMarker> markers;
+
+    [[nodiscard]] friend bool operator==(const Arrangement&, const Arrangement&) = default;
+};
+
 // ── Project ───────────────────────────────────────────────────────────────────
 
 struct ProjectMetadata {
@@ -533,25 +555,57 @@ public:
     [[nodiscard]] std::vector<Channel>&           channels()    noexcept { return channels_; }
     [[nodiscard]] std::vector<MixerNode>&         mixerNodes()  noexcept { return mixerNodes_; }
     [[nodiscard]] std::vector<Pattern>&           patterns()    noexcept { return patterns_; }
-    [[nodiscard]] std::vector<Clip>&              clips()       noexcept { return clips_; }
+    /// The CURRENT arrangement's clips. Switching arrangements changes what
+    /// this returns, which is what lets every caller stay as it was.
+    [[nodiscard]] std::vector<Clip>&              clips()       noexcept;
     [[nodiscard]] std::vector<AutomationLane>&    automation()  noexcept { return automation_; }
     [[nodiscard]] std::vector<AudioAsset>&        audioAssets() noexcept { return audioAssets_; }
     [[nodiscard]] std::vector<MidiMapping>&       midiMappings() noexcept { return midiMappings_; }
-    [[nodiscard]] std::vector<TimelineMarker>&    markers()     noexcept { return markers_; }
+    [[nodiscard]] std::vector<TimelineMarker>&    markers()     noexcept;
     [[nodiscard]] std::vector<RoutingConnection>& routing()     noexcept { return routing_; }
 
     [[nodiscard]] const std::vector<Track>&             tracks()      const noexcept { return tracks_; }
     [[nodiscard]] const std::vector<Channel>&           channels()    const noexcept { return channels_; }
     [[nodiscard]] const std::vector<MixerNode>&         mixerNodes()  const noexcept { return mixerNodes_; }
     [[nodiscard]] const std::vector<Pattern>&           patterns()    const noexcept { return patterns_; }
-    [[nodiscard]] const std::vector<Clip>&              clips()       const noexcept { return clips_; }
+    [[nodiscard]] const std::vector<Clip>&              clips()       const noexcept;
     [[nodiscard]] const std::vector<AutomationLane>&    automation()  const noexcept { return automation_; }
     [[nodiscard]] const std::vector<AudioAsset>&        audioAssets() const noexcept { return audioAssets_; }
     [[nodiscard]] const std::vector<MidiMapping>&       midiMappings() const noexcept { return midiMappings_; }
-    [[nodiscard]] const std::vector<TimelineMarker>&    markers()     const noexcept { return markers_; }
+    [[nodiscard]] const std::vector<TimelineMarker>&    markers()     const noexcept;
     [[nodiscard]] const std::vector<RoutingConnection>& routing()     const noexcept { return routing_; }
 
     [[nodiscard]] EntityId masterMixerNode() const noexcept { return master_; }
+
+    // ── Arrangements ────────────────────────────────────────────────────────
+
+    [[nodiscard]] const std::vector<Arrangement>& arrangements() const noexcept
+    {
+        return arrangements_;
+    }
+
+    /// Mutable, like every other collection here, and with the same contract:
+    /// a caller that empties it must put something back and name a current one
+    /// before anything asks for `clips()`. The loader is the only such caller.
+    [[nodiscard]] std::vector<Arrangement>& arrangements() noexcept { return arrangements_; }
+
+    [[nodiscard]] EntityId currentArrangement() const noexcept { return current_; }
+
+    /// Switches timelines. Refuses an id the project does not hold, so a stale
+    /// id from an undone removal cannot leave `clips()` pointing at nothing.
+    bool setCurrentArrangement(EntityId id) noexcept;
+
+    Arrangement& addArrangement(std::string name);
+    Arrangement& insertArrangement(std::size_t index, Arrangement arrangement);
+
+    /// Removes an arrangement and everything laid out in it. Refuses the last
+    /// one: a project with no timeline has nowhere to put a clip.
+    bool removeArrangement(EntityId id) noexcept;
+
+    [[nodiscard]] const Arrangement* findArrangement(EntityId id) const noexcept;
+    [[nodiscard]] Arrangement*       findArrangement(EntityId id) noexcept;
+
+    [[nodiscard]] std::size_t indexOfArrangement(EntityId id) const noexcept;
 
     [[nodiscard]] const Track*     findTrack(EntityId id) const noexcept;
     [[nodiscard]] Track*           findTrack(EntityId id) noexcept;
@@ -583,11 +637,14 @@ private:
     std::vector<Channel>           channels_;
     std::vector<MixerNode>         mixerNodes_;
     std::vector<Pattern>           patterns_;
-    std::vector<Clip>              clips_;
+    /// Timelines. Never empty: a project has one from the moment it exists,
+    /// for the same reason it has a master mixer node.
+    std::vector<Arrangement>       arrangements_;
+    EntityId                       current_;
+
     std::vector<AutomationLane>    automation_;
     std::vector<AudioAsset>        audioAssets_;
     std::vector<MidiMapping>       midiMappings_;
-    std::vector<TimelineMarker>    markers_;
     std::vector<RoutingConnection> routing_;
 
     EntityId master_;
