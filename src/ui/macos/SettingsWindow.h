@@ -47,4 +47,11 @@ namespace incdaw::app { struct AppSettings; }
 /// Refreshes the status line from `statusProvider`, if the window is open.
 - (void)refreshStatus;
 
+/// Re-enumerates the machine's audio and MIDI hardware and rebuilds the lists.
+///
+/// Called by the shell when the system reports a change
+/// (platform/DeviceWatcher.h), so an open window is never left describing an
+/// interface that has been unplugged. A no-op before the window is built.
+- (void)reloadHardware;
+
 @end

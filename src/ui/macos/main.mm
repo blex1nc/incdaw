@@ -32,6 +32,7 @@
 #include "engine/AudioEngine.h"
 #include "platform/AudioUnitHost.h"
 #include "platform/Http.h"
+#include "platform/DeviceWatcher.h"
 #include "platform/MidiDevice.h"
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
@@ -314,6 +315,17 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// holds a reference to engine::MidiInput.
     std::unique_ptr<platform::MidiDevice> _midiDevice;
     NSString*                             _lastMidiError;
+
+    /// Watches the machine's audio and MIDI hardware for arrivals and
+    /// departures (platform/DeviceWatcher.h). Owned by the shell because it
+    /// outlives every device, which is the whole point of it.
+    std::unique_ptr<platform::DeviceWatcher> _deviceWatcher;
+
+    /// What the audio device list looked like when it was last examined. A
+    /// notification says "something changed", not what — this is how the
+    /// difference is worked out.
+    NSString* _hardwareMessage;
+    BOOL      _chosenOutputWasPresent;
 
     /// What the settings window reports instead of the device line: a refused
     /// rate, a device that would not open, an apply a running take blocked.
@@ -769,6 +781,25 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     self.channelRack.onEditSamplerZones = ^(unsigned long long channelKey) {
         [weakAudioSelf openZoneEditorForChannel:channelKey];
     };
+
+    // Hot-plug. The system says when hardware arrives or leaves; until this
+    // existed nobody was listening, and a keyboard plugged in mid-session did
+    // nothing until Settings was reopened.
+    _deviceWatcher = platform::DeviceWatcher::create();
+
+    if (_deviceWatcher != nullptr) {
+        __weak INCDAWAppDelegate* weakHardwareSelf = self;
+
+        _deviceWatcher->setCallback([weakHardwareSelf] {
+            // Arrives on a system thread, mid-change. Everything real happens
+            // on the main thread, and coalesced: plugging in one interface can
+            // produce several notifications, and re-enumerating for each is
+            // work the user hears as a gap.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakHardwareSelf hardwareChanged];
+            });
+        });
+    }
 
     // Drives the playhead and reclaims retired graphs. Both are non-realtime
     // work that must happen off the audio thread; 30 Hz is smooth enough for a
@@ -1625,6 +1656,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     }
 
     _audioReady = YES;
+    _chosenOutputWasPresent = YES;
     _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
 
     NSLog(@"INCDAW: audio started — %s, %.0f Hz, %lld frames",
@@ -1673,6 +1705,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 {
     if (_lastSettingsMessage != nil)
         return _lastSettingsMessage;
+
+    // Said plainly rather than left to be inferred from a device name that is
+    // not the one the user picked.
+    if (_hardwareMessage != nil)
+        return _hardwareMessage;
 
     if (!_audioReady || _audio == nullptr)
         return @"Audio device unavailable — these settings are saved and applied at next launch.";
@@ -1751,6 +1788,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     }
 
     _audioReady = YES;
+    _chosenOutputWasPresent = YES;   // whatever it opened on is what it is now on
     _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
     _audio->transport().seekToTick(position);
 
@@ -1761,6 +1799,65 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         [self retargetLoop];
         _audio->transport().play();
     }
+
+    [self refreshStatus];
+}
+
+/// The machine's hardware changed: something was plugged in or unplugged.
+///
+/// Coalesced onto the main thread by the watcher's callback. The work is
+/// deliberately asymmetric between the two subsystems, because the cost of
+/// being wrong is:
+///
+///  - **MIDI** reopens unconditionally. Closing and reopening a MIDI client is
+///    cheap and inaudible, and the common case — a keyboard plugged in — should
+///    simply work without the user being asked to do anything.
+///  - **Audio** does not restart on its own while it is still playing through
+///    a device that exists. Restarting an audio device is a gap in the sound,
+///    and taking one because an unrelated interface was plugged in elsewhere is
+///    worse than not noticing. It restarts only when the device the settings
+///    ask for has come BACK — the case where INCDAW is currently on a fallback
+///    and the user's real interface has just returned.
+- (void)hardwareChanged
+{
+    // What the system now offers.
+    std::vector<platform::AudioDeviceInfo> devices;
+    if (const std::unique_ptr<platform::AudioDevice> probe = platform::AudioDevice::create())
+        devices = probe->enumerateDevices();
+
+    const std::string& wanted = _settings.audio.outputDeviceIdentifier;
+
+    // An empty preference is "system default", which is always present by
+    // definition — the system picks, and the watcher told us it just did.
+    BOOL present = wanted.empty() ? YES : NO;
+
+    for (const platform::AudioDeviceInfo& info : devices)
+        if (info.outputChannels > 0 && info.identifier == wanted)
+            present = YES;
+
+    // MIDI first, and always: a keyboard that just appeared should play.
+    [self openMidiInputs];
+
+    if (!present) {
+        _hardwareMessage = @"⚠ audio device unavailable — using the system default";
+    } else if (!_chosenOutputWasPresent) {
+        // It came back. This is the one case worth a restart: INCDAW is on a
+        // fallback and the interface the user actually chose is plugged in
+        // again.
+        _hardwareMessage = nil;
+        _chosenOutputWasPresent = YES;
+
+        [self applySettings];
+        return;
+    } else {
+        _hardwareMessage = nil;
+    }
+
+    _chosenOutputWasPresent = present;
+
+    // The Settings window, if it is open, is showing a list of hardware that
+    // no longer describes the machine.
+    [self.settingsWindow reloadHardware];
 
     [self refreshStatus];
 }

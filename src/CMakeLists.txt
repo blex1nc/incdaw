@@ -17,6 +17,7 @@ add_library(incdaw_platform STATIC
     platform/ChildProcess.cpp
     platform/macos/CoreAudioDevice.cpp
     platform/macos/CoreMidiDevice.cpp
+    platform/macos/DeviceWatcher.cpp
     platform/macos/HostTime.cpp
     platform/macos/HttpClient.mm
     platform/macos/AudioUnitHost.mm)

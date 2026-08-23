@@ -871,6 +871,16 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
 
 // ── Devices ──────────────────────────────────────────────────────────────────
 
+- (void)reloadHardware
+{
+    // Nothing is built before the window is first shown, and rebuilding lists
+    // that do not exist yet would rebuild them against a nil popup.
+    if (_midiOutput == nil)
+        return;
+
+    [self reloadDevices];
+}
+
 - (void)reloadDevices
 {
     if (const std::unique_ptr<platform::AudioDevice> device = platform::AudioDevice::create())

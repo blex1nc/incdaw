@@ -19,6 +19,7 @@ add_executable(incdaw_tests
     unit/MidiClockTests.cpp
     unit/MidiClockReceiveTests.cpp
     unit/MidiFeedbackTests.cpp
+    unit/DeviceWatcherTests.cpp
     unit/CommandTests.cpp
     unit/ProjectSessionTests.cpp
     unit/StoppedTransportTests.cpp

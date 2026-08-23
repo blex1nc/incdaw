@@ -8,6 +8,38 @@ public version yet.
 
 ## [Unreleased]
 
+### Hardware — INCDAW notices when the machine changes — 2026-08-23
+
+- **A keyboard plugged in mid-session now plays.** The system has always
+  said when hardware arrives or leaves; nobody was listening, so Settings
+  rescanned only when reopened and a device list could describe an
+  interface that had been unplugged an hour earlier. `platform::
+  DeviceWatcher` listens to CoreAudio's device list and both default-
+  device properties, and to CoreMIDI's setup notification.
+- **Deliberately not part of `AudioDevice` or `MidiDevice`.** What changed
+  is a property of the machine, not of an open device — and the most
+  interesting moment is exactly the one where the device INCDAW was using
+  has stopped existing. An observer living inside it would go with it.
+- **MIDI reopens; audio does not.** Reopening a MIDI client is cheap and
+  inaudible, so a keyboard that appears simply works. Restarting an audio
+  device is a gap in the sound, and taking one because an unrelated
+  interface was plugged in elsewhere is worse than not noticing. Audio
+  restarts in one case only: the device the settings ask for has come
+  *back*, and INCDAW is currently on a fallback.
+- **And it says so.** A chosen interface that is no longer there puts
+  "audio device unavailable — using the system default" in the status
+  line, rather than leaving the user to infer it from a device name that
+  is not the one they picked.
+- The default-output property is watched as well as the list, because
+  plugging in headphones changes what "System Default" means without
+  changing the list at all.
+
+**Tested without hardware** — the lifecycle, which is where the real
+failure modes are: a notification arriving into a half-destroyed observer,
+and a deadlock between teardown and one in flight. That a real interface
+being unplugged produces a notification is not a claim these tests make.
+
+
 ### MIDI — the mapping system learns to answer — 2026-08-23
 
 - **A mapped control now follows the parameter, whoever moved it.** A
