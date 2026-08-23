@@ -170,4 +170,46 @@ void SetPatternSwingCommand::mergeWith(const Command& next)
         swing_ = other->swing_;
 }
 
+// ── SetPatternColourCommand ───────────────────────────────────────────────────
+
+bool SetPatternColourCommand::execute(Project& project)
+{
+    project::Pattern* pattern = project.findPattern(patternId_);
+    if (pattern == nullptr || pattern->colour == colour_)
+        return false;
+
+    previousColour_ = pattern->colour;
+    pattern->colour = colour_;
+
+    previousClips_.clear();
+
+    // The pattern's placements follow it. A clip takes the pattern's colour
+    // when it is created, so leaving them behind would mean recolouring a
+    // pattern changed nothing anyone could see in the arrangement — which is
+    // where colour is for.
+    if (recolourClips_) {
+        for (project::Clip& clip : project.clips()) {
+            if (clip.type != project::ClipType::pattern || clip.source != patternId_)
+                continue;
+            if (clip.colour == colour_)
+                continue;
+
+            previousClips_.push_back({clip.id, clip.colour});
+            clip.colour = colour_;
+        }
+    }
+
+    return true;
+}
+
+void SetPatternColourCommand::undo(Project& project)
+{
+    if (project::Pattern* pattern = project.findPattern(patternId_))
+        pattern->colour = previousColour_;
+
+    for (const PreviousClip& entry : previousClips_)
+        if (project::Clip* clip = project.findClip(entry.id))
+            clip->colour = entry.colour;
+}
+
 } // namespace incdaw::app

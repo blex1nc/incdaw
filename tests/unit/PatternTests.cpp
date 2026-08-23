@@ -7,6 +7,9 @@
 
 #include "doctest.h"
 
+#include "app/CommandRegistry.h"
+#include "app/commands/ClipCommands.h"
+#include "app/commands/PatternCommands.h"
 #include "engine/core/AudioBufferPool.h"
 #include "engine/transport/TempoMap.h"
 #include "project/Model.h"
@@ -14,6 +17,7 @@
 #include "project/ProjectGraphCompiler.h"
 
 #include <chrono>
+#include <memory>
 #include <vector>
 
 using namespace incdaw;
@@ -541,4 +545,83 @@ TEST_CASE("new material is given rotating default colours")
     const std::uint32_t master = project.mixerNodes().front().colour;
     CHECK(project.mixerNodes().front().type == project::MixerNodeType::master);
     CHECK(master != first);   // the master keeps its own neutral plate
+}
+
+// ── TRACK B (B13) — the pattern workflow ─────────────────────────────────────
+//
+// Clone, rename and length already had commands; colour did not, and colour is
+// the one that has to reach further than the pattern itself. A clip takes its
+// pattern's colour when it is created, so recolouring a pattern and leaving its
+// placements alone would mean the gesture changed nothing where colour is
+// actually for: the arrangement.
+
+TEST_CASE("recolouring a pattern recolours its placements, and undoes both")
+{
+    project::Project project;
+
+    const project::EntityId channel = project.addChannel("Lead").id;
+
+    project::Pattern& pattern = project.addPattern("P1");
+    pattern.length            = engine::ticksPerQuarterNote * 4;
+    pattern.colour            = 0xFF112233u;
+    (void)pattern.contentFor(channel);
+
+    const project::EntityId patternId = pattern.id;
+    const project::EntityId track =
+        project.addTrack(project::TrackType::instrument, "A").id;
+
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddPatternClipCommand>(track, patternId, 0)));
+    REQUIRE(registry.execute(std::make_unique<app::AddPatternClipCommand>(
+        track, patternId, engine::ticksPerQuarterNote * 16)));
+
+    REQUIRE(project.clips().size() == 2);
+    REQUIRE(project.clips()[0].colour == 0xFF112233u);
+
+    // A clip of a DIFFERENT pattern must be left alone.
+    project::Pattern& other = project.addPattern("P2");
+    other.length            = engine::ticksPerQuarterNote * 4;
+    REQUIRE(registry.execute(std::make_unique<app::AddPatternClipCommand>(
+        track, other.id, engine::ticksPerQuarterNote * 32)));
+
+    const std::uint32_t untouched = project.clips()[2].colour;
+
+    REQUIRE(registry.execute(
+        std::make_unique<app::SetPatternColourCommand>(patternId, 0xFF445566u)));
+
+    CHECK(project.findPattern(patternId)->colour == 0xFF445566u);
+    CHECK(project.clips()[0].colour == 0xFF445566u);
+    CHECK(project.clips()[1].colour == 0xFF445566u);
+    CHECK(project.clips()[2].colour == untouched);
+
+    REQUIRE(registry.undo());
+    CHECK(project.findPattern(patternId)->colour == 0xFF112233u);
+    CHECK(project.clips()[0].colour == 0xFF112233u);
+
+    // Setting the colour it already has is not an undo entry.
+    CHECK_FALSE(registry.execute(
+        std::make_unique<app::SetPatternColourCommand>(patternId, 0xFF112233u)));
+}
+
+TEST_CASE("a pattern can be recoloured without touching its placements")
+{
+    project::Project project;
+
+    project::Pattern& pattern = project.addPattern("P1");
+    pattern.colour            = 0xFF112233u;
+    pattern.length            = engine::ticksPerQuarterNote * 4;
+
+    const project::EntityId patternId = pattern.id;
+    const project::EntityId track =
+        project.addTrack(project::TrackType::instrument, "A").id;
+
+    app::CommandRegistry registry{project};
+    REQUIRE(registry.execute(std::make_unique<app::AddPatternClipCommand>(track, patternId, 0)));
+
+    REQUIRE(registry.execute(
+        std::make_unique<app::SetPatternColourCommand>(patternId, 0xFF778899u, false)));
+
+    CHECK(project.findPattern(patternId)->colour == 0xFF778899u);
+    CHECK(project.clips()[0].colour == 0xFF112233u);
 }

@@ -8,6 +8,21 @@ public version yet.
 
 ## [Unreleased]
 
+### Patterns — colour, length, and which ones are in the song — 2026-08-23
+
+- **Colour** on the pattern's context menu, from the same nine hues a track
+  offers, and it reaches the pattern's placements: a clip takes its
+  pattern's colour when it is created, so recolouring a pattern and leaving
+  the arrangement grey would change nothing where colour is actually for.
+  One undo entry covers the pattern and every clip of it.
+- **Length** in bars from the same menu, with the current one ticked. The
+  command existed; nothing could call it.
+- **The picker says which patterns are in the song.** Each row carries the
+  number of times it is placed, or a dash. A list where a working pattern
+  and an abandoned sketch look identical is a list that has to be checked
+  against the playlist by hand.
+- Clone and rename were already there and are unchanged.
+
 ### Automation — clips you can ask for — 2026-08-23
 
 - **New Automation Clip** on a track's context menu: pick a mixer strip or

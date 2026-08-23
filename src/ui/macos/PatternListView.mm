@@ -5,6 +5,7 @@
 #include "project/Model.h"
 #include "ui/macos/Theme.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -21,11 +22,30 @@ constexpr CGFloat rowHeight = 30.0;
 constexpr CGFloat swatch    = 4.0;
 constexpr CGFloat padding   = 8.0;
 
+/// Bars a new length is offered in, from the pattern menu.
+constexpr int lengthChoices[] = {1, 2, 4, 8, 16};
+
 } // namespace
 
 @implementation INCDAWPatternListView {
     project::Project*     _project;
     app::CommandRegistry* _registry;
+}
+
+/// How many times a pattern is placed in the arrangement.
+///
+/// The picker's job is to show which patterns are IN the song: a list where a
+/// used pattern and an abandoned sketch look the same is a list that has to be
+/// checked against the playlist by hand.
+- (std::size_t)placementsOf:(project::EntityId)pattern
+{
+    std::size_t count = 0;
+
+    for (const project::Clip& clip : _project->clips())
+        if (clip.type == project::ClipType::pattern && clip.source == pattern)
+            ++count;
+
+    return count;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -96,14 +116,34 @@ constexpr CGFloat padding   = 8.0;
                                       rect.size.height - 10.0),
                            swatch / 2.0, colour);
 
+        const std::size_t placements = [self placementsOf:pattern.id];
+
+        // The count sits at the trailing edge, so the name keeps the room it
+        // had and an unused pattern is legible by what is missing.
+        const CGFloat countWidth = 34.0;
+
         theme::drawTextCentred(@(pattern.name.c_str()),
                                NSMakeRect(NSMinX(rect) + swatch + padding + 2.0, NSMinY(rect),
-                                          rect.size.width - swatch - padding * 2.0,
+                                          rect.size.width - swatch - padding * 2.0 - countWidth,
                                           rect.size.height),
                                selected ? theme::ink(Ink::textPrimary)
                                         : theme::ink(Ink::textSecondary),
                                theme::labelFont(12.0, selected ? NSFontWeightSemibold
                                                                : NSFontWeightRegular));
+
+        if (placements > 0)
+            theme::drawTextCentred([NSString stringWithFormat:@"×%lu",
+                                                              static_cast<unsigned long>(placements)],
+                                   NSMakeRect(NSMaxX(rect) - countWidth, NSMinY(rect),
+                                              countWidth - 4.0, rect.size.height),
+                                   theme::ink(Ink::accent), theme::labelFont(10.0,
+                                                                             NSFontWeightSemibold));
+        else
+            theme::drawTextCentred(@"—",
+                                   NSMakeRect(NSMaxX(rect) - countWidth, NSMinY(rect),
+                                              countWidth - 4.0, rect.size.height),
+                                   theme::withAlpha(theme::ink(Ink::textDim), 0.6),
+                                   theme::labelFont(10.0));
     }
 
     const NSRect addRow = NSMakeRect(4.0, top + static_cast<CGFloat>(patterns.size()) * rowHeight,
@@ -169,6 +209,14 @@ constexpr CGFloat padding   = 8.0;
     duplicate.target = self;
     duplicate.representedObject = @(patternId.value());
 
+    NSMenuItem* colour = [menu addItemWithTitle:@"Colour" action:nil keyEquivalent:@""];
+    colour.submenu = [self colourMenuFor:patternId];
+
+    NSMenuItem* length = [menu addItemWithTitle:@"Length" action:nil keyEquivalent:@""];
+    length.submenu = [self lengthMenuFor:patternId];
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     // The last pattern is not removable: with none, there is nothing to edit
     // and nothing to play, and the editors would have to grow an empty state
     // that means "you deleted everything" rather than "this is empty".
@@ -210,6 +258,79 @@ constexpr CGFloat padding   = 8.0;
     }
 
     [super keyDown:event];
+}
+
+/// The same nine hues the playlist offers a track, so a pattern and the track
+/// it is placed on can be given matching colours without a colour panel.
+- (NSMenu*)colourMenuFor:(project::EntityId)patternId
+{
+    static const struct { const char* name; unsigned int argb; } swatches[] = {
+        {"Blue",   0xFF6699CCu}, {"Teal",   0xFF3E9E96u}, {"Green",  0xFF5C9E4Au},
+        {"Amber",  0xFFC8963Cu}, {"Orange", 0xFFC86E3Cu}, {"Red",    0xFFBE4A4Au},
+        {"Pink",   0xFFB4569Eu}, {"Violet", 0xFF7E5CBEu}, {"Grey",   0xFF6E6E78u},
+    };
+
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    for (const auto& entry : swatches) {
+        NSMenuItem* item = [menu addItemWithTitle:@(entry.name)
+                                           action:@selector(setColourFromMenu:)
+                                    keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @[@(patternId.value()), @(entry.argb)];
+    }
+
+    return menu;
+}
+
+- (NSMenu*)lengthMenuFor:(project::EntityId)patternId
+{
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    const project::Pattern* pattern = _project->findPattern(patternId);
+
+    for (const int bars : lengthChoices) {
+        NSMenuItem* item =
+            [menu addItemWithTitle:[NSString stringWithFormat:@"%d bar%s", bars,
+                                                              bars == 1 ? "" : "s"]
+                            action:@selector(setLengthFromMenu:)
+                     keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @[@(patternId.value()), @(bars)];
+
+        if (pattern != nullptr
+            && pattern->length == engine::ticksPerQuarterNote * 4 * bars)
+            item.state = NSControlStateValueOn;
+    }
+
+    return menu;
+}
+
+- (void)setColourFromMenu:(NSMenuItem*)item
+{
+    NSArray* pair = item.representedObject;
+    if (pair.count != 2)
+        return;
+
+    const project::EntityId pattern{[pair[0] unsignedLongLongValue]};
+    const auto colour = static_cast<std::uint32_t>([pair[1] unsignedIntValue]);
+
+    if (_registry->execute(std::make_unique<app::SetPatternColourCommand>(pattern, colour)))
+        [self changed];
+}
+
+- (void)setLengthFromMenu:(NSMenuItem*)item
+{
+    NSArray* pair = item.representedObject;
+    if (pair.count != 2)
+        return;
+
+    const project::EntityId pattern{[pair[0] unsignedLongLongValue]};
+    const auto bars = static_cast<engine::Tick>([pair[1] intValue]);
+
+    if (_registry->execute(std::make_unique<app::SetPatternLengthCommand>(
+            pattern, engine::ticksPerQuarterNote * 4 * bars)))
+        [self changed];
 }
 
 - (void)renameFromMenu:(NSMenuItem*)item

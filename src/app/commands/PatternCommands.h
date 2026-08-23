@@ -5,6 +5,7 @@
 #include "project/Model.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace incdaw::app {
@@ -128,6 +129,31 @@ private:
 };
 
 /// Shuffle, 0..1. Mergeable, so dragging the control is one undo.
+/// A pattern's colour, which is also its clips' colour in the playlist.
+class SetPatternColourCommand final : public Command {
+public:
+    SetPatternColourCommand(EntityId pattern, std::uint32_t colour, bool recolourClips = true)
+        : patternId_(pattern), colour_(colour), recolourClips_(recolourClips) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "pattern.setColour"; }
+    [[nodiscard]] std::string name() const override { return "Set Pattern Colour"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    struct PreviousClip {
+        EntityId      id;
+        std::uint32_t colour = 0u;
+    };
+
+    EntityId                  patternId_;
+    std::uint32_t             colour_          = 0u;
+    bool                      recolourClips_   = true;
+    std::uint32_t             previousColour_  = 0u;
+    std::vector<PreviousClip> previousClips_;
+};
+
 class SetPatternSwingCommand final : public Command {
 public:
     SetPatternSwingCommand(EntityId pattern, double swing)
