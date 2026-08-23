@@ -63,6 +63,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/effects/DynamicsEffects.cpp
     engine/dsp/effects/EffectPresets.cpp
     engine/dsp/effects/ModulationEffects.cpp
+    engine/dsp/effects/MultibandEffects.cpp
     engine/dsp/effects/SpaceEffects.cpp
     engine/dsp/effects/ToneEffects.cpp
     engine/dsp/effects/UtilityEffects.cpp

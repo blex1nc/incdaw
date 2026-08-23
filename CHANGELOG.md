@@ -8,6 +8,26 @@ public version yet.
 
 ## [Unreleased]
 
+### Effects — Multiband Compressor — 2026-08-23
+
+- **Three bands over a Linkwitz-Riley tree that sums flat.** The crossover
+  is what makes or breaks a multiband: three bands that do not sum back to
+  the signal they were split from colour everything whether the compressors
+  are working or not. The low band takes the second crossover as an
+  ALLPASS — its lowpass and highpass halves summed — which is what keeps all
+  three phase-aligned; without it the sum has a hole at 2.5 kHz. Measured
+  flat to better than 0.05 dB from 20 Hz to 18 kHz, both as drawn and as
+  rendered through the node.
+- **Transparency is structural.** An allpass is flat but not an identity, so
+  a summed split is phase-shifted and cannot null sample-for-sample. At
+  ratio 1 with no makeup and nothing soloed the effect skips the split
+  entirely, and passes the signal through bit-exact like every other
+  builtin.
+- **Per band:** threshold, ratio, attack, release, makeup, bypass and solo,
+  on the single-band compressor's own gain computer. A bypassed band leaves
+  its detector where it was, so switching bypass off does not dump a stale
+  gain. Four factory presets.
+
 ### Instruments — INCDAW Drum — 2026-08-23
 
 - **Sixteen pads, every voice synthesised.** Kick, snare, hat, clap, tom and

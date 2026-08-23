@@ -80,7 +80,8 @@ add_executable(incdaw_tests
     unit/WavetableTests.cpp
     unit/WavetableSynthTests.cpp
     unit/FmSynthTests.cpp
-    unit/DrumMachineTests.cpp)
+    unit/DrumMachineTests.cpp
+    unit/MultibandTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.

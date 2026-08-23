@@ -3,6 +3,7 @@
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/EffectPresets.h"
 #include "engine/dsp/effects/ModulationEffects.h"
+#include "engine/dsp/effects/MultibandEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
@@ -65,6 +66,8 @@ const std::vector<CatalogueEntry>& catalogue()
         add("incdaw.phaser",     "Phaser",     [](SampleRate) { return std::make_unique<PhaserEffect>(); });
         add("incdaw.transientsplit", "Transient Split",
             [](SampleRate) { return std::make_unique<TransientSplitEffect>(); });
+        add("incdaw.multiband", "Multiband Compressor",
+            [](SampleRate) { return std::make_unique<MultibandCompressorEffect>(); });
 
         return rows;
     }();

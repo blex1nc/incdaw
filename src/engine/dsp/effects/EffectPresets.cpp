@@ -2,6 +2,7 @@
 
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/ModulationEffects.h"
+#include "engine/dsp/effects/MultibandEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
@@ -317,6 +318,50 @@ constexpr FactoryPreset phaserPresets[] = {
     {"Fast Wobble", phaserFast, std::size(phaserFast)},
 };
 
+// ── Multiband ────────────────────────────────────────────────────────────────
+
+using Multiband = MultibandCompressorEffect;
+
+constexpr PresetValue multibandGlue[] = {
+    {Multiband::crossoverLowHz, 180.0},
+    {Multiband::crossoverHighHz, 2800.0},
+    {Multiband::bandParameter(0, Multiband::bandThresholdDb), -14.0},
+    {Multiband::bandParameter(0, Multiband::bandRatio), 2.0},
+    {Multiband::bandParameter(1, Multiband::bandThresholdDb), -16.0},
+    {Multiband::bandParameter(1, Multiband::bandRatio), 1.8},
+    {Multiband::bandParameter(2, Multiband::bandThresholdDb), -18.0},
+    {Multiband::bandParameter(2, Multiband::bandRatio), 2.2},
+    {Multiband::outputDb, 2.0},
+};
+constexpr PresetValue multibandTameLows[] = {
+    {Multiband::crossoverLowHz, 120.0},
+    {Multiband::bandParameter(0, Multiband::bandThresholdDb), -20.0},
+    {Multiband::bandParameter(0, Multiband::bandRatio), 4.0},
+    {Multiband::bandParameter(0, Multiband::bandAttackMs), 30.0},
+    {Multiband::bandParameter(0, Multiband::bandReleaseMs), 300.0},
+};
+constexpr PresetValue multibandDeHarsh[] = {
+    {Multiband::crossoverHighHz, 4000.0},
+    {Multiband::bandParameter(2, Multiband::bandThresholdDb), -26.0},
+    {Multiband::bandParameter(2, Multiband::bandRatio), 5.0},
+    {Multiband::bandParameter(2, Multiband::bandAttackMs), 1.0},
+    {Multiband::bandParameter(2, Multiband::bandReleaseMs), 60.0},
+};
+constexpr PresetValue multibandPump[] = {
+    {Multiband::bandParameter(0, Multiband::bandThresholdDb), -24.0},
+    {Multiband::bandParameter(0, Multiband::bandRatio), 8.0},
+    {Multiband::bandParameter(0, Multiband::bandAttackMs), 5.0},
+    {Multiband::bandParameter(0, Multiband::bandReleaseMs), 250.0},
+    {Multiband::bandParameter(0, Multiband::bandMakeupDb), 4.0},
+};
+
+constexpr FactoryPreset multibandPresets[] = {
+    {"Bus Glue",     multibandGlue,     std::size(multibandGlue)},
+    {"Tame the Low", multibandTameLows, std::size(multibandTameLows)},
+    {"De-Harsh",     multibandDeHarsh,  std::size(multibandDeHarsh)},
+    {"Low Pump",     multibandPump,     std::size(multibandPump)},
+};
+
 struct Row {
     std::string_view   uid;
     FactoryPresetTable table;
@@ -341,6 +386,7 @@ constexpr Row rows[] = {
     {"incdaw.flanger",        {flangerPresets,    std::size(flangerPresets)}},
     {"incdaw.phaser",         {phaserPresets,     std::size(phaserPresets)}},
     {"incdaw.transientsplit", {transientPresets,  std::size(transientPresets)}},
+    {"incdaw.multiband",      {multibandPresets,  std::size(multibandPresets)}},
 };
 
 } // namespace

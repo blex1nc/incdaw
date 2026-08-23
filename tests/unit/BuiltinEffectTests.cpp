@@ -169,6 +169,15 @@ TEST_CASE("every effect at its transparent settings passes the signal bit-exact"
         nullThrough(std::move(node));
     }
 
+    SUBCASE("multiband at ratio 1")
+    {
+        // The split's sum is an allpass — flat, but phase-shifted — so a
+        // multiband that is doing nothing must skip the split entirely if it
+        // is to pass the signal through untouched. That short circuit is what
+        // this subcase holds it to.
+        nullThrough(makeBuiltinEffect("incdaw.multiband", 48000.0));
+    }
+
     SUBCASE("reverb at mix zero")
     {
         auto node = makeBuiltinEffect("incdaw.reverb", 48000.0);
