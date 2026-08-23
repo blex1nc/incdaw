@@ -4,6 +4,7 @@
 #include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/MultibandEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
+#include "engine/dsp/effects/StereoEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
 
@@ -399,6 +400,36 @@ constexpr FactoryPreset deEsserPresets[] = {
     {"Wideband",      deEsserWideband, std::size(deEsserWideband)},
 };
 
+// ── Stereo imager ────────────────────────────────────────────────────────────
+
+using Imager = StereoImagerEffect;
+
+constexpr PresetValue imagerWideTop[] = {
+    {Imager::highWidth, 1.5},
+    {Imager::midWidth, 1.15},
+    {Imager::monoBelowHz, 120.0},
+};
+constexpr PresetValue imagerMonoBass[] = {
+    {Imager::monoBelowHz, 140.0},
+};
+constexpr PresetValue imagerNarrow[] = {
+    {Imager::lowWidth, 0.6},
+    {Imager::midWidth, 0.7},
+    {Imager::highWidth, 0.85},
+};
+constexpr PresetValue imagerMonoCheck[] = {
+    {Imager::lowWidth, 0.0},
+    {Imager::midWidth, 0.0},
+    {Imager::highWidth, 0.0},
+};
+
+constexpr FactoryPreset imagerPresets[] = {
+    {"Wide Top",   imagerWideTop,   std::size(imagerWideTop)},
+    {"Mono Bass",  imagerMonoBass,  std::size(imagerMonoBass)},
+    {"Narrower",   imagerNarrow,    std::size(imagerNarrow)},
+    {"Mono Check", imagerMonoCheck, std::size(imagerMonoCheck)},
+};
+
 struct Row {
     std::string_view   uid;
     FactoryPresetTable table;
@@ -425,6 +456,7 @@ constexpr Row rows[] = {
     {"incdaw.transientsplit", {transientPresets,  std::size(transientPresets)}},
     {"incdaw.multiband",      {multibandPresets,  std::size(multibandPresets)}},
     {"incdaw.deesser",        {deEsserPresets,    std::size(deEsserPresets)}},
+    {"incdaw.imager",         {imagerPresets,     std::size(imagerPresets)}},
 };
 
 } // namespace

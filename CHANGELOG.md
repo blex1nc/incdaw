@@ -8,6 +8,21 @@ public version yet.
 
 ## [Unreleased]
 
+### Effects — Stereo Imager — 2026-08-23
+
+- **Width per band, because one width knob cannot say what a mix needs.**
+  A mixer strip already has a stereo-separation control and this is not a
+  second one: bass wants to be mono and the top wants to be wide, and a
+  single number cannot say both. Three bands over the shared Linkwitz-Riley
+  tree, a width each, plus a mono-below frequency for the case where a
+  centred bottom end is all that is wanted.
+- **A correlation meter, which is the picture.** It reads the OUTPUT, so it
+  answers the question it is actually asked: will what just left here
+  survive a mono fold-down. Collapsing an antiphase signal takes it from
+  -1 to +1 in the same block.
+- **Width 1 on every band is bit-exact**, by skipping the split rather than
+  by trusting an allpass sum to be an identity. Four factory presets.
+
 ### Effects — De-Esser — 2026-08-23
 
 - **Two ways to build one, because they are different tools.** Split band

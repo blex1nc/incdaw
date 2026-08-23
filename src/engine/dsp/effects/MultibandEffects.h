@@ -22,7 +22,7 @@
 // nothing skips the split entirely and passes the signal through untouched.
 
 #include "engine/dsp/effects/BuiltinEffect.h"
-#include "engine/dsp/effects/ToneEffects.h"
+#include "engine/dsp/effects/Crossover.h"
 
 #include <array>
 #include <atomic>
@@ -77,32 +77,7 @@ public:
     }
 
 private:
-    /// One biquad's state, transposed direct form II — the same form the EQ
-    /// uses, so the two cannot disagree about what a biquad is.
-    struct Section {
-        double z1 = 0.0, z2 = 0.0;
-
-        [[nodiscard]] double step(const BiquadCoefficients& c, double input) noexcept
-        {
-            const double output = c.b0 * input + z1;
-            z1 = c.b1 * input - c.a1 * output + z2;
-            z2 = c.b2 * input - c.a2 * output;
-            return output;
-        }
-    };
-
-    /// A fourth-order Linkwitz-Riley half: two identical Butterworth sections
-    /// in series.
-    struct Pair {
-        Section first, second;
-
-        [[nodiscard]] double step(const BiquadCoefficients& c, double input) noexcept
-        {
-            return second.step(c, first.step(c, input));
-        }
-
-        void reset() noexcept { first = {}; second = {}; }
-    };
+    using Pair = LinkwitzRileyHalf;
 
     struct ChannelState {
         Pair lowSplit, highSplit;         ///< the split at the first crossover
@@ -182,28 +157,13 @@ public:
     }
 
 private:
-    struct Section {
-        double z1 = 0.0, z2 = 0.0;
-
-        [[nodiscard]] double step(const BiquadCoefficients& c, double input) noexcept
-        {
-            const double output = c.b0 * input + z1;
-            z1 = c.b1 * input - c.a1 * output + z2;
-            z2 = c.b2 * input - c.a2 * output;
-            return output;
-        }
-    };
-
     struct ChannelState {
-        Section lowFirst, lowSecond;
-        Section highFirst, highSecond;
+        LinkwitzRileyHalf low, high;
 
         void reset() noexcept
         {
-            lowFirst = {};
-            lowSecond = {};
-            highFirst = {};
-            highSecond = {};
+            low.reset();
+            high.reset();
         }
     };
 

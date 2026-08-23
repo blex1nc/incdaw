@@ -1,5 +1,7 @@
 #include "engine/dsp/effects/MultibandEffects.h"
 
+#include "engine/dsp/effects/Crossover.h"
+
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -10,45 +12,6 @@ namespace incdaw::engine::dsp {
 namespace {
 
 constexpr double pi = std::numbers::pi;
-
-/// Butterworth Q. Two of these in series make one Linkwitz-Riley fourth-order
-/// half, and an LR4 lowpass and highpass sum to an allpass — which is the
-/// only reason a three-band split can be flat.
-constexpr double butterworthQ = 0.70710678118654752;
-
-[[nodiscard]] BiquadCoefficients butterworthLowpass(double frequency, SampleRate rate) noexcept
-{
-    const double w0    = 2.0 * pi * std::clamp(frequency, 10.0, rate * 0.45) / rate;
-    const double cosw  = std::cos(w0);
-    const double alpha = std::sin(w0) / (2.0 * butterworthQ);
-
-    const double a0 = 1.0 + alpha;
-
-    BiquadCoefficients c;
-    c.b0 = ((1.0 - cosw) * 0.5) / a0;
-    c.b1 = (1.0 - cosw) / a0;
-    c.b2 = c.b0;
-    c.a1 = (-2.0 * cosw) / a0;
-    c.a2 = (1.0 - alpha) / a0;
-    return c;
-}
-
-[[nodiscard]] BiquadCoefficients butterworthHighpass(double frequency, SampleRate rate) noexcept
-{
-    const double w0    = 2.0 * pi * std::clamp(frequency, 10.0, rate * 0.45) / rate;
-    const double cosw  = std::cos(w0);
-    const double alpha = std::sin(w0) / (2.0 * butterworthQ);
-
-    const double a0 = 1.0 + alpha;
-
-    BiquadCoefficients c;
-    c.b0 = ((1.0 + cosw) * 0.5) / a0;
-    c.b1 = -(1.0 + cosw) / a0;
-    c.b2 = c.b0;
-    c.a1 = (-2.0 * cosw) / a0;
-    c.a2 = (1.0 - alpha) / a0;
-    return c;
-}
 
 /// One-pole smoothing coefficient for a time constant in milliseconds. The
 /// same formula the single-band compressor uses; it is four lines, and two
@@ -363,9 +326,8 @@ void DeEsserEffect::process(const ProcessContext& context) noexcept
 
             const double input = static_cast<double>(context.output.channel(channel)[frame]);
 
-            low[channel]  = state.lowSecond.step(lowpass_, state.lowFirst.step(lowpass_, input));
-            high[channel] =
-                state.highSecond.step(highpass_, state.highFirst.step(highpass_, input));
+            low[channel]  = state.low.step(lowpass_, input);
+            high[channel] = state.high.step(highpass_, input);
 
             peak = std::max(peak, std::fabs(high[channel]));
         }
