@@ -305,3 +305,146 @@ TEST_CASE("the meter reports what each band reduced")
     CHECK(effect.gainReductionDb(1) > 6.0);
     CHECK(effect.gainReductionDb(0) == doctest::Approx(0.0).epsilon(0.001));
 }
+
+// ── The de-esser ─────────────────────────────────────────────────────────────
+
+namespace {
+
+std::unique_ptr<Node> deEsser(double frequency, double threshold, double ratio, double range)
+{
+    auto node = makeBuiltinEffect("incdaw.deesser", sampleRate);
+    REQUIRE(node != nullptr);
+
+    ParameterSink* sink = node->parameterSink();
+    sink->setParameter(DeEsserEffect::frequencyHz, frequency);
+    sink->setParameter(DeEsserEffect::thresholdDb, threshold);
+    sink->setParameter(DeEsserEffect::ratio, ratio);
+    sink->setParameter(DeEsserEffect::rangeDb, range);
+    sink->setParameter(DeEsserEffect::attackMs, 0.5);
+    sink->setParameter(DeEsserEffect::releaseMs, 500.0);
+
+    return node;
+}
+
+std::vector<Sample> mix(const std::vector<Sample>& a, const std::vector<Sample>& b)
+{
+    std::vector<Sample> sum(a.size(), 0.0f);
+    for (std::size_t index = 0; index < a.size(); ++index)
+        sum[index] = a[index] + b[index];
+
+    return sum;
+}
+
+} // namespace
+
+TEST_CASE("the de-esser is in the catalogue with presets")
+{
+    const BuiltinEffectInfo* info = findBuiltinEffect("incdaw.deesser");
+    REQUIRE(info != nullptr);
+
+    CHECK(info->parameterCount == 8);
+    CHECK(info->presets.count >= 3);
+}
+
+TEST_CASE("split band leaves the body of the voice alone")
+{
+    const std::vector<Sample> body = sine(220.0, 0.4, 48000);
+
+    std::unique_ptr<Node>     node   = deEsser(6000.0, -40.0, 10.0, 20.0);
+    const std::vector<Sample> output = processThrough(*node, body);
+
+    // Nothing above 6 kHz to detect, so nothing happens — and the crossover's
+    // two halves sum back to what went in.
+    CHECK(peakOf(output, 24000) == doctest::Approx(peakOf(body, 24000)).epsilon(0.01));
+}
+
+TEST_CASE("split band pulls sibilance down and nothing else")
+{
+    const std::vector<Sample> voice = mix(sine(220.0, 0.4, 48000), sine(9000.0, 0.4, 48000));
+
+    std::unique_ptr<Node>     node   = deEsser(6000.0, -30.0, 8.0, 20.0);
+    const std::vector<Sample> output = processThrough(*node, voice);
+
+    // The sum is quieter than the input, because half of it was reduced...
+    CHECK(peakOf(output, 24000) < peakOf(voice, 24000) * 0.95);
+
+    // ...and what is left is dominated by the untouched low tone.
+    const std::vector<Sample> lowAlone = sine(220.0, 0.4, 48000);
+    CHECK(peakOf(output, 24000) > peakOf(lowAlone, 24000) * 0.9);
+}
+
+TEST_CASE("the range caps how much an s can be pulled back")
+{
+    constexpr double amplitude = 0.8;
+    constexpr double range     = 6.0;
+
+    // Well above the crossover, so the tone is essentially all in the band
+    // being reduced and the measurement is of the cap rather than of the
+    // filter's skirt.
+    const std::vector<Sample> sibilance = sine(14000.0, amplitude, 48000);
+
+    // Threshold far below and a hard ratio: without the cap this would be
+    // reduced by more than forty decibels.
+    std::unique_ptr<Node>     node   = deEsser(4000.0, -50.0, 20.0, range);
+    const std::vector<Sample> output = processThrough(*node, sibilance);
+
+    const double expected = amplitude * std::pow(10.0, -range / 20.0);
+
+    CAPTURE(expected);
+    CHECK(peakOf(output, 24000) == doctest::Approx(expected).epsilon(0.03));
+}
+
+TEST_CASE("wideband ducks the whole signal, split band does not")
+{
+    const std::vector<Sample> voice = mix(sine(220.0, 0.4, 48000), sine(9000.0, 0.4, 48000));
+
+    const auto lowContentAfter = [&voice](int mode) {
+        std::unique_ptr<Node> node = deEsser(6000.0, -30.0, 8.0, 20.0);
+        node->parameterSink()->setParameter(DeEsserEffect::mode, static_cast<double>(mode));
+
+        const std::vector<Sample> output = processThrough(*node, voice);
+
+        // The low tone's own contribution, isolated by its RMS over a stretch
+        // long enough for the 9 kHz partner to average out of the estimate.
+        return rmsOf(output, 24000);
+    };
+
+    CHECK(lowContentAfter(DeEsserEffect::wideband)
+          < lowContentAfter(DeEsserEffect::splitBand) * 0.95);
+}
+
+TEST_CASE("listen hands over what the detector hears")
+{
+    const std::vector<Sample> voice = mix(sine(220.0, 0.4, 48000), sine(9000.0, 0.4, 48000));
+
+    auto node = makeBuiltinEffect("incdaw.deesser", sampleRate);
+    node->parameterSink()->setParameter(DeEsserEffect::listen, 1.0);
+    node->parameterSink()->setParameter(DeEsserEffect::frequencyHz, 3000.0);
+
+    const std::vector<Sample> output = processThrough(*node, voice);
+
+    // The 220 Hz half is gone — four octaves below a fourth-order highpass is
+    // ninety decibels down — and the 9 kHz half is through at full level.
+    CHECK(peakOf(output, 24000) == doctest::Approx(0.4).epsilon(0.03));
+}
+
+TEST_CASE("the de-esser's split sums flat when it is not reducing")
+{
+    for (const double frequency : {200.0, 3000.0, 6000.0, 9000.0, 14000.0}) {
+        const std::vector<Sample> input = sine(frequency, 0.25, 24000);
+
+        // Ratio above 1 so the split runs, threshold at 0 dBFS so it never
+        // reduces: the crossover on its own.
+        auto node = makeBuiltinEffect("incdaw.deesser", sampleRate);
+        node->parameterSink()->setParameter(DeEsserEffect::ratio, 4.0);
+        node->parameterSink()->setParameter(DeEsserEffect::thresholdDb, 0.0);
+
+        const std::vector<Sample> output = processThrough(*node, input);
+
+        const double measuredDb = 20.0 * std::log10(rmsOf(output, 8000) / rmsOf(input, 8000));
+
+        CAPTURE(frequency);
+        CAPTURE(measuredDb);
+        CHECK(std::fabs(measuredDb) < 0.05);
+    }
+}

@@ -178,6 +178,11 @@ TEST_CASE("every effect at its transparent settings passes the signal bit-exact"
         nullThrough(makeBuiltinEffect("incdaw.multiband", 48000.0));
     }
 
+    SUBCASE("de-esser at ratio 1")
+    {
+        nullThrough(makeBuiltinEffect("incdaw.deesser", 48000.0));
+    }
+
     SUBCASE("reverb at mix zero")
     {
         auto node = makeBuiltinEffect("incdaw.reverb", 48000.0);

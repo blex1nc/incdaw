@@ -362,6 +362,43 @@ constexpr FactoryPreset multibandPresets[] = {
     {"Low Pump",     multibandPump,     std::size(multibandPump)},
 };
 
+// ── De-esser ─────────────────────────────────────────────────────────────────
+
+constexpr PresetValue deEsserVocal[] = {
+    {DeEsserEffect::frequencyHz, 6500.0},
+    {DeEsserEffect::thresholdDb, -28.0},
+    {DeEsserEffect::ratio, 4.0},
+    {DeEsserEffect::rangeDb, 8.0},
+};
+constexpr PresetValue deEsserHarsh[] = {
+    {DeEsserEffect::frequencyHz, 5000.0},
+    {DeEsserEffect::thresholdDb, -34.0},
+    {DeEsserEffect::ratio, 8.0},
+    {DeEsserEffect::rangeDb, 14.0},
+    {DeEsserEffect::attackMs, 0.5},
+};
+constexpr PresetValue deEsserGentle[] = {
+    {DeEsserEffect::frequencyHz, 7500.0},
+    {DeEsserEffect::thresholdDb, -22.0},
+    {DeEsserEffect::ratio, 2.5},
+    {DeEsserEffect::rangeDb, 5.0},
+    {DeEsserEffect::releaseMs, 120.0},
+};
+constexpr PresetValue deEsserWideband[] = {
+    {DeEsserEffect::mode, static_cast<double>(DeEsserEffect::wideband)},
+    {DeEsserEffect::frequencyHz, 6000.0},
+    {DeEsserEffect::thresholdDb, -26.0},
+    {DeEsserEffect::ratio, 3.0},
+    {DeEsserEffect::rangeDb, 6.0},
+};
+
+constexpr FactoryPreset deEsserPresets[] = {
+    {"Vocal",         deEsserVocal,    std::size(deEsserVocal)},
+    {"Harsh Sibilance", deEsserHarsh,  std::size(deEsserHarsh)},
+    {"Gentle",        deEsserGentle,   std::size(deEsserGentle)},
+    {"Wideband",      deEsserWideband, std::size(deEsserWideband)},
+};
+
 struct Row {
     std::string_view   uid;
     FactoryPresetTable table;
@@ -387,6 +424,7 @@ constexpr Row rows[] = {
     {"incdaw.phaser",         {phaserPresets,     std::size(phaserPresets)}},
     {"incdaw.transientsplit", {transientPresets,  std::size(transientPresets)}},
     {"incdaw.multiband",      {multibandPresets,  std::size(multibandPresets)}},
+    {"incdaw.deesser",        {deEsserPresets,    std::size(deEsserPresets)}},
 };
 
 } // namespace

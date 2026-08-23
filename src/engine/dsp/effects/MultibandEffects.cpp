@@ -123,6 +123,21 @@ static_assert(descriptorCount == networkCount
     return networkCount + band * perBandCount + static_cast<std::size_t>(offset);
 }
 
+// ── The de-esser's table ─────────────────────────────────────────────────────
+
+constexpr EffectParameter deEsserDescriptors[] = {
+    {DeEsserEffect::frequencyHz, "Frequency", 2000.0, 16000.0, 6000.0, false},
+    {DeEsserEffect::thresholdDb, "Threshold",  -60.0,     0.0,    0.0, false},
+    {DeEsserEffect::ratio,       "Ratio",        1.0,    20.0,    1.0, false},
+    {DeEsserEffect::attackMs,    "Attack",       0.1,    50.0,    1.0, false},
+    {DeEsserEffect::releaseMs,   "Release",      1.0,   500.0,   60.0, false},
+    {DeEsserEffect::rangeDb,     "Range",        0.0,    30.0,   12.0, false},
+    {DeEsserEffect::mode,        "Mode",         0.0,     1.0,    0.0, true},
+    {DeEsserEffect::listen,      "Listen",       0.0,     1.0,    0.0, true},
+};
+
+constexpr std::size_t deEsserCount = std::size(deEsserDescriptors);
+
 } // namespace
 
 MultibandCompressorEffect::MultibandCompressorEffect()
@@ -287,6 +302,104 @@ void MultibandCompressorEffect::process(const ProcessContext& context) noexcept
 
     for (std::size_t band = 0; band < bandCount; ++band)
         reduction_[band].store(-worstReduction[band], std::memory_order_relaxed);
+}
+
+// ── DeEsserEffect ────────────────────────────────────────────────────────────
+
+DeEsserEffect::DeEsserEffect() : BuiltinEffect(deEsserDescriptors, deEsserCount) {}
+
+void DeEsserEffect::prepare(SampleRate sampleRate, FrameCount maxBlockSize)
+{
+    (void)maxBlockSize;
+    sampleRate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+
+    for (ChannelState& channel : channels_)
+        channel.reset();
+
+    envelope_ = 1.0;
+    cachedHz_ = -1.0;
+}
+
+void DeEsserEffect::process(const ProcessContext& context) noexcept
+{
+    sumInputsInto(context);
+
+    const double ratioValue = std::max(1.0, valueAt(2));
+    const bool   listening  = valueAt(7) >= 0.5;
+
+    // Same structural rule as the multiband: the split's sum is an allpass,
+    // so a de-esser that is not reducing must not run the split at all if it
+    // is to pass the signal through untouched.
+    if (ratioValue == 1.0 && !listening)
+        return;
+
+    const double frequency = valueAt(0);
+    if (frequency != cachedHz_) {
+        lowpass_  = butterworthLowpass(frequency, sampleRate_);
+        highpass_ = butterworthHighpass(frequency, sampleRate_);
+        cachedHz_ = frequency;
+    }
+
+    const double threshold = valueAt(1);
+    const double attack    = coefficientFor(valueAt(3), sampleRate_);
+    const double release   = coefficientFor(valueAt(4), sampleRate_);
+    const double range     = valueAt(5);
+    const bool   split     = static_cast<int>(valueAt(6)) == splitBand;
+
+    const double slope   = 1.0 / ratioValue - 1.0;
+    const double floorDb = -std::max(range, 0.0);
+
+    const std::size_t channels = std::min(context.output.channelCount(), maxChannels);
+
+    double worstReduction = 0.0;
+
+    for (FrameCount frame = 0; frame < context.frameCount; ++frame) {
+        double low[maxChannels]  = {};
+        double high[maxChannels] = {};
+        double peak = 0.0;
+
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+            ChannelState& state = channels_[channel];
+
+            const double input = static_cast<double>(context.output.channel(channel)[frame]);
+
+            low[channel]  = state.lowSecond.step(lowpass_, state.lowFirst.step(lowpass_, input));
+            high[channel] =
+                state.highSecond.step(highpass_, state.highFirst.step(highpass_, input));
+
+            peak = std::max(peak, std::fabs(high[channel]));
+        }
+
+        const double peakDb = peak > 1.0e-10 ? 20.0 * std::log10(peak) : -200.0;
+        const double overDb = peakDb - threshold;
+
+        // The range cap is what makes this a de-esser rather than a
+        // compressor with a filtered key: an "s" is pulled back, not deleted.
+        const double reductionDb =
+            overDb > 0.0 ? std::max(overDb * slope, floorDb) : 0.0;
+
+        const double target      = dbToGain(reductionDb);
+        const double coefficient = target < envelope_ ? attack : release;
+        envelope_ = target + coefficient * (envelope_ - target);
+
+        worstReduction =
+            std::min(worstReduction, 20.0 * std::log10(std::max(1.0e-10, envelope_)));
+
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+            double value = 0.0;
+
+            if (listening)
+                value = high[channel];
+            else if (split)
+                value = low[channel] + high[channel] * envelope_;
+            else
+                value = (low[channel] + high[channel]) * envelope_;
+
+            context.output.channel(channel)[frame] = static_cast<Sample>(value);
+        }
+    }
+
+    reduction_.store(-worstReduction, std::memory_order_relaxed);
 }
 
 double multibandSumMagnitudeDb(double lowHz, double highHz, SampleRate sampleRate,

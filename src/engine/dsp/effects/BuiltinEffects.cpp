@@ -68,6 +68,8 @@ const std::vector<CatalogueEntry>& catalogue()
             [](SampleRate) { return std::make_unique<TransientSplitEffect>(); });
         add("incdaw.multiband", "Multiband Compressor",
             [](SampleRate) { return std::make_unique<MultibandCompressorEffect>(); });
+        add("incdaw.deesser",   "De-Esser",
+            [](SampleRate) { return std::make_unique<DeEsserEffect>(); });
 
         return rows;
     }();

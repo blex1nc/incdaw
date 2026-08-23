@@ -8,6 +8,21 @@ public version yet.
 
 ## [Unreleased]
 
+### Effects — De-Esser — 2026-08-23
+
+- **Two ways to build one, because they are different tools.** Split band
+  divides the signal at the sibilance frequency and compresses only the
+  upper half — surgical, and the halves sum through the same Linkwitz-Riley
+  allpass identity the multiband uses, so the network is flat to 0.05 dB.
+  Wideband detects through the same highpass but applies the gain to
+  everything, which is more natural on a voice that is sibilant because it
+  is loud.
+- **A range cap, which is what separates this from a compressor with a
+  filtered key.** An "s" twenty decibels over threshold gets pulled back,
+  not deleted.
+- **Listen** hands over exactly what the detector hears, so the frequency
+  can be found by ear rather than guessed. Four factory presets.
+
 ### Effects — Multiband Compressor — 2026-08-23
 
 - **Three bands over a Linkwitz-Riley tree that sums flat.** The crossover

@@ -135,6 +135,88 @@ private:
     std::array<std::atomic<double>, bandCount>     reduction_{};
 };
 
+/// De-esser (A7) — a compressor that only hears sibilance.
+///
+/// Two ways to build one, and this has both because they are genuinely
+/// different tools rather than two spellings of one:
+///
+///   · SPLIT band. The signal is divided at the sibilance frequency and only
+///     the upper half is compressed. Surgical — the body of the voice is
+///     untouched — and the halves sum through the same Linkwitz-Riley
+///     allpass identity the multiband uses, so the network is flat.
+///
+///   · WIDEBAND. The detector still listens through the highpass, but the
+///     gain is applied to everything. Less surgical and more natural on a
+///     voice that is sibilant because it is loud.
+///
+/// `rangeDb` caps the reduction. That cap is what separates a de-esser from
+/// a compressor with a sidechain filter: an "s" that is 20 dB over threshold
+/// should be pulled back, not deleted.
+class DeEsserEffect final : public BuiltinEffect {
+public:
+    static constexpr std::size_t maxChannels = 8;
+
+    enum Param : std::uint32_t {
+        frequencyHz = 0,
+        thresholdDb = 1,
+        ratio       = 2,
+        attackMs    = 3,
+        releaseMs   = 4,
+        rangeDb     = 5,
+        mode        = 6,   ///< 0 split band · 1 wideband
+        listen      = 7,   ///< monitor what the detector hears
+    };
+
+    enum Mode : int { splitBand = 0, wideband = 1 };
+
+    DeEsserEffect();
+
+    void prepare(SampleRate sampleRate, FrameCount maxBlockSize) override;
+    void process(const ProcessContext& context) noexcept override;
+
+    [[nodiscard]] const char* name() const noexcept override { return "De-Esser"; }
+
+    [[nodiscard]] double gainReductionDb() const noexcept
+    {
+        return reduction_.load(std::memory_order_relaxed);
+    }
+
+private:
+    struct Section {
+        double z1 = 0.0, z2 = 0.0;
+
+        [[nodiscard]] double step(const BiquadCoefficients& c, double input) noexcept
+        {
+            const double output = c.b0 * input + z1;
+            z1 = c.b1 * input - c.a1 * output + z2;
+            z2 = c.b2 * input - c.a2 * output;
+            return output;
+        }
+    };
+
+    struct ChannelState {
+        Section lowFirst, lowSecond;
+        Section highFirst, highSecond;
+
+        void reset() noexcept
+        {
+            lowFirst = {};
+            lowSecond = {};
+            highFirst = {};
+            highSecond = {};
+        }
+    };
+
+    BiquadCoefficients lowpass_{}, highpass_{};
+    double             cachedHz_ = -1.0;
+
+    std::array<ChannelState, maxChannels> channels_{};
+    double                                envelope_ = 1.0;
+
+    SampleRate          sampleRate_ = 48000.0;
+    std::atomic<double> reduction_{0.0};
+};
+
 /// Splits the three-band network's crossover response for a UI or a test:
 /// the summed magnitude of the network at `frequency`, in dB, designed with
 /// the same code the audio thread runs.
