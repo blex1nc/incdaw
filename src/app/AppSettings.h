@@ -77,6 +77,15 @@ struct AppSettings {
     /// does not understand reads as "off" rather than as something arbitrary.
     std::string midiClockRole = "off";
 
+    /// Whether an MPE controller may announce itself and be decoded per note
+    /// (engine/midi/MpeDecoder.h).
+    ///
+    /// Off, and that is a cost decision: a decoder that might be configured at
+    /// any moment has to examine every block, and most sessions have an
+    /// ordinary keyboard attached or nothing at all. On, the controller's own
+    /// configuration message does the rest.
+    bool midiAcceptMpe = false;
+
     /// Where the window was, and what it was showing.
     struct Workspace {
         /// All four zero means "never placed" — the window centres itself.

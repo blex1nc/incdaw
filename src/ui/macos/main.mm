@@ -1929,6 +1929,15 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         clockRole = engine::MidiClockRole::receive;
 
     _audio->setMidiClockRole(clockRole);
+
+    // MPE. The controller's own configuration message does the rest, which is
+    // what makes an MPE keyboard work when plugged in rather than after being
+    // described (engine/midi/MpeDecoder.h).
+    _audio->mpe().setConfigurationMessagesHonoured(_settings.midiAcceptMpe);
+
+    if (!_settings.midiAcceptMpe)
+        _audio->mpe().setZones(engine::MpeZone{engine::MpeZoneKind::lower, 0, 48.0, 2.0},
+                               engine::MpeZone{engine::MpeZoneKind::upper, 0, 48.0, 2.0});
 }
 
 // ── The update check ─────────────────────────────────────────────────────────

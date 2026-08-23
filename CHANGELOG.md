@@ -8,6 +8,48 @@ public version yet.
 
 ## [Unreleased]
 
+### MIDI — MPE, decoded at last — 2026-08-23
+
+The MIDI representation has been described as MPE-ready since Phase 5 and
+nothing decoded it. An MPE controller reached INCDAW as fifteen channels
+of unrelated monophonic keyboard: every glide read as a whole-zone bend,
+and pressure landing on whichever notes happened to share a channel.
+
+- **The association.** A member channel carries one note at a time, so
+  that channel's pitch bend, channel pressure and CC 74 belong to *that*
+  note. `engine::MpeDecoder` makes that association and emits it as a
+  stream of per-note events beside the MIDI, not instead of it.
+- **Every note gets an id.** A member channel is reused the instant its
+  note ends, so channel-and-key does not identify a note across time —
+  two notes on one key in quick succession are the same note to anything
+  keyed on the pair, and the second one's expression lands on the first
+  one's voice.
+- **A note starts already shaped.** Controllers send bend and timbre
+  *before* the note-on for exactly that reason; a decoder that forwarded
+  only changes would start every note flat and correct it a moment later,
+  which is audible as a click into position.
+- **Pitch is reported in semitones**, scaled by the zone's own bend range.
+  A controller using ±96 read as the MPE default ±48 reports every glide
+  at half size — in tune with nothing, and consistently so.
+- **Both zones, with the right arithmetic.** The lower zone's master is
+  channel 1 counting up; the upper zone's is channel 16 counting *down*.
+  A fifteen-member lower zone leaves channel 16 a member and no upper
+  master — reading it as one would silently drop every note played on the
+  top channel.
+- **The controller configures itself.** An MPE Configuration Message
+  (RPN 6) on a master channel sets the zone, and RPN 0 sets the bend
+  range, so a keyboard works when plugged in rather than after being
+  described. Settings → MIDI has one checkbox to allow it; off, the
+  decoder never sees a block.
+
+**Not included, by instruction and by boundary** — the instruments. The
+decoded expression reaches `AudioEngine::lastBlockMpe()` and stops there,
+because `SimpleSynth::Voice` and `Sampler::Voice` have no per-note pitch,
+pressure or timbre input to receive it. Adding one means editing the
+instruments, which belong to another track. **The exact requirement is in
+this session's report.**
+
+
 ### Hardware — INCDAW notices when the machine changes — 2026-08-23
 
 - **A keyboard plugged in mid-session now plays.** The system has always

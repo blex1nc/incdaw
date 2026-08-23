@@ -10,6 +10,7 @@
 #include "engine/midi/MidiClock.h"
 #include "engine/midi/MidiFeedback.h"
 #include "engine/midi/MidiOutput.h"
+#include "engine/midi/MpeDecoder.h"
 #include "engine/transport/Transport.h"
 #include "platform/AudioDevice.h"
 
@@ -190,6 +191,18 @@ public:
         midiClockInput_.setRole(role);
     }
 
+    /// MPE decoding. Off until a zone is configured — from Settings or by the
+    /// controller itself — and free when off.
+    [[nodiscard]] MpeDecoder&       mpe()       noexcept { return mpe_; }
+    [[nodiscard]] const MpeDecoder& mpe() const noexcept { return mpe_; }
+
+    /// The per-note expression decoded for the block just rendered.
+    ///
+    /// Runs beside `lastBlockMidi` rather than replacing it: the MIDI is still
+    /// delivered to instruments unchanged, and this says what it MEANT — which
+    /// note each member channel's bend, pressure and timbre belong to.
+    [[nodiscard]] const MpeEventBuffer& lastBlockMpe() const noexcept { return blockMpe_; }
+
     /// The messages collected for the block just rendered. Read from the audio
     /// thread by nodes; exposed here for diagnostics and tests.
     [[nodiscard]] const MidiBuffer& lastBlockMidi() const noexcept { return blockMidi_; }
@@ -244,6 +257,8 @@ private:
     MidiClockGenerator                     midiClock_;
     MidiClockReceiver                      midiClockInput_;
     MidiFeedback                           midiFeedback_;
+    MpeDecoder                             mpe_;
+    MpeEventBuffer                         blockMpe_;
     MidiBuffer                             blockMidi_;
     MidiBuffer                             outputMidi_;   ///< what this block sends out
     MidiBuffer                             segmentMidi_;

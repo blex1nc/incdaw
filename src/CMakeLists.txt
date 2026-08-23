@@ -71,6 +71,7 @@ add_library(incdaw_engine STATIC
     engine/midi/MidiOutput.cpp
     engine/midi/MidiClock.cpp
     engine/midi/MidiFeedback.cpp
+    engine/midi/MpeDecoder.cpp
     engine/midi/SmfFile.cpp
     engine/midi/MidiRecorder.cpp
     engine/midi/NoteSequence.cpp

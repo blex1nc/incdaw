@@ -157,6 +157,8 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
     midiOutput_.resetCounters();
     midiClock_.reset();
     midiClockInput_.reset();
+    mpe_.reset();
+    blockMpe_.clear();
     outputMidi_.clear();
 
     // The sender thread lives exactly as long as the device does: nothing can
@@ -218,6 +220,14 @@ void AudioEngine::renderAudioBlock(float* const* outputChannels, std::size_t cha
     const SampleRate blockRate = device_ != nullptr ? device_->actualSampleRate() : 0.0;
 
     midiInput_.collectForBlock(blockMidi_, blockHostTimeNanos, frameCount, blockRate);
+
+    // Per-note expression, decoded from the same block. Skipped entirely with
+    // no zone configured, which is the common case — a MIDI keyboard that is
+    // not an MPE controller costs one atomic load per block.
+    if (mpe_.isListening())
+        mpe_.decode(blockMidi_, blockMpe_);
+    else
+        blockMpe_.clear();
 
     // Before the transport is planned, not after: a start or a locate that
     // arrived in this block should govern the block it arrived in, rather

@@ -131,6 +131,7 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     NSView*        _midiList;
     NSPopUpButton* _midiOutput;
     NSPopUpButton* _midiClockRole;
+    NSButton*      _acceptMpe;
     NSTextField*   _status;
 
     NSMutableArray<NSButton*>* _midiChecks;
@@ -358,6 +359,12 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
 
     [page addSubview:makeLabel(@"MIDI INPUT", NSMakeRect(pageInset, y, 200, rowHeight), YES)];
     y -= rowHeight;
+
+    _acceptMpe = [[NSButton alloc] initWithFrame:NSMakeRect(pageInset, y, 420, rowHeight)];
+    _acceptMpe.buttonType = NSButtonTypeSwitch;
+    _acceptMpe.title      = @"Accept MPE controllers (per-note pitch, pressure and timbre)";
+    [page addSubview:_acceptMpe];
+    y -= rowHeight + 2.0;
 
     _allMidiSources = [[NSButton alloc] initWithFrame:NSMakeRect(pageInset, y, 320, rowHeight)];
     _allMidiSources.buttonType = NSButtonTypeSwitch;
@@ -1107,6 +1114,8 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     [self selectIdentifier:fromUtf8(_settings->midiClockRole)
                    inPopup:_midiClockRole
               missingTitle:@"Off"];
+
+    _acceptMpe.state = _settings->midiAcceptMpe ? NSControlStateValueOn : NSControlStateValueOff;
 }
 
 - (void)rebuildMidiList
@@ -1203,6 +1212,7 @@ NSString* fromUtf8(const std::string& text) { return @(text.c_str()); }
     // and keeps working when the hardware changes.
     _settings->midiOutputIdentifier = [self selectedIdentifierOf:_midiOutput].UTF8String;
     _settings->midiClockRole        = [self selectedIdentifierOf:_midiClockRole].UTF8String;
+    _settings->midiAcceptMpe        = _acceptMpe.state == NSControlStateValueOn;
 
     _settings->midiInputIdentifiers.clear();
     if (_allMidiSources.state != NSControlStateValueOn) {

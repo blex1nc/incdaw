@@ -56,6 +56,7 @@ std::string AppSettings::toJson() const
     midiObject.set("inputs", std::move(inputs));
     midiObject.set("output", midiOutputIdentifier);
     midiObject.set("clockRole", midiClockRole);
+    midiObject.set("acceptMpe", midiAcceptMpe);
     root.set("midi", std::move(midiObject));
 
     Json workspaceObject = Json::object();
@@ -120,6 +121,8 @@ AppSettings AppSettings::fromJson(const std::string& text)
     const std::string clockRole = root["midi"]["clockRole"].asString();
     settings.midiClockRole = (clockRole == "send" || clockRole == "receive") ? clockRole
                                                                               : std::string{"off"};
+
+    settings.midiAcceptMpe = root["midi"]["acceptMpe"].asBool(false);
 
     const Json& workspaceObject = root["workspace"];
     if (workspaceObject.isObject()) {
