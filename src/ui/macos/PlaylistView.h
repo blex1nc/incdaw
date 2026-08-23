@@ -44,6 +44,19 @@ namespace incdaw::app     { class CommandRegistry; }
 /// id — the host opens it in the audio editor.
 @property (nonatomic, copy) void (^onOpenAudioAsset)(unsigned long long);
 
+/// Whether the clips before the start marker are triggered rather than played
+/// in sequence. The host reads this when it compiles, so changing it asks for
+/// a rebuild through `onPerformanceModeChanged`.
+@property (nonatomic, assign) BOOL performanceMode;
+
+/// Called when the mode is switched, so the host can recompile the graph.
+@property (nonatomic, copy) void (^onPerformanceModeChanged)(void);
+
+/// Called when a pad is pressed or released: the track it belongs to, the pad,
+/// and whether it went down. The host resolves it against the compiled graph,
+/// which is the only place that knows which scheduler slot a track is.
+@property (nonatomic, copy) void (^onPerformanceTrigger)(unsigned long long, int, bool);
+
 /// Drops cached clip waveforms. The host calls this after any edit, undo or
 /// redo that may have rewritten an asset's file.
 - (void)invalidateWaveformCache;

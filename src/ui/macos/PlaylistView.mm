@@ -6,6 +6,7 @@
 #include "app/PlaylistModel.h"
 #include "app/commands/ClipCommands.h"
 #include "app/commands/ArrangementCommands.h"
+#include "app/commands/PerformanceCommands.h"
 #include "app/commands/AutomationCommands.h"
 #include "app/commands/ConsolidateCommands.h"
 #include "app/commands/ImportCommands.h"
@@ -179,6 +180,7 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         return;
 
     [self drawArrangementChip];
+    [self drawPerformanceZone];
     [self drawRuler];
     [self drawTracks];
     [self drawClips];
@@ -283,6 +285,48 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     return NSMakeRect(3.0, 3.0, headerWidth - 8.0, rulerHeight - 6.0);
 }
 
+/// The region before the start marker, washed so the two halves of the
+/// timeline read as the two different things they are: one is triggered, the
+/// other is played.
+- (void)drawPerformanceZone
+{
+    const Tick end = project::performanceZoneEnd(*_project);
+    if (end <= 0)
+        return;
+
+    const auto right = static_cast<CGFloat>(_model->tickToX(end)) + headerWidth;
+    if (right <= headerWidth)
+        return;
+
+    const NSRect zone = NSMakeRect(headerWidth, rulerHeight,
+                                   std::min(right, self.bounds.size.width) - headerWidth,
+                                   self.bounds.size.height - rulerHeight);
+
+    fillRect(zone, theme::withAlpha(theme::ink(Ink::accent), _performanceMode ? 0.10 : 0.045));
+
+    // The boundary itself, which is the start marker.
+    fillRect(NSMakeRect(right - 1.0, 0, 2.0, self.bounds.size.height),
+             theme::withAlpha(theme::ink(Ink::accent), 0.9));
+
+    if (_performanceMode)
+        theme::drawText(@"PERFORMANCE",
+                        NSMakeRect(headerWidth + 8.0, rulerHeight + 4.0, 140.0, 12.0),
+                        theme::withAlpha(theme::ink(Ink::accent), 0.9),
+                        theme::labelFont(9.5, NSFontWeightBold));
+}
+
+- (void)setPerformanceMode:(BOOL)mode
+{
+    if (_performanceMode == mode)
+        return;
+
+    _performanceMode = mode;
+    [self setNeedsDisplay:YES];
+
+    if (self.onPerformanceModeChanged != nil)
+        self.onPerformanceModeChanged();
+}
+
 - (void)drawArrangementChip
 {
     const NSRect chip = [self arrangementChipRect];
@@ -317,6 +361,24 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
     [menu addItem:[NSMenuItem separatorItem]];
 
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* performance =
+        [menu addItemWithTitle:_performanceMode ? @"Leave Performance Mode"
+                                                : @"Performance Mode"
+                        action:@selector(togglePerformanceModeFromMenu:)
+                 keyEquivalent:@""];
+    performance.target = self;
+    performance.state  = _performanceMode ? NSControlStateValueOn : NSControlStateValueOff;
+
+    NSMenu* start = [self startMarkerMenu];
+    if (start != nil) {
+        NSMenuItem* item = [menu addItemWithTitle:@"Start Marker" action:nil keyEquivalent:@""];
+        item.submenu = start;
+    }
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem* add = [menu addItemWithTitle:@"New Arrangement"
                                       action:@selector(addArrangementFromMenu:)
                                keyEquivalent:@""];
@@ -342,6 +404,61 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     }
 
     [NSMenu popUpContextMenu:menu withEvent:event forView:self];
+}
+
+/// The markers of this arrangement, plus "None". The one before which the
+/// performance zone lies is ticked.
+- (NSMenu*)startMarkerMenu
+{
+    if (_project->markers().empty())
+        return nil;
+
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    NSMenuItem* none = [menu addItemWithTitle:@"None"
+                                       action:@selector(setStartMarkerFromMenu:)
+                                keyEquivalent:@""];
+    none.target            = self;
+    none.representedObject = @(0ull);
+    none.state = project::performanceZoneEnd(*_project) == 0 ? NSControlStateValueOn
+                                                             : NSControlStateValueOff;
+
+    for (const project::TimelineMarker& marker : _project->markers()) {
+        NSMenuItem* item = [menu addItemWithTitle:@(marker.name.c_str())
+                                           action:@selector(setStartMarkerFromMenu:)
+                                    keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @(marker.id.value());
+        item.state = marker.isStart ? NSControlStateValueOn : NSControlStateValueOff;
+    }
+
+    return menu;
+}
+
+- (void)setStartMarkerFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId marker{[item.representedObject unsignedLongLongValue]};
+
+    if (_registry->execute(std::make_unique<app::SetStartMarkerCommand>(marker))) {
+        [self changed];
+
+        // The zone decides which clips are triggered, so the graph has to be
+        // rebuilt around it — but only when the mode is on to care.
+        if (_performanceMode && self.onPerformanceModeChanged != nil)
+            self.onPerformanceModeChanged();
+    }
+}
+
+- (void)togglePerformanceModeFromMenu:(id)sender
+{
+    (void)sender;
+
+    if (!_performanceMode && project::performanceZoneEnd(*_project) == 0) {
+        [self refuse:@"Set a start marker first \u2014 the zone is what comes before it."];
+        return;
+    }
+
+    self.performanceMode = !_performanceMode;
 }
 
 /// Every switch goes through the command stack, which is what keeps one undo
@@ -574,6 +691,9 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         if (model.group.isValid())
             [self drawGroupTieIn:body forGroup:model.group];
 
+        if (model.performanceKey >= 0)
+            [self drawPadBadge:model.performanceKey inBody:body];
+
         if (model.locked)
             [self drawLockMarkIn:body];
     }
@@ -636,6 +756,22 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
                                               alpha:0.85];
 
     fillRect(NSMakeRect(NSMinX(body), NSMaxY(body) - 3.0, body.size.width, 3.0), tint);
+}
+
+/// The pad number, bottom-left, so a performance layout can be read off the
+/// arrangement rather than held in the player's head.
+- (void)drawPadBadge:(int)pad inBody:(NSRect)body
+{
+    if (body.size.width < 16.0 || body.size.height < 12.0)
+        return;
+
+    const NSRect badge = NSMakeRect(NSMinX(body) + 3.0, NSMinY(body) + 2.0, 12.0, 10.0);
+
+    theme::fillRounded(badge, 2.0, theme::withAlpha(theme::ink(Ink::accent), 0.85));
+
+    theme::drawTextCentred([NSString stringWithFormat:@"%d", pad + 1], badge,
+                           theme::ink(Ink::textOnAccent), theme::labelFont(8.0,
+                                                                           NSFontWeightBold));
 }
 
 /// A bar-and-shackle glyph in the region's bottom-right corner. Drawn rather
@@ -1352,6 +1488,14 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
         return;
     }
 
+    // In Performance Mode the number row is the pad bank: 1..8 press the pad,
+    // and the release comes on keyUp. Only while the mode is on, so the keys
+    // mean nothing different to anyone who has not asked for it.
+    if (_performanceMode && !command && character >= '1' && character <= '8') {
+        [self triggerPad:static_cast<int>(character - '1') pressed:true];
+        return;
+    }
+
     if (character == ' ') {
         if (self.onTransportToggle != nil)
             self.onTransportToggle();
@@ -1550,6 +1694,11 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
     [menu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem* pad = [menu addItemWithTitle:@"Performance Pad" action:nil keyEquivalent:@""];
+    pad.submenu = [self padMenu];
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem* editLane = [menu addItemWithTitle:@"Edit Automation Lane"
                                            action:@selector(editLaneFromMenu:)
                                     keyEquivalent:@""];
@@ -1663,6 +1812,10 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
                                            action:nil
                                     keyEquivalent:@""];
     automate.submenu = [self automationTargetMenu];
+
+    NSMenuItem* performance = [menu addItemWithTitle:@"Performance" action:nil
+                                       keyEquivalent:@""];
+    performance.submenu = [self performanceMenuFor:*track];
 
     if (track->type == project::TrackType::folder) {
         NSMenuItem* toggle =
@@ -1838,6 +1991,164 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     _model->setSelection({raw->clipId()});
     [self changed];
     [self openAutomationLane:raw->laneId()];
+}
+
+/// Press, motion, trigger sync and position sync — one menu, because they are
+/// read as one setting: how this track answers a pad.
+- (NSMenu*)performanceMenuFor:(const project::Track&)track
+{
+    static const struct { const char* title; engine::PerformancePress value; } presses[] = {
+        {"Retrigger",      engine::PerformancePress::retrigger},
+        {"Hold",           engine::PerformancePress::hold},
+        {"Hold and Stop",  engine::PerformancePress::holdAndStop},
+        {"Hold and Motion", engine::PerformancePress::holdAndMotion},
+        {"Latch",          engine::PerformancePress::latch},
+    };
+
+    static const struct { const char* title; engine::PerformanceMotion value; } motions[] = {
+        {"Stay",             engine::PerformanceMotion::stay},
+        {"One Shot",         engine::PerformanceMotion::oneShot},
+        {"March and Wrap",   engine::PerformanceMotion::marchAndWrap},
+        {"March and Stay",   engine::PerformanceMotion::marchAndStay},
+        {"March and Stop",   engine::PerformanceMotion::marchAndStop},
+        {"Random",           engine::PerformanceMotion::random},
+        {"Exclusive Random", engine::PerformanceMotion::exclusiveRandom},
+    };
+
+    static const struct { const char* title; int beats; } syncs[] = {
+        {"Off", 0}, {"1/4", 1}, {"1/2", 2}, {"1 bar", 4}, {"2 bars", 8}, {"4 bars", 16},
+    };
+
+    const auto key = track.id.value();
+
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    NSMenu* pressMenu = [[NSMenu alloc] init];
+    for (const auto& entry : presses) {
+        NSMenuItem* item = [pressMenu addItemWithTitle:@(entry.title)
+                                                action:@selector(setPressFromMenu:)
+                                         keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @[@(key), @(static_cast<int>(entry.value))];
+        item.state = track.performancePress == entry.value ? NSControlStateValueOn
+                                                           : NSControlStateValueOff;
+    }
+
+    NSMenuItem* press = [menu addItemWithTitle:@"Press" action:nil keyEquivalent:@""];
+    press.submenu = pressMenu;
+
+    NSMenu* motionMenu = [[NSMenu alloc] init];
+    for (const auto& entry : motions) {
+        NSMenuItem* item = [motionMenu addItemWithTitle:@(entry.title)
+                                                 action:@selector(setMotionFromMenu:)
+                                          keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @[@(key), @(static_cast<int>(entry.value))];
+        item.state = track.performanceMotion == entry.value ? NSControlStateValueOn
+                                                            : NSControlStateValueOff;
+    }
+
+    NSMenuItem* motion = [menu addItemWithTitle:@"Motion" action:nil keyEquivalent:@""];
+    motion.submenu = motionMenu;
+
+    NSMenu* syncMenu = [[NSMenu alloc] init];
+    for (const auto& entry : syncs) {
+        NSMenuItem* item = [syncMenu addItemWithTitle:@(entry.title)
+                                               action:@selector(setTriggerSyncFromMenu:)
+                                        keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @[@(key), @(entry.beats)];
+        item.state = track.triggerSyncTicks == ticksPerQuarterNote * entry.beats
+                         ? NSControlStateValueOn
+                         : NSControlStateValueOff;
+    }
+
+    NSMenuItem* sync = [menu addItemWithTitle:@"Trigger Sync" action:nil keyEquivalent:@""];
+    sync.submenu = syncMenu;
+
+    NSMenuItem* position = [menu addItemWithTitle:@"Position Sync"
+                                           action:@selector(togglePositionSyncFromMenu:)
+                                    keyEquivalent:@""];
+    position.target            = self;
+    position.representedObject = @(key);
+    position.state = track.positionSync ? NSControlStateValueOn : NSControlStateValueOff;
+
+    return menu;
+}
+
+/// All four settings are one command, so a change to any of them carries the
+/// other three through unchanged.
+- (void)commitPerformanceFor:(project::EntityId)trackId
+                       press:(engine::PerformancePress)press
+                      motion:(engine::PerformanceMotion)motion
+                        sync:(Tick)sync
+                positionSync:(bool)positionSync
+{
+    [self commit:std::make_unique<app::SetTrackPerformanceCommand>(trackId, press, motion,
+                                                                    sync, positionSync)];
+}
+
+- (void)setPressFromMenu:(NSMenuItem*)item
+{
+    NSArray* pair = item.representedObject;
+    const project::EntityId trackId{[pair[0] unsignedLongLongValue]};
+
+    const project::Track* track = _project->findTrack(trackId);
+    if (track == nullptr)
+        return;
+
+    [self commitPerformanceFor:trackId
+                         press:static_cast<engine::PerformancePress>([pair[1] intValue])
+                        motion:track->performanceMotion
+                          sync:track->triggerSyncTicks
+                  positionSync:track->positionSync];
+}
+
+- (void)setMotionFromMenu:(NSMenuItem*)item
+{
+    NSArray* pair = item.representedObject;
+    const project::EntityId trackId{[pair[0] unsignedLongLongValue]};
+
+    const project::Track* track = _project->findTrack(trackId);
+    if (track == nullptr)
+        return;
+
+    [self commitPerformanceFor:trackId
+                         press:track->performancePress
+                        motion:static_cast<engine::PerformanceMotion>([pair[1] intValue])
+                          sync:track->triggerSyncTicks
+                  positionSync:track->positionSync];
+}
+
+- (void)setTriggerSyncFromMenu:(NSMenuItem*)item
+{
+    NSArray* pair = item.representedObject;
+    const project::EntityId trackId{[pair[0] unsignedLongLongValue]};
+
+    const project::Track* track = _project->findTrack(trackId);
+    if (track == nullptr)
+        return;
+
+    [self commitPerformanceFor:trackId
+                         press:track->performancePress
+                        motion:track->performanceMotion
+                          sync:ticksPerQuarterNote * [pair[1] intValue]
+                  positionSync:track->positionSync];
+}
+
+- (void)togglePositionSyncFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId trackId{[item.representedObject unsignedLongLongValue]};
+
+    const project::Track* track = _project->findTrack(trackId);
+    if (track == nullptr)
+        return;
+
+    [self commitPerformanceFor:trackId
+                         press:track->performancePress
+                        motion:track->performanceMotion
+                          sync:track->triggerSyncTicks
+                  positionSync:!track->positionSync];
 }
 
 - (void)addFolderFromMenu:(id)sender
@@ -2078,6 +2389,51 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
                                                             incoming ? -1 : frames)];
 }
 
+/// The eight pads of the typing keyboard's top row, plus "None". Eight because
+/// that is what a row of number keys and a pad controller's first bank both
+/// give you, and a pad the player cannot reach is a pad they will not use.
+- (NSMenu*)padMenu
+{
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    const project::Clip* first = nullptr;
+    for (const project::EntityId id : _model->selection())
+        if (const project::Clip* clip = _project->findClip(id)) {
+            first = clip;
+            break;
+        }
+
+    NSMenuItem* none = [menu addItemWithTitle:@"None"
+                                       action:@selector(setPadFromMenu:)
+                                keyEquivalent:@""];
+    none.target            = self;
+    none.representedObject = @(-1);
+    none.state = first != nullptr && first->performanceKey < 0 ? NSControlStateValueOn
+                                                               : NSControlStateValueOff;
+
+    for (int pad = 0; pad < 8; ++pad) {
+        NSMenuItem* item = [menu addItemWithTitle:[NSString stringWithFormat:@"%d", pad + 1]
+                                           action:@selector(setPadFromMenu:)
+                                    keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @(pad);
+        item.state = first != nullptr && first->performanceKey == pad ? NSControlStateValueOn
+                                                                      : NSControlStateValueOff;
+    }
+
+    return menu;
+}
+
+- (void)setPadFromMenu:(NSMenuItem*)item
+{
+    const int pad = [item.representedObject intValue];
+
+    for (const project::EntityId id : _model->selection())
+        (void)_registry->execute(std::make_unique<app::SetClipPerformanceKeyCommand>(id, pad));
+
+    [self changed];
+}
+
 - (void)groupFromMenu:(id)sender
 {
     (void)sender;
@@ -2310,6 +2666,41 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     _patternIdValue = value;
     [self setNeedsDisplay:YES];
+}
+
+- (void)keyUp:(NSEvent*)event
+{
+    NSString* characters = event.charactersIgnoringModifiers;
+
+    if (_performanceMode && characters.length > 0) {
+        const unichar character = [characters characterAtIndex:0];
+
+        if (character >= '1' && character <= '8') {
+            [self triggerPad:static_cast<int>(character - '1') pressed:false];
+            return;
+        }
+    }
+
+    [super keyUp:event];
+}
+
+/// Sends the pad to every track that has a clip bound to it. One pad drives one
+/// clip PER TRACK, so a single key can start a whole scene — which is what
+/// makes eight keys enough to play with.
+- (void)triggerPad:(int)pad pressed:(bool)pressed
+{
+    if (self.onPerformanceTrigger == nil)
+        return;
+
+    for (const project::Track& track : _project->tracks()) {
+        bool bound = false;
+
+        for (const project::Clip& clip : _project->clips())
+            bound = bound || (clip.track == track.id && clip.performanceKey == pad);
+
+        if (bound)
+            self.onPerformanceTrigger(track.id.value(), pad, pressed);
+    }
 }
 
 - (void)setPlayheadTick:(long long)tick

@@ -8,6 +8,28 @@ public version yet.
 
 ## [Unreleased]
 
+### Performance Mode — playable from the window — 2026-08-23
+
+- **The zone is visible**: the region before the start marker is washed, its
+  edge drawn where the marker is, and labelled once the mode is on.
+- **Performance Mode is toggled from the arrangement menu**, and refuses
+  until a start marker exists — the zone is what comes before one, so
+  without a marker there is nothing to switch on.
+- **Per-track press, motion, trigger sync and position sync** on the track
+  menu, each ticked at its current value. **Per-clip pad** on the clip menu,
+  badged on the clip itself so a layout can be read off the arrangement
+  rather than held in the player's head.
+- **The number row is the pad bank** while the mode is on: 1–8 press on the
+  way down and release on the way up, and one pad drives one clip *per
+  track*, so a single key starts a whole scene.
+- **Which clip a pad triggers comes from the mapping the compiler recorded**,
+  not from working the order out a second time — the clip order behind a
+  slot is the compiler's (lane, then start, then id), and a second
+  implementation of that rule would eventually trigger the wrong clip with
+  nothing to say so.
+- Nothing changes for a project that has not asked for this: the mode is off
+  by default, and with it off a start marker is a marker like any other.
+
 ### Performance Mode — a project can hold one — 2026-08-23
 
 - **The zone is the region before the arrangement's start marker.** A marker

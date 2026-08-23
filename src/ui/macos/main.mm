@@ -527,6 +527,22 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     self.playlist.parameterRegistry = &_parameters;
     self.playlist.hidden            = YES;
 
+    // Performance Mode: the flag decides how the graph is compiled, so
+    // switching it asks for a rebuild; a pad press is resolved against the
+    // compiled graph, which is the only thing that knows which scheduler slot
+    // a playlist track became.
+    {
+        __weak INCDAWAppDelegate* weakSelf = self;
+
+        self.playlist.onPerformanceModeChanged = ^{
+            [weakSelf rebuildGraph];
+        };
+
+        self.playlist.onPerformanceTrigger = ^(unsigned long long track, int pad, bool pressed) {
+            [weakSelf performanceTrigger:project::EntityId{track} pad:pad pressed:pressed];
+        };
+    }
+
     self.mixer = [[INCDAWMixerView alloc]
         initWithFrame:editorFrame
               project:_project.get()
@@ -2104,6 +2120,27 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 /// provides an atomic swap with deferred reclamation for exactly this
 /// (docs/ARCHITECTURE.md §7). Edits happen at human speed; a rebuild costs
 /// microseconds.
+/// Sends a pad press to the compiled scene table.
+///
+/// The resolution goes through the mapping the compiler recorded rather than
+/// being worked out again here: the clip order behind a slot is the compiler's
+/// (lane, then start, then id), and a second implementation of that rule would
+/// eventually disagree and trigger the wrong clip with nothing to say so.
+- (void)performanceTrigger:(project::EntityId)track pad:(int)pad pressed:(bool)pressed
+{
+    if (_live.performance == nullptr)
+        return;
+
+    const auto target = project::performanceTargetFor(*_project, _live, track, pad);
+    if (!target.found)
+        return;
+
+    // The transport's position now. The scheduler rounds it forward to the
+    // track's own grid, so a press between beats still lands on one.
+    (void)_live.performance->postTrigger(target.slot, target.clip, pressed,
+                                         _audio->transport().position());
+}
+
 - (void)rebuildGraph
 {
     if (!_audioReady || (_project->patterns().empty() && !_songMode))
@@ -2127,6 +2164,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                      : project::PlaybackSource::pattern;
     options.pattern      = project::EntityId{self.pianoRoll.patternIdValue};
     options.diskStreamer = _diskStreamer.get();
+    options.performanceMode = self.playlist.performanceMode == YES;
     options.sampleCache  = _sampleCache.get();
 
     options.metronomeEnabled = _metronomeEnabled == YES;

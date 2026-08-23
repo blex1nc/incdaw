@@ -1116,3 +1116,75 @@ TEST_CASE("a 1.11 project has no performance zone")
     for (const project::Clip& clip : project.clips())
         CHECK(clip.performanceKey == -1);
 }
+
+// ── TRACK B (B12, increment 5) — the surface's arithmetic ────────────────────
+//
+// The window is not testable here, but the one piece of it that could quietly
+// go wrong is: which clip a pad resolves to. That mapping is recorded by the
+// compiler rather than re-derived, and this is the test that says so.
+
+TEST_CASE("a pad resolves to the clip the compiler put behind it")
+{
+    ScratchDir scratch{"resolve"};
+
+    auto data = flat(4000, 0.5f);
+    REQUIRE(bool(engine::WavFile::write(scratch.path / "flat.wav", *data)));
+
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    const project::EntityId track =
+        project.addTrack(project::TrackType::audio, "Pads").id;
+
+    auto& asset      = project.addAudioAsset((scratch.path / "flat.wav").string());
+    asset.sampleRate = 48000.0;
+    asset.frameCount = 4000;
+
+    // Deliberately created in the WRONG order and on two lanes, so a naive
+    // "clips in project order" mapping would disagree with the compiler's.
+    const auto place = [&](engine::FramePosition start, int lane, int pad) {
+        project::Clip& clip  = project.addClip(project::ClipType::audio, track, asset.id);
+        clip.start           = start;
+        clip.length          = 4000;
+        clip.lane            = lane;
+        clip.performanceKey  = pad;
+        return clip.id;   // read before the next add can reallocate the vector
+    };
+
+    const project::EntityId lateId  = place(4000, 1, 1);
+    const project::EntityId earlyId = place(0, 0, 0);
+
+    project::TimelineMarker& marker = project.addMarker(ticksPerQuarterNote * 16, "Song");
+    marker.isStart                  = true;
+
+    project::GraphCompileOptions options;
+    options.source          = project::PlaybackSource::arrangement;
+    options.masterGain      = 1.0f;
+    options.performanceMode = true;
+
+    auto compiled = project::compileProjectGraph(project, project.tempoMap(), options);
+    REQUIRE(bool(compiled));
+    REQUIRE(compiled.performance != nullptr);
+
+    REQUIRE(compiled.performanceClips.size() == 1);
+    REQUIRE(compiled.performanceClips[0].size() == 2);
+
+    // Lane, then start: the clip on lane 0 is first whatever order it was made
+    // in, which is exactly what the mapping exists to record.
+    CHECK(compiled.performanceClips[0][0] == earlyId);
+    CHECK(compiled.performanceClips[0][1] == lateId);
+
+    const auto padZero = project::performanceTargetFor(project, compiled, track, 0);
+    REQUIRE(padZero.found);
+    CHECK(padZero.slot == 0);
+    CHECK(padZero.clip == 0);
+
+    const auto padOne = project::performanceTargetFor(project, compiled, track, 1);
+    REQUIRE(padOne.found);
+    CHECK(padOne.clip == 1);
+
+    // A pad nothing is bound to, and a track that is not performing.
+    CHECK_FALSE(project::performanceTargetFor(project, compiled, track, 5).found);
+    CHECK_FALSE(project::performanceTargetFor(project, compiled, project::EntityId{999}, 0).found);
+    CHECK_FALSE(project::performanceTargetFor(project, compiled, track, -1).found);
+}

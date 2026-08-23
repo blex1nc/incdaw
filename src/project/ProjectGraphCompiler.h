@@ -144,6 +144,13 @@ struct GraphCompileOptions {
     bool               performanceMode = false;
 };
 
+/// The scheduler slot and clip a (track, pad) pair names, or `found` false.
+struct PerformanceTarget {
+    bool        found = false;
+    std::size_t slot  = 0;
+    std::size_t clip  = 0;
+};
+
 /// A compiled graph plus the handles needed to drive it.
 struct CompiledProjectGraph {
     std::unique_ptr<engine::CompiledGraph> graph;
@@ -183,6 +190,14 @@ struct CompiledProjectGraph {
 
     /// The playlist tracks the scheduler's slots correspond to, in slot order.
     std::vector<EntityId> performanceTracks;
+
+    /// The clips behind each slot, in the slot's own clip order.
+    ///
+    /// Recorded by the compiler rather than re-derived by whoever needs it:
+    /// the order is the compiler's (lane, then start, then id), and a second
+    /// implementation of that rule would eventually disagree with it — at
+    /// which point a pad would trigger the wrong clip and nothing would say so.
+    std::vector<std::vector<EntityId>> performanceClips;
 
     /// The automation evaluator, or nullptr when no lane compiled. Owned by
     /// `graph`, like everything else here.
@@ -249,5 +264,11 @@ struct CompiledProjectGraph {
 [[nodiscard]] CompiledProjectGraph compileProjectGraph(const Project&          project,
                                                        const engine::TempoMap& tempoMap,
                                                        const GraphCompileOptions& options);
+
+/// Resolves a pad press to a scheduler slot and clip, through the mapping the
+/// compiler recorded.
+[[nodiscard]] PerformanceTarget performanceTargetFor(const Project& project,
+                                                     const CompiledProjectGraph& compiled,
+                                                     EntityId track, int performanceKey);
 
 } // namespace incdaw::project

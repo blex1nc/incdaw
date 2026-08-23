@@ -901,8 +901,14 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 for (const Clip* entry : ordered)
                     setup.clips.push_back({entry->start, entry->length});
 
+                std::vector<EntityId> slotClips;
+                slotClips.reserve(ordered.size());
+                for (const Clip* entry : ordered)
+                    slotClips.push_back(entry->id);
+
                 performanceSetups.push_back(std::move(setup));
                 compiled.performanceTracks.push_back(track.id);
+                compiled.performanceClips.push_back(std::move(slotClips));
                 performanceNodes.push_back(node.get());
             }
 
@@ -1175,6 +1181,36 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     compiled.builtInserts = std::move(builtInsertNodes);
 
     return compiled;
+}
+
+PerformanceTarget performanceTargetFor(const Project& project,
+                                       const CompiledProjectGraph& compiled,
+                                       EntityId track, int performanceKey)
+{
+    PerformanceTarget target;
+
+    if (performanceKey < 0)
+        return target;
+
+    for (std::size_t slot = 0; slot < compiled.performanceTracks.size(); ++slot) {
+        if (compiled.performanceTracks[slot] != track)
+            continue;
+
+        const std::vector<EntityId>& clips = compiled.performanceClips[slot];
+
+        for (std::size_t index = 0; index < clips.size(); ++index) {
+            const Clip* clip = project.findClip(clips[index]);
+            if (clip == nullptr || clip->performanceKey != performanceKey)
+                continue;
+
+            target.found = true;
+            target.slot  = slot;
+            target.clip  = index;
+            return target;
+        }
+    }
+
+    return target;
 }
 
 } // namespace incdaw::project

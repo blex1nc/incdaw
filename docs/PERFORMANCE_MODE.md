@@ -1,10 +1,9 @@
 # INCDAW — Performance Mode
 
-**Status:** increments 2, 3 and 4 implemented — the scheduler, `AudioClipNode`
-playing from it, and the project state and format behind both. Increments 5 and
-6 (the surface, and controller triggering) are still design, so a performance
-can be built and heard from code and from a saved project but not yet played
-from the window.
+**Status:** increments 2–5 implemented. A performance can be set up in the
+playlist and played from the typing keyboard. Increment 6 — triggering from a
+MIDI controller — is still design, and is blocked on a file boundary this track
+does not own (see below).
 
 TRACK B item B12 asks for a written plan before any code, and names the
 scheduling design as the deliverable of the first increment. This is that
@@ -216,13 +215,32 @@ That is **one format bump, additive** (1.12), with every default meaning
    builds the scene table from all of it and points the nodes at it, behind
    `GraphCompileOptions::performanceMode`, which is off by default: a start
    marker alone changes nothing until the mode is switched on.
-5. **The surface.** The zone drawn in the playlist, per-track behaviour
-   controls, and the typing-keyboard map.
-6. **Controller triggering**, through the existing MIDI mapping system, which
-   already binds hardware controls to parameters by registry key.
+5. ~~**The surface.**~~ **Done.** The zone washed in the playlist with the
+   start marker as its edge; the mode toggled from the arrangement menu, which
+   refuses until a start marker exists; per-track press, motion, trigger sync
+   and position sync; per-clip pad, badged on the clip so a layout can be read
+   off the arrangement; and the number row as the pad bank, pressing on keyDown
+   and releasing on keyUp, only while the mode is on.
 
-Increments 2 and 3 are the risky ones and are deliberately first. Nothing in
-1–3 changes an existing project or an existing render.
+   One pad drives one clip **per track**, so a single key starts a whole scene
+   — which is what makes eight keys enough to play with.
+
+   Which clip a pad resolves to goes through the mapping the compiler recorded
+   (`CompiledProjectGraph::performanceClips`) rather than being worked out
+   again. The clip order behind a slot is the compiler's — lane, then start,
+   then id — and a second implementation of that rule would eventually disagree
+   and trigger the wrong clip with nothing to say so.
+6. **Controller triggering.** Not done, and **blocked on ownership rather than
+   on design**: the MIDI mapping system binds hardware controls to *parameters*
+   by registry key, and a pad is not a parameter, so it needs a second kind of
+   mapping and a hook in the MIDI input path — which lives in `src/platform/`,
+   a directory TRACK B does not own. The scheduler side needs nothing new: the
+   trigger ring is already single-producer and already takes a timeline frame,
+   so a MIDI thread can post into it exactly as the window does.
+
+Increments 2 and 3 were the risky ones and were deliberately first. Nothing in
+1–5 changes an existing project or an existing render: the mode is off by
+default, and with it off a start marker is a marker like any other.
 
 ---
 
