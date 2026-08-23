@@ -26,6 +26,14 @@ using namespace incdaw;
     long long _selectionFrom;
     long long _selectionTo;
     long long _dragAnchor;
+
+    /// The open file's markers, re-read on every reload. Cheap: the reader
+    /// seeks past the audio rather than decoding it.
+    std::vector<engine::AudioMarker> _markers;
+
+    /// Where the last click landed. A marker dropped with no selection goes
+    /// here rather than at zero.
+    long long _caretFrame;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -44,6 +52,24 @@ using namespace incdaw;
 - (BOOL)acceptsFirstResponder { return YES; }
 
 - (BOOL)hasSelection { return _loaded && _selectionTo > _selectionFrom; }
+- (long long)caretFrame { return _caretFrame; }
+- (const std::vector<engine::AudioMarker>&)markers { return _markers; }
+
+- (long long)markerIndexNear:(long long)frame within:(long long)tolerance
+{
+    long long best         = -1;
+    long long bestDistance = tolerance;
+
+    for (std::size_t index = 0; index < _markers.size(); ++index) {
+        const long long distance = std::llabs(_markers[index].start - frame);
+        if (distance <= bestDistance) {
+            bestDistance = distance;
+            best         = static_cast<long long>(index);
+        }
+    }
+
+    return best;
+}
 - (long long)selectionFrom { return _selectionFrom; }
 - (long long)selectionTo { return _selectionTo; }
 
@@ -68,6 +94,11 @@ using namespace incdaw;
 
     const std::string& path = !asset->absolutePath.empty() ? asset->absolutePath
                                                            : asset->relativePath;
+
+    // Markers before the overview: even a file whose waveform fails to build
+    // may have readable metadata, and the two are independent.
+    _markers.clear();
+    (void)engine::WavFile::readMarkers(path, _markers);
 
     if (bool(engine::WaveformOverview::build(path, _overview))) {
         _loaded = YES;
@@ -191,6 +222,44 @@ using namespace incdaw;
         }
     }
 
+    // Markers, over the waveform. Regions are a band so the span reads at a
+    // glance; points are a line with a flag, because a bare line at the top of
+    // a busy waveform is indistinguishable from a transient.
+    if (!_markers.empty()) {
+        NSColor* markerInk = theme::ink(Ink::accent);
+        const double laneTop = 22.0;
+
+        for (const engine::AudioMarker& marker : _markers) {
+            const double left = [self xForFrame:marker.start];
+
+            if (marker.isRegion()) {
+                const double right = [self xForFrame:marker.end()];
+                if (right > 0.0 && left < width) {
+                    const NSRect band = NSMakeRect(std::max(0.0, left), laneTop,
+                                                   std::min(width, right) - std::max(0.0, left),
+                                                   self.bounds.size.height - laneTop);
+                    theme::fillRect(band, [markerInk colorWithAlphaComponent:0.10]);
+                }
+            }
+
+            if (left < -1.0 || left > width)
+                continue;
+
+            [markerInk setFill];
+            NSRectFill(NSMakeRect(left, laneTop, 1.0, self.bounds.size.height - laneTop));
+
+            // The flag, and the name beside it. Drawn last so a dense cluster
+            // of markers still reads.
+            NSRectFill(NSMakeRect(left, laneTop, 7.0, 7.0));
+
+            if (!marker.name.empty()) {
+                const NSRect label = NSMakeRect(left + 10.0, laneTop - 1.0, 160.0, 12.0);
+                theme::drawTextCentred(@(marker.name.c_str()), label, markerInk,
+                                       theme::labelFont(9.0), theme::Align::left);
+            }
+        }
+    }
+
     // The header line: what is open, how long, what is selected.
     const project::AudioAsset* asset = [self asset];
     if (asset != nullptr && _overview.sampleRate > 0.0) {
@@ -236,6 +305,7 @@ using namespace incdaw;
 
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     _dragAnchor    = std::clamp<long long>([self frameAtX:point.x], 0, _overview.frameCount);
+    _caretFrame    = _dragAnchor;
     _selectionFrom = _dragAnchor;
     _selectionTo   = _dragAnchor;
     [self setNeedsDisplay:YES];

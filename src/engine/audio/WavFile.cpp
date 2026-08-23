@@ -360,6 +360,69 @@ WavFile::Result WavFile::read(const std::filesystem::path& path, AudioFileData& 
     return result;
 }
 
+WavFile::Result WavFile::readMarkers(const std::filesystem::path& path,
+                                     std::vector<AudioMarker>&    out)
+{
+    Result result;
+    out.clear();
+
+    std::ifstream file{path, std::ios::binary};
+    if (!file) {
+        result.error = "cannot open: " + path.string();
+        return result;
+    }
+
+    char riff[12] = {};
+    if (!file.read(riff, 12) || std::memcmp(riff, "RIFF", 4) != 0
+        || std::memcmp(riff + 8, "WAVE", 4) != 0) {
+        result.error = "not a RIFF/WAVE file";
+        return result;
+    }
+
+    ParsedHeader header;
+
+    // Walk the chunk headers, reading only the bodies that carry markers.
+    // Everything else — the data chunk above all — is skipped over.
+    for (;;) {
+        std::uint8_t chunk[8] = {};
+        if (!file.read(reinterpret_cast<char*>(chunk), 8))
+            break;
+
+        const std::uint32_t size    = readU32(chunk + 4);
+        const std::uint32_t padded  = size + (size & 1u);
+        const bool          isCue   = std::memcmp(chunk, "cue ", 4) == 0;
+        const bool          isList  = std::memcmp(chunk, "LIST", 4) == 0;
+
+        // A metadata chunk large enough to be a hostile file is not one worth
+        // reading: a legitimate cue list for a thousand markers is 24 KB.
+        constexpr std::uint32_t metadataLimit = 4u * 1024u * 1024u;
+
+        if ((isCue || isList) && size <= metadataLimit) {
+            std::vector<std::uint8_t> body(size);
+            if (!file.read(reinterpret_cast<char*>(body.data()), size))
+                break;
+
+            if (isCue)
+                parseCueChunk(body.data(), body.size(), header);
+            else
+                parseListChunk(body.data(), body.size(), header);
+
+            if (padded != size)
+                file.seekg(1, std::ios::cur);
+        } else {
+            file.seekg(static_cast<std::streamoff>(padded), std::ios::cur);
+        }
+
+        if (!file)
+            break;
+    }
+
+    out = assembleMarkers(header);
+
+    result.succeeded = true;
+    return result;
+}
+
 WavFile::Result WavFile::write(const std::filesystem::path& path, const AudioFileData& data,
                                Format format)
 {

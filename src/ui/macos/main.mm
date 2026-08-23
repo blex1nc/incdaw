@@ -1170,6 +1170,141 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self audioAssetChanged];
 }
 
+// ── Markers in the editor ────────────────────────────────────────────────────
+//
+// Stored in the audio file itself, so a marker dropped here is one every other
+// editor can see (engine/audio/WavFile.h). All four verbs go through one
+// command: the sample data is untouched, and "the list becomes this" is the
+// whole of what any of them does.
+
+/// The marker list as it stands, plus the frame a new one would go at.
+- (BOOL)editorMarkers:(std::vector<engine::AudioMarker>*)outMarkers
+                asset:(project::EntityId*)outAsset
+{
+    if (self.audioEditor.assetIdValue == 0)
+        return NO;
+
+    *outAsset   = project::EntityId{self.audioEditor.assetIdValue};
+    *outMarkers = self.audioEditor.markers;
+    return YES;
+}
+
+/// Where a new marker goes: the selection start when there is one, else
+/// wherever the user last clicked.
+- (long long)markerInsertionFrame
+{
+    return self.audioEditor.hasSelection ? self.audioEditor.selectionFrom
+                                         : self.audioEditor.caretFrame;
+}
+
+- (void)applyMarkers:(std::vector<engine::AudioMarker>)markers
+               asset:(project::EntityId)asset
+               label:(NSString*)label
+{
+    (void)_registry->execute(std::make_unique<app::SetAudioMarkersCommand>(
+        asset, std::move(markers), label.UTF8String));
+
+    [self audioAssetChanged];
+}
+
+- (void)editAddMarker:(id)sender
+{
+    (void)sender;
+
+    std::vector<engine::AudioMarker> markers;
+    project::EntityId                asset;
+    if (![self editorMarkers:&markers asset:&asset])
+        return;
+
+    engine::AudioMarker marker;
+    marker.start = [self markerInsertionFrame];
+    marker.name  = "Marker " + std::to_string(markers.size() + 1);
+
+    markers.push_back(std::move(marker));
+    [self applyMarkers:std::move(markers) asset:asset label:@"Add Marker"];
+}
+
+- (void)editAddRegion:(id)sender
+{
+    (void)sender;
+
+    std::vector<engine::AudioMarker> markers;
+    project::EntityId                asset;
+
+    // A region needs a span. Inventing one from a click would be a guess the
+    // user then has to undo.
+    if (![self editorMarkers:&markers asset:&asset] || !self.audioEditor.hasSelection)
+        return;
+
+    engine::AudioMarker marker;
+    marker.start  = self.audioEditor.selectionFrom;
+    marker.length = self.audioEditor.selectionTo - self.audioEditor.selectionFrom;
+    marker.name   = "Region " + std::to_string(markers.size() + 1);
+
+    markers.push_back(std::move(marker));
+    [self applyMarkers:std::move(markers) asset:asset label:@"Add Region"];
+}
+
+/// The marker the verbs act on: the one nearest the insertion point, within a
+/// tenth of a second so a click nowhere near one does nothing.
+- (long long)nearestMarkerIndex
+{
+    const long long tolerance =
+        _audioReady ? static_cast<long long>(_audio->sampleRate() / 10.0) : 4800;
+
+    return [self.audioEditor markerIndexNear:[self markerInsertionFrame] within:tolerance];
+}
+
+- (void)editRenameMarker:(id)sender
+{
+    (void)sender;
+
+    std::vector<engine::AudioMarker> markers;
+    project::EntityId                asset;
+    if (![self editorMarkers:&markers asset:&asset])
+        return;
+
+    const long long index = [self nearestMarkerIndex];
+    if (index < 0)
+        return;
+
+    auto& marker = markers[static_cast<std::size_t>(index)];
+
+    NSAlert* alert        = [[NSAlert alloc] init];
+    alert.messageText     = @"Rename Marker";
+    alert.informativeText = @"A name is what makes a marker worth having.";
+    [alert addButtonWithTitle:@"Rename"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 220, 24)];
+    field.stringValue  = @(marker.name.c_str());
+    alert.accessoryView = field;
+    alert.window.initialFirstResponder = field;
+
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return;
+
+    marker.name = field.stringValue.UTF8String;
+    [self applyMarkers:std::move(markers) asset:asset label:@"Rename Marker"];
+}
+
+- (void)editDeleteMarker:(id)sender
+{
+    (void)sender;
+
+    std::vector<engine::AudioMarker> markers;
+    project::EntityId                asset;
+    if (![self editorMarkers:&markers asset:&asset])
+        return;
+
+    const long long index = [self nearestMarkerIndex];
+    if (index < 0)
+        return;
+
+    markers.erase(markers.begin() + static_cast<std::ptrdiff_t>(index));
+    [self applyMarkers:std::move(markers) asset:asset label:@"Delete Marker"];
+}
+
 - (void)editNormalize:(id)sender { (void)sender; [self applyAudioEdit:app::AudioEditOp::normalize factor:1.0f]; }
 - (void)editReverse:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::reverse factor:1.0f]; }
 - (void)editSilence:(id)sender   { (void)sender; [self applyAudioEdit:app::AudioEditOp::silence factor:1.0f]; }
@@ -5004,6 +5139,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         {@"Time Stretch…",     @selector(editTimeStretch:)},
         {@"Pitch Shift…",      @selector(editPitchShift:)},
         {@"Slice to New Channel", @selector(sliceToNewChannel:)},
+        {@"Add Marker",           @selector(editAddMarker:)},
+        {@"Add Region from Selection", @selector(editAddRegion:)},
+        {@"Rename Marker…",       @selector(editRenameMarker:)},
+        {@"Delete Marker",        @selector(editDeleteMarker:)},
     };
 
     for (const auto& verb : verbs) {

@@ -7,6 +7,8 @@
 
 #include "doctest.h"
 
+#include <fstream>
+
 #include "app/CommandRegistry.h"
 #include "app/commands/AudioEditCommands.h"
 #include "engine/audio/AudioEdits.h"
@@ -684,4 +686,150 @@ TEST_CASE("a paste from a file at another rate is refused, not resampled")
     AudioFileData unchanged;
     REQUIRE(bool(WavFile::read(file, unchanged)));
     CHECK(unchanged.frameCount == 500);
+}
+
+// ── Reading markers without decoding the audio ───────────────────────────────
+
+TEST_CASE("markers can be read without pulling the file into memory")
+{
+    ScratchDir scratch{"incdaw-readmarkers"};
+    const auto file = scratch.path / "long.wav";
+
+    auto data = makeAudio(2, 200000);
+    data.markers = {marker("Start", 0), marker("Chorus", 96000, 48000), marker("End", 199999)};
+    REQUIRE(bool(WavFile::write(file, data)));
+
+    std::vector<engine::AudioMarker> markers;
+    REQUIRE(bool(WavFile::readMarkers(file, markers)));
+
+    CHECK(markers == data.markers);
+}
+
+TEST_CASE("reading markers from a file that has none succeeds with none")
+{
+    ScratchDir scratch{"incdaw-nomarkerread"};
+    const auto file = scratch.path / "bare.wav";
+
+    REQUIRE(bool(WavFile::write(file, makeAudio(1, 128))));
+
+    std::vector<engine::AudioMarker> markers;
+
+    // Not an error. A file with no cues is the ordinary case, and reporting it
+    // as a failure would make the editor treat every unmarked file as broken.
+    REQUIRE(bool(WavFile::readMarkers(file, markers)));
+    CHECK(markers.empty());
+}
+
+TEST_CASE("reading markers from something that is not a WAV fails cleanly")
+{
+    ScratchDir scratch{"incdaw-notwav"};
+    const auto file = scratch.path / "notes.txt";
+
+    {
+        std::ofstream out{file};
+        out << "this is not a wave file";
+    }
+
+    std::vector<engine::AudioMarker> markers;
+    CHECK_FALSE(bool(WavFile::readMarkers(file, markers)));
+    CHECK(markers.empty());
+
+    std::vector<engine::AudioMarker> missing;
+    CHECK_FALSE(bool(WavFile::readMarkers(scratch.path / "nothing.wav", missing)));
+}
+
+// ── The marker command ───────────────────────────────────────────────────────
+
+TEST_CASE("adding, renaming and removing a marker is one undoable step each")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    const auto markersOf = [&fixture] { return fixture.load().markers; };
+
+    REQUIRE(markersOf().empty());
+
+    // Add.
+    REQUIRE(registry.execute(std::make_unique<app::SetAudioMarkersCommand>(
+        fixture.assetId, std::vector<engine::AudioMarker>{marker("Drop", 1200)}, "Add Marker")));
+
+    REQUIRE(markersOf().size() == 1);
+    CHECK(markersOf()[0].name == "Drop");
+
+    // Rename: the same command with a different list.
+    REQUIRE(registry.execute(std::make_unique<app::SetAudioMarkersCommand>(
+        fixture.assetId, std::vector<engine::AudioMarker>{marker("The Drop", 1200)},
+        "Rename Marker")));
+
+    CHECK(markersOf()[0].name == "The Drop");
+
+    // Remove.
+    REQUIRE(registry.execute(std::make_unique<app::SetAudioMarkersCommand>(
+        fixture.assetId, std::vector<engine::AudioMarker>{}, "Delete Marker")));
+
+    CHECK(markersOf().empty());
+
+    // Three steps back, three steps forward.
+    registry.undo();
+    CHECK(markersOf().size() == 1);
+    registry.undo();
+    CHECK(markersOf()[0].name == "Drop");
+    registry.undo();
+    CHECK(markersOf().empty());
+
+    registry.redo();
+    registry.redo();
+    registry.redo();
+    CHECK(markersOf().empty());
+}
+
+TEST_CASE("setting the marker list to what it already is makes no undo entry")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetAudioMarkersCommand>(
+        fixture.assetId, std::vector<engine::AudioMarker>{marker("A", 10)}, "Add Marker")));
+
+    const std::size_t depth = registry.undoDepth();
+
+    // An undo entry that changes nothing is worse than no entry: the user
+    // presses Cmd+Z expecting their last real edit back and gets nothing.
+    CHECK_FALSE(registry.execute(std::make_unique<app::SetAudioMarkersCommand>(
+        fixture.assetId, std::vector<engine::AudioMarker>{marker("A", 10)}, "Add Marker")));
+
+    CHECK(registry.undoDepth() == depth);
+}
+
+TEST_CASE("markers set out of order are stored in order")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetAudioMarkersCommand>(
+        fixture.assetId,
+        std::vector<engine::AudioMarker>{marker("Third", 3000), marker("First", 100),
+                                         marker("Second", 900)},
+        "Add Marker")));
+
+    const auto markers = fixture.load().markers;
+    REQUIRE(markers.size() == 3);
+    CHECK(markers[0].name == "First");
+    CHECK(markers[1].name == "Second");
+    CHECK(markers[2].name == "Third");
+}
+
+TEST_CASE("marker edits leave the audio alone")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    const auto before = fixture.load();
+
+    REQUIRE(registry.execute(std::make_unique<app::SetAudioMarkersCommand>(
+        fixture.assetId, std::vector<engine::AudioMarker>{marker("A", 10)}, "Add Marker")));
+
+    const auto after = fixture.load();
+    CHECK(after.channels == before.channels);
+    CHECK(after.frameCount == before.frameCount);
 }

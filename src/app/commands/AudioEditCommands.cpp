@@ -3,6 +3,8 @@
 #include "engine/dsp/TimeStretch.h"
 #include "engine/audio/WavFile.h"
 
+#include <algorithm>
+
 namespace incdaw::app {
 namespace {
 
@@ -457,6 +459,62 @@ void StretchAssetCommand::undo(Project& project)
 
     if (WavFile::write(assetFilePath(*asset), restored))
         asset->frameCount = restored.frameCount;
+}
+
+// ── SetAudioMarkersCommand ────────────────────────────────────────────────────
+
+namespace {
+
+/// Sorted by position, which is the order the file stores them in and the
+/// order the editor draws them in.
+void sortMarkers(std::vector<engine::AudioMarker>& markers)
+{
+    std::stable_sort(markers.begin(), markers.end(),
+                     [](const engine::AudioMarker& left, const engine::AudioMarker& right) {
+                         return left.start < right.start;
+                     });
+}
+
+} // namespace
+
+bool SetAudioMarkersCommand::execute(Project& project)
+{
+    const project::AudioAsset* asset = findAsset(project, asset_);
+    if (asset == nullptr)
+        return false;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return false;
+
+    if (!minted_) {
+        markersBefore_ = data.markers;
+        sortMarkers(markers_);
+
+        // Setting the list to what it already is is not an edit, and an undo
+        // entry that changes nothing is worse than no entry at all.
+        if (markers_ == markersBefore_)
+            return false;
+
+        minted_ = true;
+    }
+
+    data.markers = markers_;
+    return bool(WavFile::write(assetFilePath(*asset), data));
+}
+
+void SetAudioMarkersCommand::undo(Project& project)
+{
+    const project::AudioAsset* asset = findAsset(project, asset_);
+    if (asset == nullptr)
+        return;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return;
+
+    data.markers = markersBefore_;
+    (void)WavFile::write(assetFilePath(*asset), data);
 }
 
 } // namespace incdaw::app

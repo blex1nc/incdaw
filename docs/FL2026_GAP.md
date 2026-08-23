@@ -136,7 +136,7 @@ and note tools · a synthesized piano · **automation touch/latch/write modes**
 | C4 | MPE input handling | **DONE (decode)** — `MpeDecoder`, both zones, per-note id, RPN 6/0. Instruments have no per-voice expression input (track `timbre`) | — |
 | C5 | Device hot-plug re-enumeration | **DONE** — `platform::DeviceWatcher` (CoreAudio device list + defaults, CoreMIDI setup); MIDI reopens, audio restarts only when the chosen device returns | — |
 | C6 | Audio editor: cut / copy / paste between selections | **DONE** — was already implemented and menu-wired; now covered by cross-asset and rate-mismatch tests | — |
-| C7 | Audio editor: markers and regions inside the editor | ✗ timeline has them, the editor does not | — |
+| C7 | Audio editor: markers and regions inside the editor | **DONE** — `AudioMarker` stored in the file as RIFF `cue `/`adtl`, coherent under every edit verb, restored by undo; drawn in the editor with add/rename/delete verbs | — |
 | C8 | Comping editor over recorded takes | ✗ takes stack; nothing comps them | — |
 | C9 | Pre-record buffer on the input side | ✗ (the master Audio Logger is not the same thing) | — |
 | C10 | Denoise / noise profile | ✗ | — |

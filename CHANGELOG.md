@@ -8,6 +8,30 @@ public version yet.
 
 ## [Unreleased]
 
+### Audio editor — the markers become visible and editable — 2026-08-23
+
+- **Drawn over the waveform.** A point is a line with a flag and its name;
+  a region is a translucent band, so the span reads at a glance. A bare
+  line at the top of a busy waveform is indistinguishable from a
+  transient, which is why the flag is there.
+- **Audio → Add Marker / Add Region from Selection / Rename / Delete.**
+  A marker goes at the selection start, or wherever the last click landed.
+  A region needs a selection — inventing a span from a click is a guess
+  the user then has to undo. Rename and Delete act on the marker nearest
+  the insertion point within a tenth of a second, so nothing happens when
+  the click was nowhere near one.
+- **One command behind all four.** `SetAudioMarkersCommand` — the sample
+  data is untouched and every verb is "the list becomes this", so an
+  operation-specific command would differ in nothing but the name it
+  shows in the undo history. Setting the list to what it already is makes
+  no undo entry at all: pressing Cmd+Z expecting the last real edit back
+  and getting nothing is worse than no entry.
+- **`WavFile::readMarkers` seeks past the audio.** `probe` and `read`
+  both pull the whole file into memory, which for an hour of audio is
+  hundreds of megabytes to answer a question about a few dozen bytes —
+  and the editor asks it on every reload.
+
+
 ### Audio editor — markers and regions, stored in the file — 2026-08-23
 
 - **`AudioMarker` on `AudioFileData`**, read and written as RIFF's own

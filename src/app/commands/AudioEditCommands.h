@@ -198,4 +198,35 @@ private:
     std::vector<engine::AudioMarker> markersBefore_;
 };
 
+/// Replaces the marker list stored in the asset's file.
+///
+/// One command for add, remove and rename, because all three ARE "the list
+/// becomes this" and undo is "it was that". The sample data is never touched,
+/// so an operation-specific command would differ in nothing except the name it
+/// shows in the undo history — which is what `label` is for.
+///
+/// The list is written into the file's `cue `/`adtl` chunks, so a marker
+/// dropped here is a marker every other audio editor can see
+/// (engine/audio/WavFile.h).
+class SetAudioMarkersCommand final : public Command {
+public:
+    SetAudioMarkersCommand(project::EntityId asset, std::vector<engine::AudioMarker> markers,
+                           std::string label)
+        : asset_(asset), markers_(std::move(markers)), label_(std::move(label)) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "audio.setMarkers"; }
+    [[nodiscard]] std::string name() const override { return label_; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    project::EntityId                asset_;
+    std::vector<engine::AudioMarker> markers_;
+    std::string                      label_;
+
+    std::vector<engine::AudioMarker> markersBefore_;
+    bool                             minted_ = false;
+};
+
 } // namespace incdaw::app

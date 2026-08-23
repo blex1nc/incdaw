@@ -2,6 +2,10 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "engine/audio/WavFile.h"
+
+#include <vector>
+
 namespace incdaw::project { class Project; }
 namespace incdaw::app     { class CommandRegistry; }
 
@@ -32,5 +36,17 @@ namespace incdaw::app     { class CommandRegistry; }
 @property (nonatomic, readonly) BOOL hasSelection;
 @property (nonatomic, readonly) long long selectionFrom;
 @property (nonatomic, readonly) long long selectionTo;
+
+/// The markers stored in the open file, as the view last read them
+/// (engine/audio/WavFile.h). Re-read by `reloadWaveform`.
+@property (nonatomic, readonly) const std::vector<incdaw::engine::AudioMarker>& markers;
+
+/// Frame under the last click, clamped to the file. Where a new marker goes
+/// when there is no selection.
+@property (nonatomic, readonly) long long caretFrame;
+
+/// The marker nearest `frame` within `tolerance` frames, or -1. What "the
+/// marker the user means" resolves to, without asking them to hit a pixel.
+- (long long)markerIndexNear:(long long)frame within:(long long)tolerance;
 
 @end

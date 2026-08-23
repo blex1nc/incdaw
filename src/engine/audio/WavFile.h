@@ -75,6 +75,15 @@ public:
     /// audio.
     [[nodiscard]] static Result probe(const std::filesystem::path& path, AudioFileData& out);
 
+    /// The file's markers, without decoding a sample.
+    ///
+    /// Seeks chunk to chunk and reads only the metadata bodies. `probe` and
+    /// `read` both pull the whole file into memory, which for an hour of audio
+    /// is hundreds of megabytes to answer a question about a few dozen bytes —
+    /// and the editor asks it on every reload.
+    [[nodiscard]] static Result readMarkers(const std::filesystem::path& path,
+                                            std::vector<AudioMarker>&    out);
+
     enum class Format : std::uint16_t { pcm16, pcm24, float32 };
 
     /// Writes planar float data. Float32 is the default: recordings pass
