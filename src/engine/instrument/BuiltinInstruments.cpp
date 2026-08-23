@@ -3,6 +3,7 @@
 #include "engine/instrument/PianoInstrument.h"
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
+#include "engine/instrument/WavetableSynth.h"
 
 #include <iterator>
 
@@ -158,6 +159,61 @@ constexpr PresetValue pianoBar[] = {
     {static_cast<std::uint32_t>(PianoParam::hammerNoise), 0.5},
 };
 
+constexpr PresetValue wavetableSupersaw[] = {
+    {static_cast<std::uint32_t>(WavetableParam::oscALevel), 0.45},
+    {static_cast<std::uint32_t>(WavetableParam::oscADetune), -12.0},
+    {static_cast<std::uint32_t>(WavetableParam::oscBLevel), 0.45},
+    {static_cast<std::uint32_t>(WavetableParam::oscBDetune), 12.0},
+    {static_cast<std::uint32_t>(WavetableParam::filterCutoffHz), 9000.0},
+};
+constexpr PresetValue wavetableFormant[] = {
+    {static_cast<std::uint32_t>(WavetableParam::oscATable), 3.0},
+    {static_cast<std::uint32_t>(WavetableParam::oscAPosition), 0.2},
+    {static_cast<std::uint32_t>(WavetableParam::oscALevel), 0.6},
+    {static_cast<std::uint32_t>(WavetableParam::lfo1RateHz), 0.3},
+    {static_cast<std::uint32_t>(WavetableParam::lfo1ToPosition), 0.5},
+};
+constexpr PresetValue wavetableWobble[] = {
+    {static_cast<std::uint32_t>(WavetableParam::oscATable), 1.0},
+    {static_cast<std::uint32_t>(WavetableParam::oscAPosition), 0.4},
+    {static_cast<std::uint32_t>(WavetableParam::subLevel), 0.5},
+    {static_cast<std::uint32_t>(WavetableParam::filterMode), 1.0},
+    {static_cast<std::uint32_t>(WavetableParam::filterCutoffHz), 400.0},
+    {static_cast<std::uint32_t>(WavetableParam::filterResonance), 4.0},
+    {static_cast<std::uint32_t>(WavetableParam::lfo1Shape), 1.0},
+    {static_cast<std::uint32_t>(WavetableParam::lfo1RateHz), 4.0},
+    {static_cast<std::uint32_t>(WavetableParam::lfo1ToCutoff), 3.0},
+};
+constexpr PresetValue wavetableBell[] = {
+    {static_cast<std::uint32_t>(WavetableParam::oscATable), 4.0},
+    {static_cast<std::uint32_t>(WavetableParam::oscAPosition), 0.75},
+    {static_cast<std::uint32_t>(WavetableParam::ampDecay), 0.5},
+    {static_cast<std::uint32_t>(WavetableParam::ampSustain), 0.0},
+    {static_cast<std::uint32_t>(WavetableParam::ampRelease), 0.4},
+    {static_cast<std::uint32_t>(WavetableParam::filterCutoffHz), 1500.0},
+    {static_cast<std::uint32_t>(WavetableParam::modDecay), 0.3},
+    {static_cast<std::uint32_t>(WavetableParam::modToCutoff), 4.0},
+};
+constexpr PresetValue wavetablePad[] = {
+    {static_cast<std::uint32_t>(WavetableParam::oscATable), 2.0},
+    {static_cast<std::uint32_t>(WavetableParam::oscALevel), 0.4},
+    {static_cast<std::uint32_t>(WavetableParam::oscBTable), 2.0},
+    {static_cast<std::uint32_t>(WavetableParam::oscBLevel), 0.3},
+    {static_cast<std::uint32_t>(WavetableParam::ampAttack), 1.2},
+    {static_cast<std::uint32_t>(WavetableParam::ampRelease), 1.5},
+    {static_cast<std::uint32_t>(WavetableParam::filterCutoffHz), 6000.0},
+    {static_cast<std::uint32_t>(WavetableParam::lfo2RateHz), 0.2},
+    {static_cast<std::uint32_t>(WavetableParam::lfo2ToPosition), 0.35},
+};
+
+constexpr FactoryPreset wavetablePresets[] = {
+    {"Detuned Saws", wavetableSupersaw, std::size(wavetableSupersaw)},
+    {"Formant Sweep", wavetableFormant, std::size(wavetableFormant)},
+    {"Wobble Bass",   wavetableWobble,  std::size(wavetableWobble)},
+    {"Bell Pluck",    wavetableBell,    std::size(wavetableBell)},
+    {"Slow Pad",      wavetablePad,     std::size(wavetablePad)},
+};
+
 constexpr FactoryPreset pianoPresets[] = {
     {"Concert Grand", pianoConcert, std::size(pianoConcert)},
     {"Pop Bright",    pianoPop,     std::size(pianoPop)},
@@ -177,6 +233,8 @@ const std::vector<BuiltinInstrumentInfo>& builtinInstruments()
          {simpleSynthPresets, std::size(simpleSynthPresets)}},
         {"incdaw.piano", "INCDAW Piano", pianoParameters, 10,
          {pianoPresets, std::size(pianoPresets)}},
+        {"incdaw.wavetable", "INCDAW Wavetable", wavetableParameters(),
+         wavetableParameterCount(), {wavetablePresets, std::size(wavetablePresets)}},
     };
 
     return infos;

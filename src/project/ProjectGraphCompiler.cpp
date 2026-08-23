@@ -12,6 +12,7 @@
 #include "engine/instrument/PianoInstrument.h"
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
+#include "engine/instrument/WavetableSynth.h"
 #include "engine/automation/AutomationNode.h"
 #include "engine/midi/MidiMapNode.h"
 #include "project/PatternCompiler.h"
@@ -458,6 +459,12 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
         if (channel.instrument.uid == plugins::builtinPiano().uid)
             return std::make_unique<engine::PianoInstrument>();
+
+        // The wavetable synth has no plugins::builtin* helper: its uid comes
+        // from the instrument catalogue, which is where the channel's
+        // identifier was built from in the first place.
+        if (channel.instrument.uid == "incdaw.wavetable")
+            return std::make_unique<engine::WavetableSynth>();
 
         if (channel.instrument.uid == plugins::builtinSampler().uid) {
             auto sampler = std::make_unique<engine::Sampler>();

@@ -252,6 +252,7 @@ const std::vector<Wavetable>& wavetables()
         return rows;
     }();
 
+    static_assert(wavetableCount == 5, "the declared count and the catalogue must agree");
     return tables;
 }
 

@@ -92,6 +92,12 @@ private:
     std::size_t        offsetOfLevel_[levelCount] = {};
 };
 
+/// How many tables INCDAW ships. A constant rather than `wavetables().size()`
+/// so a parameter's range can be declared without forcing every table to be
+/// synthesised; the two are held together by a static assertion where the
+/// catalogue is built.
+inline constexpr std::size_t wavetableCount = 5;
+
 /// The tables INCDAW ships, in catalogue order. Built once, on first call —
 /// which happens off the audio thread, from the synth's prepare.
 [[nodiscard]] const std::vector<Wavetable>& wavetables();

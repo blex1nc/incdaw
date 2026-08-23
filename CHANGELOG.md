@@ -8,6 +8,26 @@ public version yet.
 
 ## [Unreleased]
 
+### Instruments — INCDAW Wavetable — 2026-08-23
+
+- **A wavetable synth that does not alias.** Two wavetable oscillators, a
+  sub, a state-variable filter, an amplitude envelope, a modulation
+  envelope and two LFOs. Every single-cycle frame is stored eleven times
+  over, each copy band-limited to half the harmonics of the last, and a
+  voice reads the copy whose harmonics all fit under Nyquist at the pitch
+  it is playing — chosen once at note-on, with headroom for whatever pitch
+  modulation the patch can apply.
+- **Five tables, written as harmonic recipes.** Basic (sine through
+  square), Pulse, Even Fade, Formant and Comb, synthesised at startup by
+  transforming a spectrum rather than shipped as content. There is no
+  waveform data in the repository.
+- **The Sampler's modulation shape, not a matrix.** Each destination has
+  its own depth parameter, so a lane, a MIDI knob and the panel reach it as
+  an ordinary automatable parameter with no matrix-shaped special case
+  anywhere — 39 parameters, all automatable, all in presets.
+- **Five factory presets** — Detuned Saws, Formant Sweep, Wobble Bass,
+  Bell Pluck, Slow Pad.
+
 ### Sound — presets for every builtin instrument and effect — 2026-08-23
 
 - **A preset is a file.** `<Application Support>/INCDAW/Presets/<uid>/<Name>.json`,
