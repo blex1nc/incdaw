@@ -8,6 +8,16 @@ public version yet.
 
 ## [Unreleased]
 
+### Fixed — a control surface plugged in later stayed blank — 2026-08-23
+
+`MidiFeedback::flush` recorded a value as sent before knowing whether it
+had been. With no destination attached the send fails, so every parameter
+that settled before the surface arrived was marked as already delivered —
+and hot-plug causes no graph rebuild, so nothing was going to rewrite it.
+The surface sat showing the previous state until a parameter happened to
+move. The value is now committed only on a send that succeeded.
+
+
 ### MIDI — MPE, decoded at last — 2026-08-23
 
 The MIDI representation has been described as MPE-ready since Phase 5 and

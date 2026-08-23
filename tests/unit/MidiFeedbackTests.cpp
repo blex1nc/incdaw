@@ -147,6 +147,37 @@ TEST_CASE("a value that came from the hardware is not sent back to it")
     CHECK(surface.pump().empty());
 }
 
+TEST_CASE("a surface plugged in later is told where everything is")
+{
+    RecordingMidiDevice device;
+    MidiOutput          output;
+    MidiFeedback        feedback;
+
+    MidiFeedback::Binding binding;
+    binding.controller = 7;
+    binding.active     = true;
+    feedback.setBindings({binding});
+
+    // Values settle while nothing is listening — the ordinary case, since a
+    // control surface is not required to be plugged in first.
+    feedback.observe(0, 1.0f);
+    CHECK(feedback.flush(output) == 0);
+    CHECK(feedback.lastSentAt(0) == -1);
+
+    // Now the surface arrives. Hot-plug causes no graph rebuild, so nothing
+    // else is going to rewrite it: if the failed send had been recorded as
+    // sent, the surface would sit at whatever it was showing until a
+    // parameter happened to move.
+    output.setDevice(&device);
+
+    CHECK(feedback.flush(output) == 1);
+    (void)output.drainPending();
+
+    REQUIRE(device.sent.size() == 1);
+    CHECK(device.sent[0].data1 == 7);
+    CHECK(device.sent[0].data2 == 127);
+}
+
 TEST_CASE("an inverted mapping reads back inverted")
 {
     Surface surface;

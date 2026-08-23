@@ -74,16 +74,21 @@ std::size_t MidiFeedback::flush(MidiOutput& output)
         if (sevenBit == lastSent_[slot])
             continue;
 
-        lastSent_[slot] = sevenBit;
-
         platform::TimestampedMidiMessage message;
         message.hostTimeNanos = 0;   // as soon as possible: this is a display, not a performance
         message.status = static_cast<std::uint8_t>(0xB0 | (binding.midiChannel & 0x0F));
         message.data1  = static_cast<std::uint8_t>(binding.controller & 0x7F);
         message.data2  = static_cast<std::uint8_t>(sevenBit);
 
-        if (output.send(message))
+        // Recorded as sent only if it was. With no destination attached the
+        // send fails, and marking it sent anyway would leave a surface plugged
+        // in later showing whatever it was showing before — the values it
+        // missed are exactly the ones "nothing changed" then hides. This is
+        // the hot-plug path: a surface arriving mid-session causes no rebuild.
+        if (output.send(message)) {
+            lastSent_[slot] = sevenBit;
             ++sent;
+        }
     }
 
     return sent;

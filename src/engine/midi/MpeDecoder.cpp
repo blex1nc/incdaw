@@ -318,8 +318,10 @@ void MpeDecoder::decode(const MidiBuffer& incoming, MpeEventBuffer& destination)
 {
     destination.clear();
 
-    // Read once, not per message: a block's worth of atomic loads for a
-    // configuration that cannot change inside a block anyway.
+    // Re-read after every message rather than hoisted out of the loop: a
+    // configuration message changes the layout mid-block, and the messages
+    // behind it belong to the new one — a controller announces itself and
+    // starts playing in the same breath.
     //
     // Master channels are examined even with no zone configured, because a
     // configuration message is how a zone comes into existence — a decoder
