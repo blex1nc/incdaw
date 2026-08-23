@@ -3,6 +3,7 @@
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/MultibandEffects.h"
+#include "engine/dsp/effects/ShaperEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/StereoEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
@@ -430,6 +431,66 @@ constexpr FactoryPreset imagerPresets[] = {
     {"Mono Check", imagerMonoCheck, std::size(imagerMonoCheck)},
 };
 
+// ── Waveshaper ───────────────────────────────────────────────────────────────
+
+using Shaper = WaveshaperEffect;
+
+/// A soft S: the extremes pulled in, the middle left alone.
+constexpr PresetValue shaperSoftClip[] = {
+    {Shaper::pointBase + 0, -0.85},
+    {Shaper::pointBase + 1, -0.72},
+    {Shaper::pointBase + 2, -0.52},
+    {Shaper::pointBase + 3, -0.27},
+    {Shaper::pointBase + 5, 0.27},
+    {Shaper::pointBase + 6, 0.52},
+    {Shaper::pointBase + 7, 0.72},
+    {Shaper::pointBase + 8, 0.85},
+    {Shaper::driveDb, 6.0},
+};
+/// Hard clipping: flat past two thirds.
+constexpr PresetValue shaperHardClip[] = {
+    {Shaper::pointBase + 0, -0.7},
+    {Shaper::pointBase + 1, -0.7},
+    {Shaper::pointBase + 2, -0.55},
+    {Shaper::pointBase + 3, -0.28},
+    {Shaper::pointBase + 5, 0.28},
+    {Shaper::pointBase + 6, 0.55},
+    {Shaper::pointBase + 7, 0.7},
+    {Shaper::pointBase + 8, 0.7},
+    {Shaper::driveDb, 12.0},
+    {Shaper::oversample, 2.0},
+};
+/// A fold: the curve turns back on itself, which no tanh can do.
+constexpr PresetValue shaperFold[] = {
+    {Shaper::pointBase + 0, 0.4},
+    {Shaper::pointBase + 1, -0.4},
+    {Shaper::pointBase + 2, -0.95},
+    {Shaper::pointBase + 3, -0.5},
+    {Shaper::pointBase + 5, 0.5},
+    {Shaper::pointBase + 6, 0.95},
+    {Shaper::pointBase + 7, 0.4},
+    {Shaper::pointBase + 8, -0.4},
+    {Shaper::driveDb, 9.0},
+    {Shaper::oversample, 2.0},
+};
+/// Asymmetric: only the positive half is bent, which is what adds even
+/// harmonics rather than odd ones.
+constexpr PresetValue shaperAsymmetric[] = {
+    {Shaper::pointBase + 5, 0.4},
+    {Shaper::pointBase + 6, 0.68},
+    {Shaper::pointBase + 7, 0.85},
+    {Shaper::pointBase + 8, 0.92},
+    {Shaper::driveDb, 8.0},
+    {Shaper::mix, 0.7},
+};
+
+constexpr FactoryPreset shaperPresets[] = {
+    {"Soft Clip",  shaperSoftClip,   std::size(shaperSoftClip)},
+    {"Hard Clip",  shaperHardClip,   std::size(shaperHardClip)},
+    {"Wavefolder", shaperFold,       std::size(shaperFold)},
+    {"Asymmetric", shaperAsymmetric, std::size(shaperAsymmetric)},
+};
+
 struct Row {
     std::string_view   uid;
     FactoryPresetTable table;
@@ -457,6 +518,7 @@ constexpr Row rows[] = {
     {"incdaw.multiband",      {multibandPresets,  std::size(multibandPresets)}},
     {"incdaw.deesser",        {deEsserPresets,    std::size(deEsserPresets)}},
     {"incdaw.imager",         {imagerPresets,     std::size(imagerPresets)}},
+    {"incdaw.shaper",         {shaperPresets,     std::size(shaperPresets)}},
 };
 
 } // namespace

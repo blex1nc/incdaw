@@ -64,6 +64,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/effects/EffectPresets.cpp
     engine/dsp/effects/ModulationEffects.cpp
     engine/dsp/effects/MultibandEffects.cpp
+    engine/dsp/effects/ShaperEffects.cpp
     engine/dsp/effects/SpaceEffects.cpp
     engine/dsp/effects/StereoEffects.cpp
     engine/dsp/effects/ToneEffects.cpp
@@ -220,6 +221,7 @@ if(APPLE)
         ui/macos/PresetBar.mm
         ui/macos/SpectrumView.mm
         ui/macos/TonePanel.mm
+        ui/macos/ShaperPanel.mm
         ui/macos/BrowserView.mm
         ui/macos/SettingsWindow.mm
         ui/macos/CommandPalette.mm)

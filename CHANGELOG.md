@@ -8,6 +8,27 @@ public version yet.
 
 ## [Unreleased]
 
+### Effects — Waveshaper — 2026-08-23
+
+- **The curve is the parameter, so the curve is the control.** Nine handles
+  on a square plot, dragged straight up and down, with drive, mix, output
+  and oversampling underneath. Right-click a handle to put it back on the
+  identity. `incdaw.saturator` is untouched — a good default curve is worth
+  having as its own effect.
+- **The points are ordinary automatable parameters.** A curve can be
+  automated, saved in a preset and MIDI-mapped like anything else; a shaper
+  whose curve lived outside the parameter system would be the one control
+  in INCDAW that automation could not reach.
+- **It oversamples, at 1x, 2x or 4x.** A drawn curve has corners a tanh
+  never has, and a corner makes harmonics far above Nyquist that fold
+  straight back down. Measured: four times over is more than six decibels
+  cleaner on a hard clip at 5 kHz.
+- **The plot is not a second opinion.** It is drawn from
+  `engine::dsp::shaperCurveAt`, the same spline the audio thread builds its
+  table from, and a test holds the rendered transfer to it. Four factory
+  presets, including a wavefolder — a curve that turns back on itself, which
+  no tanh can do.
+
 ### Effects — Stereo Imager — 2026-08-23
 
 - **Width per band, because one width knob cannot say what a mix needs.**

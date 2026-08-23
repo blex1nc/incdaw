@@ -57,6 +57,7 @@
 #include "ui/macos/ControlBarView.h"
 #include "ui/macos/InsertParameterPanel.h"
 #include "ui/macos/PresetBar.h"
+#include "ui/macos/ShaperPanel.h"
 #include "ui/macos/SpectrumView.h"
 #include "ui/macos/TonePanel.h"
 #include "ui/macos/Theme.h"
@@ -2057,6 +2058,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
 
         [INCDAWInsertParameterPanel refreshAppearance:window];
+        [INCDAWShaperPanel refreshAppearance:window];
         [INCDAWPresetBar refreshAppearanceInWindow:window];
         ui::theme::refreshViewTree(window.contentView);
     }
@@ -2850,6 +2852,14 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                          ? _audio->sampleRate() : 48000.0
                                              onWrite:write];
 
+    // The waveshaper's curve IS its parameter set, so it gets a plot with
+    // draggable handles rather than nine numbered sliders.
+    if (window == nil && slot->plugin.format == plugins::Format::builtin
+        && slot->plugin.uid == "incdaw.shaper")
+        window = [INCDAWShaperPanel makePanelWithTitle:[self displayNameForSlotKey:slotKey]
+                                                  rows:rows
+                                               onWrite:write];
+
     if (window == nil)
         window = [INCDAWInsertParameterPanel
             makePanelWithTitle:[self displayNameForSlotKey:slotKey]
@@ -2997,6 +3007,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         if (values.count > 0) {
             [INCDAWInsertParameterPanel refreshWindow:_panelWindows[key] values:values];
             [INCDAWTonePanel refreshWindow:_panelWindows[key] values:values];
+            [INCDAWShaperPanel refreshWindow:_panelWindows[key] values:values];
         }
     }
 }

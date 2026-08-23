@@ -188,6 +188,11 @@ TEST_CASE("every effect at its transparent settings passes the signal bit-exact"
         nullThrough(makeBuiltinEffect("incdaw.imager", 48000.0));
     }
 
+    SUBCASE("waveshaper at the identity curve")
+    {
+        nullThrough(makeBuiltinEffect("incdaw.shaper", 48000.0));
+    }
+
     SUBCASE("reverb at mix zero")
     {
         auto node = makeBuiltinEffect("incdaw.reverb", 48000.0);

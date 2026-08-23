@@ -4,6 +4,7 @@
 #include "engine/dsp/effects/EffectPresets.h"
 #include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/MultibandEffects.h"
+#include "engine/dsp/effects/ShaperEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/StereoEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
@@ -73,6 +74,8 @@ const std::vector<CatalogueEntry>& catalogue()
             [](SampleRate) { return std::make_unique<DeEsserEffect>(); });
         add("incdaw.imager",    "Stereo Imager",
             [](SampleRate) { return std::make_unique<StereoImagerEffect>(); });
+        add("incdaw.shaper",    "Waveshaper",
+            [](SampleRate) { return std::make_unique<WaveshaperEffect>(); });
 
         return rows;
     }();
