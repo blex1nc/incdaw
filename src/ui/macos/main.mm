@@ -57,6 +57,7 @@
 #include "ui/macos/ControlBarView.h"
 #include "ui/macos/InsertParameterPanel.h"
 #include "ui/macos/PresetBar.h"
+#include "ui/macos/BeatGatePanel.h"
 #include "ui/macos/ConvolverPanel.h"
 #include "ui/macos/EqCurvePanel.h"
 #include "ui/macos/ShaperPanel.h"
@@ -2064,6 +2065,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         [INCDAWShaperPanel refreshAppearance:window];
         [INCDAWEqCurvePanel refreshAppearance:window];
         [INCDAWConvolverPanel refreshAppearance:window];
+        [INCDAWBeatGatePanel refreshAppearance:window];
         [INCDAWPresetBar refreshAppearanceInWindow:window];
         ui::theme::refreshViewTree(window.contentView);
     }
@@ -2928,6 +2930,14 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                          ? _audio->sampleRate() : 48000.0
                                              onWrite:write];
 
+    // Thirty-two numbered sliders is not an editor for a gesture that is
+    // drawn: the beat gate gets its two curves.
+    if (window == nil && slot->plugin.format == plugins::Format::builtin
+        && slot->plugin.uid == "incdaw.beatgate")
+        window = [INCDAWBeatGatePanel makePanelWithTitle:[self displayNameForSlotKey:slotKey]
+                                                    rows:rows
+                                                 onWrite:write];
+
     // The convolver's most important control is a file path, which no slider
     // can carry.
     if (window == nil && slot->plugin.format == plugins::Format::builtin
@@ -3111,6 +3121,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
             [INCDAWTonePanel refreshWindow:_panelWindows[key] values:values];
             [INCDAWShaperPanel refreshWindow:_panelWindows[key] values:values];
             [INCDAWEqCurvePanel refreshWindow:_panelWindows[key] values:values];
+            [INCDAWBeatGatePanel refreshWindow:_panelWindows[key] values:values];
             [INCDAWConvolverPanel refreshWindow:_panelWindows[key]
                                          values:values
                                         impulse:[self impulsePathForSlotKey:entityKey]];

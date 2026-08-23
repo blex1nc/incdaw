@@ -228,6 +228,7 @@ if(APPLE)
         ui/macos/ShaperPanel.mm
         ui/macos/EqCurvePanel.mm
         ui/macos/ConvolverPanel.mm
+        ui/macos/BeatGatePanel.mm
         ui/macos/BrowserView.mm
         ui/macos/SettingsWindow.mm
         ui/macos/CommandPalette.mm)

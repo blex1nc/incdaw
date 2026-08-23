@@ -26,6 +26,9 @@ public version yet.
   parameters. Four factory presets: Sixteenth Gate, Pump, End Stutter and
   Half Speed. An insert in a graph with no tempo map has nothing to sync to
   and passes the signal through.
+- **Two stacked plots on a sixteenth grid** instead of thirty-two numbered
+  sliders — a gesture that is drawn should be swept in with the mouse.
+  Right-click flattens whichever curve is under the pointer.
 
 ### Effects — Vocoder — 2026-08-23
 
