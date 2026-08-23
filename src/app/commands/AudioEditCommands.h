@@ -2,6 +2,7 @@
 
 #include "app/Command.h"
 #include "engine/audio/AudioEdits.h"
+#include "engine/dsp/Denoise.h"
 #include "project/Model.h"
 
 #include <string>
@@ -196,6 +197,39 @@ private:
     /// arithmetic on what is left brings it back. The list is a few dozen
     /// entries; copying it is cheaper than being clever about it.
     std::vector<engine::AudioMarker> markersBefore_;
+};
+
+/// Subtracts a learned noise profile from a region of the asset's file.
+///
+/// The profile is carried BY the command, like the paste command's audio: redo
+/// re-applies the profile that was used, and learning a new one later cannot
+/// rewrite what the undo stack already holds.
+///
+/// Undo restores the recorded samples rather than adding the noise back —
+/// spectral subtraction is not invertible, and pretending otherwise would
+/// return audio that is merely similar to what the user had.
+class DenoiseAssetCommand final : public Command {
+public:
+    DenoiseAssetCommand(project::EntityId asset, engine::edits::Region region,
+                        engine::dsp::NoiseProfile profile, double amount)
+        : asset_(asset), region_(region), profile_(std::move(profile)), amount_(amount) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "audio.denoise"; }
+    [[nodiscard]] std::string name() const override { return "Denoise"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    project::EntityId          asset_;
+    engine::edits::Region      region_;
+    engine::dsp::NoiseProfile  profile_;
+    double                     amount_ = 1.0;
+
+    std::vector<std::vector<engine::Sample>> before_;
+    std::vector<std::vector<engine::Sample>> after_;
+    engine::edits::Region                    applied_;
+    bool                                     minted_ = false;
 };
 
 /// Replaces the marker list stored in the asset's file.

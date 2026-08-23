@@ -25,6 +25,17 @@ public:
     /// separate real/imaginary arrays. Realtime-safe.
     void forward(float* real, float* imaginary) const noexcept;
 
+    /// In-place inverse transform, scaled by 1/size so that
+    /// `inverse(forward(x)) == x`.
+    ///
+    /// Built from `forward` by conjugating either side rather than by a second
+    /// set of tables: the inverse DFT is the forward DFT of the conjugate,
+    /// conjugated and scaled. One transform, one set of twiddles, and no way
+    /// for the two directions to disagree about a sign — which is the bug that
+    /// makes a resynthesised signal come back time-reversed and takes an
+    /// afternoon to find.
+    void inverse(float* real, float* imaginary) const noexcept;
+
 private:
     std::size_t              size_ = 0;
     std::vector<std::size_t> reversed_;

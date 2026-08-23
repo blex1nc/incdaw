@@ -139,7 +139,7 @@ and note tools · a synthesized piano · **automation touch/latch/write modes**
 | C7 | Audio editor: markers and regions inside the editor | **DONE** — `AudioMarker` stored in the file as RIFF `cue `/`adtl`, coherent under every edit verb, restored by undo; drawn in the editor with add/rename/delete verbs | — |
 | C8 | Comping editor over recorded takes | **DONE** — `app::comping::takesOver` + `AssignCompRangeCommand` (split-and-mute, no new model field), `INCDAWCompingView` lanes with per-take waveforms, one undo entry per assignment | — |
 | C9 | Pre-record buffer on the input side | **DONE** — a second `AudioLogger` on the input, `RecordingSession::keepPreRoll` lands it as a take ending at the playhead; own switch, off by default | — |
-| C10 | Denoise / noise profile | ✗ | — |
+| C10 | Denoise / noise profile | **DONE** — `engine::dsp::Stft` (exact-reconstruction STFT, null-tested), `NoiseProfile` learned per channel, `DenoiseAssetCommand`; Audio → Learn Noise Profile / Denoise… | — |
 | C11 | Spectral view and spectral editing | ◐ analyzer draws a spectrum; the editor has no spectral surface | — |
 | C12 | VST3 hosting | ✗ format enum only | **§41 — SDK, dual-licensed. Proposal + approval required** |
 | C13 | FLAC export/import | ✗ | **§41 — libFLAC. Proposal + approval required** |

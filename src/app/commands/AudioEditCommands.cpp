@@ -461,6 +461,63 @@ void StretchAssetCommand::undo(Project& project)
         asset->frameCount = restored.frameCount;
 }
 
+// ── DenoiseAssetCommand ───────────────────────────────────────────────────────
+
+bool DenoiseAssetCommand::execute(Project& project)
+{
+    project::AudioAsset* asset = nullptr;
+    for (project::AudioAsset& candidate : project.audioAssets())
+        if (candidate.id == asset_)
+            asset = &candidate;
+
+    if (asset == nullptr)
+        return false;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return false;
+
+    if (!minted_) {
+        applied_ = engine::edits::clampedRegion(data, region_);
+
+        if (applied_.length() <= 0 || profile_.isEmpty())
+            return false;
+
+        before_ = snapshotRegion(data, applied_);
+
+        AudioFileData working = data;
+        if (!engine::dsp::denoise(working, applied_.from, applied_.to, profile_, amount_))
+            return false;
+
+        after_  = snapshotRegion(working, applied_);
+        minted_ = true;
+    }
+
+    // Redo writes the recorded RESULT rather than re-running the pass: the
+    // arithmetic is deterministic, but re-running it is seconds of work for a
+    // keystroke that should be instant.
+    restoreRegion(data, applied_, after_);
+
+    return bool(WavFile::write(assetFilePath(*asset), data));
+}
+
+void DenoiseAssetCommand::undo(Project& project)
+{
+    const project::AudioAsset* asset = findAsset(project, asset_);
+    if (asset == nullptr)
+        return;
+
+    AudioFileData data;
+    if (!WavFile::read(assetFilePath(*asset), data))
+        return;
+
+    // The recorded samples, not the noise added back. Spectral subtraction is
+    // not invertible, and returning audio that is merely similar to what the
+    // user had is not undo.
+    restoreRegion(data, applied_, before_);
+    (void)WavFile::write(assetFilePath(*asset), data);
+}
+
 // ── SetAudioMarkersCommand ────────────────────────────────────────────────────
 
 namespace {

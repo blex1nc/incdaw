@@ -23,6 +23,7 @@ add_executable(incdaw_tests
     unit/MpeTests.cpp
     unit/PreRecordTests.cpp
     unit/CompingTests.cpp
+    unit/SpectralTests.cpp
     unit/CommandTests.cpp
     unit/ProjectSessionTests.cpp
     unit/StoppedTransportTests.cpp

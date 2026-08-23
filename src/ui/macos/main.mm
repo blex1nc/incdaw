@@ -330,6 +330,13 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     NSWindow*         _compWindow;
     INCDAWCompingView* _compView;
 
+    /// The learned noise profile, session state rather than project data.
+    ///
+    /// A profile describes one recording session's room; storing it in the
+    /// project would be a format question, and a profile that outlived the
+    /// session it was learned in would be applied to a different room.
+    engine::dsp::NoiseProfile _noiseProfile;
+
     NSString* _hardwareMessage;
     BOOL      _chosenOutputWasPresent;
 
@@ -1309,6 +1316,97 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     markers.erase(markers.begin() + static_cast<std::ptrdiff_t>(index));
     [self applyMarkers:std::move(markers) asset:asset label:@"Delete Marker"];
+}
+
+// ── Denoise ──────────────────────────────────────────────────────────────────
+
+/// Learns what the room sounds like from a selection the user says is silence.
+- (void)editLearnNoiseProfile:(id)sender
+{
+    (void)sender;
+
+    engine::edits::Region region;
+    project::EntityId     asset;
+
+    // A profile has to be learned from something specific. Guessing at
+    // "probably the first second" would learn the count-in.
+    if (![self editorSelection:&region asset:&asset]) {
+        _lastRecordError = @"select a stretch of silence first";
+        [self refreshStatus];
+        return;
+    }
+
+    const project::AudioAsset* record = nullptr;
+    for (const project::AudioAsset& candidate : _project->audioAssets())
+        if (candidate.id == asset)
+            record = &candidate;
+
+    if (record == nullptr)
+        return;
+
+    engine::AudioFileData data;
+    const std::string path =
+        !record->absolutePath.empty() ? record->absolutePath : record->relativePath;
+
+    if (!engine::WavFile::read(path, data))
+        return;
+
+    _noiseProfile = engine::dsp::learnNoiseProfile(data, region.from, region.to);
+
+    if (_noiseProfile.isEmpty()) {
+        _lastRecordError = @"the selection is too short to learn a noise profile";
+    } else {
+        _lastRecordError = nil;
+        NSLog(@"INCDAW: noise profile learned from %lld frames",
+              static_cast<long long>(region.to - region.from));
+    }
+
+    [self refreshStatus];
+}
+
+- (void)editDenoise:(id)sender
+{
+    (void)sender;
+
+    if (_noiseProfile.isEmpty()) {
+        _lastRecordError = @"learn a noise profile first — select silence, then Learn";
+        [self refreshStatus];
+        return;
+    }
+
+    if (self.audioEditor.assetIdValue == 0)
+        return;
+
+    const double amount = [self promptForValue:@"Denoise"
+                                       message:@"How much of the learned noise to subtract. "
+                                                "1 is what was measured; more is more aggressive "
+                                                "and takes more of the signal with it."
+                                       initial:@"1.0"];
+
+    if (!(amount > 0.0))
+        return;
+
+    const project::EntityId asset{self.audioEditor.assetIdValue};
+
+    // The whole file when nothing is selected: after learning from a silent
+    // stretch, "clean the take" is the thing the user means.
+    engine::edits::Region region;
+    if (self.audioEditor.hasSelection) {
+        region.from = self.audioEditor.selectionFrom;
+        region.to   = self.audioEditor.selectionTo;
+    } else {
+        region.from = 0;
+        region.to   = std::numeric_limits<engine::FrameCount>::max();
+    }
+
+    if (!_registry->execute(std::make_unique<app::DenoiseAssetCommand>(
+            asset, region, _noiseProfile, amount))) {
+        _lastRecordError = @"denoise: nothing to do";
+        [self refreshStatus];
+        return;
+    }
+
+    [self audioAssetChanged];
 }
 
 - (void)editNormalize:(id)sender { (void)sender; [self applyAudioEdit:app::AudioEditOp::normalize factor:1.0f]; }
@@ -5328,6 +5426,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         {@"Fade Out",          @selector(editFadeOut:)},
         {@"Gain +3 dB",        @selector(editGainUp:)},
         {@"Gain -3 dB",        @selector(editGainDown:)},
+        {@"Learn Noise Profile", @selector(editLearnNoiseProfile:)},
+        {@"Denoise…",          @selector(editDenoise:)},
         {@"Time Stretch…",     @selector(editTimeStretch:)},
         {@"Pitch Shift…",      @selector(editPitchShift:)},
         {@"Slice to New Channel", @selector(sliceToNewChannel:)},

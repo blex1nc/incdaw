@@ -8,6 +8,47 @@ public version yet.
 
 ## [Unreleased]
 
+### Audio editor — denoise, and the spectral floor under it — 2026-08-23
+
+- **Select silence, Learn, Denoise.** `engine::dsp::NoiseProfile` is the
+  mean magnitude per bin of a stretch the user says is the room; denoise
+  subtracts it across the selection. The mean rather than the peak: a peak
+  profile subtracts the loudest moment of the noise everywhere, which
+  takes the quiet parts of the signal with it.
+- **Per channel, not averaged.** A two-microphone take has two noise
+  floors, and one shared profile subtracts each one's hum from the
+  other's. A mono profile applied to a stereo file reuses its single
+  channel, which is what it should do.
+- **A spectral floor is left on purpose.** Subtracting all the way to zero
+  produces isolated surviving bins warbling against silence — "musical
+  noise" — which sounds worse than the hiss it removed.
+- **The profile carries the parameters it was learned with.** Applied at
+  another sample rate its bins are other frequencies, so it is refused
+  rather than misapplied: it would remove a hum that is not there and
+  leave the one that is.
+- Amount 0 leaves the file **bit-identical** rather than passing it
+  through a round trip. A user who cancels gets their file back, not a
+  re-rendered copy.
+- Undo restores the recorded samples. Spectral subtraction is not
+  invertible, and returning audio merely *similar* to what the user had
+  is not undo.
+
+**Architecture** — `engine::dsp::Stft` is the shared floor for this and
+for the spectral editing to come; doing the analysis twice is how two
+spectral tools end up disagreeing about what a bin means. `Fft` gains an
+`inverse` built by conjugating either side of the existing forward pass
+rather than by a second set of tables, so the two directions cannot
+disagree about a sign.
+
+**The null test is the one that matters**, and it is in the suite: a pass
+that changes no bin returns the input to within 1e-4. When that fails the
+symptom is a faint tremolo at the hop rate, which sounds like "the
+algorithm" rather than like a bug and is therefore never reported. The
+overlap normalisation is measured from the window rather than taken from
+the textbook constant, which is only correct when the hop divides the
+window evenly.
+
+
 ### Recording — the comping editor — 2026-08-23
 
 Loop recording has stacked passes since Phase 12 and nothing chose

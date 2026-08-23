@@ -74,4 +74,23 @@ void Fft::forward(float* real, float* imaginary) const noexcept
     }
 }
 
+void Fft::inverse(float* real, float* imaginary) const noexcept
+{
+    const std::size_t size = size_;
+    if (size == 0)
+        return;
+
+    for (std::size_t index = 0; index < size; ++index)
+        imaginary[index] = -imaginary[index];
+
+    forward(real, imaginary);
+
+    const float scale = 1.0f / static_cast<float>(size);
+
+    for (std::size_t index = 0; index < size; ++index) {
+        real[index]      *= scale;
+        imaginary[index] *= -scale;
+    }
+}
+
 } // namespace incdaw::engine::dsp

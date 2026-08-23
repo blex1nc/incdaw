@@ -7,7 +7,10 @@
 
 #include "doctest.h"
 
+#include "engine/dsp/Denoise.h"
+
 #include <fstream>
+#include <random>
 
 #include "app/CommandRegistry.h"
 #include "app/commands/AudioEditCommands.h"
@@ -832,4 +835,65 @@ TEST_CASE("marker edits leave the audio alone")
     const auto after = fixture.load();
     CHECK(after.channels == before.channels);
     CHECK(after.frameCount == before.frameCount);
+}
+
+// ── C10: denoise, undoably ───────────────────────────────────────────────────
+
+TEST_CASE("denoise rewrites the file and undo restores it bit-exactly")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    // A noisy take: the fixture's audio with hiss over all of it.
+    {
+        auto data = fixture.load();
+
+        std::mt19937                          engine{101};
+        std::uniform_real_distribution<float> hiss{-0.08f, 0.08f};
+
+        for (auto& channel : data.channels)
+            for (engine::Sample& value : channel)
+                value += hiss(engine);
+
+        REQUIRE(bool(WavFile::write(fixture.file, data)));
+    }
+
+    const auto noisy = fixture.load();
+
+    const auto profile = engine::dsp::learnNoiseProfile(noisy, 0, 3000);
+    REQUIRE_FALSE(profile.isEmpty());
+
+    REQUIRE(registry.execute(std::make_unique<app::DenoiseAssetCommand>(
+        fixture.assetId, engine::edits::Region{3000, 5000}, profile, 1.0)));
+
+    const auto cleaned = fixture.load();
+    CHECK(cleaned.frameCount == noisy.frameCount);
+    CHECK_FALSE(cleaned.channels == noisy.channels);
+
+    // Outside the region, untouched.
+    for (std::size_t index = 0; index < 3000; ++index)
+        CHECK(cleaned.channels[0][index] == noisy.channels[0][index]);
+
+    registry.undo();
+
+    // Bit-exact: spectral subtraction is not invertible, so undo restores the
+    // recorded samples rather than trying to add the noise back.
+    CHECK(fixture.load().channels == noisy.channels);
+
+    registry.redo();
+    CHECK(fixture.load().channels == cleaned.channels);
+}
+
+TEST_CASE("denoise with no profile is refused and makes no undo entry")
+{
+    EditFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    const std::size_t depth = registry.undoDepth();
+
+    const engine::dsp::NoiseProfile empty;
+    CHECK_FALSE(registry.execute(std::make_unique<app::DenoiseAssetCommand>(
+        fixture.assetId, engine::edits::Region{0, 5000}, empty, 1.0)));
+
+    CHECK(registry.undoDepth() == depth);
 }
