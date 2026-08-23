@@ -138,7 +138,7 @@ and note tools · a synthesized piano · **automation touch/latch/write modes**
 | C6 | Audio editor: cut / copy / paste between selections | **DONE** — was already implemented and menu-wired; now covered by cross-asset and rate-mismatch tests | — |
 | C7 | Audio editor: markers and regions inside the editor | **DONE** — `AudioMarker` stored in the file as RIFF `cue `/`adtl`, coherent under every edit verb, restored by undo; drawn in the editor with add/rename/delete verbs | — |
 | C8 | Comping editor over recorded takes | ✗ takes stack; nothing comps them | — |
-| C9 | Pre-record buffer on the input side | ✗ (the master Audio Logger is not the same thing) | — |
+| C9 | Pre-record buffer on the input side | **DONE** — a second `AudioLogger` on the input, `RecordingSession::keepPreRoll` lands it as a take ending at the playhead; own switch, off by default | — |
 | C10 | Denoise / noise profile | ✗ | — |
 | C11 | Spectral view and spectral editing | ◐ analyzer draws a spectrum; the editor has no spectral surface | — |
 | C12 | VST3 hosting | ✗ format enum only | **§41 — SDK, dual-licensed. Proposal + approval required** |

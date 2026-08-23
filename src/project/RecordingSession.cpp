@@ -1,5 +1,8 @@
 #include "project/RecordingSession.h"
 
+#include "engine/audio/AudioEdits.h"
+#include "platform/HostTime.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -218,6 +221,77 @@ RecordingSession::Placement RecordingSession::finish(engine::AudioEngine& audioE
         // position from a take armed before playback reached frame 0 can be
         // slightly negative — clamp rather than place a clip before time.
         placement.startFrame = audioEngine.transport().position();
+    }
+
+    if (placement.startFrame < 0)
+        placement.startFrame = 0;
+
+    placement.succeeded = true;
+    return placement;
+}
+
+RecordingSession::Placement RecordingSession::keepPreRoll(engine::AudioEngine& audioEngine,
+                                                          const std::filesystem::path& directory,
+                                                          double seconds)
+{
+    Placement placement;
+
+    const engine::AudioLogger& logger = audioEngine.inputLogger();
+
+    if (!logger.isEnabled() || logger.channelCount() == 0) {
+        placement.error = "the input buffer is not running";
+        return placement;
+    }
+
+    // The anchor first, and before anything slow: it is the correlation
+    // between now and the timeline, and every millisecond spent writing a
+    // file makes it staler.
+    engine::TimelineAnchor anchor;
+    const bool          haveAnchor = audioEngine.latestAnchor(anchor);
+    const std::uint64_t nowNanos   = platform::hostTimeNowNanos();
+
+    engine::AudioFileData data;
+    if (logger.grab(data) <= 0) {
+        placement.error = "nothing in the input buffer yet";
+        return placement;
+    }
+
+    // Trim to the requested span, keeping the END: the interesting part of a
+    // buffer nobody armed is always the part that just happened.
+    if (seconds > 0.0 && data.sampleRate > 0.0) {
+        const auto wanted = static_cast<engine::FrameCount>(seconds * data.sampleRate);
+
+        if (wanted > 0 && wanted < data.frameCount)
+            engine::edits::trimTo(data, {data.frameCount - wanted, data.frameCount});
+    }
+
+    if (data.frameCount <= 0) {
+        placement.error = "nothing in the input buffer yet";
+        return placement;
+    }
+
+    std::error_code code;
+    std::filesystem::create_directories(directory, code);
+
+    const std::filesystem::path path = takePath(directory);
+
+    if (!engine::WavFile::write(path, data)) {
+        placement.error = "could not write the take file";
+        return placement;
+    }
+
+    placement.path         = path;
+    placement.frameCount   = data.frameCount;
+    placement.channelCount = data.channelCount;
+    placement.sampleRate   = data.sampleRate;
+
+    // Placed so that the window ENDS now. Anything else puts the sound the
+    // user just played somewhere they did not play it.
+    if (haveAnchor && anchor.playing) {
+        placement.startFrame            = anchor.frameAt(nowNanos) - data.frameCount;
+        placement.placedAgainstPlayback = true;
+    } else {
+        placement.startFrame = audioEngine.transport().position() - data.frameCount;
     }
 
     if (placement.startFrame < 0)

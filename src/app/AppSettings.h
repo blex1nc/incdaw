@@ -59,6 +59,13 @@ struct AppSettings {
     /// the user did not ask for. Arming a recording opens it on demand.
     bool openInputAtLaunch = false;
 
+    /// Whether the input pre-record buffer runs (engine/audio/AudioLogger.h).
+    ///
+    /// Off, for the same reason `openInputAtLaunch` is off and more so: this
+    /// one keeps the last minute of the microphone in memory. It is a decision
+    /// the user makes, not one they inherit from a preferences file.
+    bool inputPreRecordEnabled = false;
+
     /// MIDI sources to connect. Empty means every available source, which is
     /// what someone who plugs in a keyboard and plays a note expects.
     std::vector<std::string> midiInputIdentifiers;

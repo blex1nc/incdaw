@@ -104,6 +104,22 @@ public:
     /// map is linear); loop recording is separate, outstanding Phase 12 work.
     [[nodiscard]] Placement finish(engine::AudioEngine& audioEngine);
 
+    /// Keeps what the input has been doing, without a recording having been
+    /// started — the take nobody armed.
+    ///
+    /// The engine's input logger holds the last minute of the input whether
+    /// or not anything asked for it (engine/audio/AudioLogger.h). This writes
+    /// that window to a file in `directory` and places it so that its END is
+    /// NOW: the sound just played is the sound that lands under the playhead
+    /// it was played against, which is the only placement that makes the
+    /// feature worth having.
+    ///
+    /// `seconds` trims the window to the most recent span; zero keeps all of
+    /// it. Fails when the buffer is off, unprepared, or empty.
+    [[nodiscard]] Placement keepPreRoll(engine::AudioEngine&         audioEngine,
+                                        const std::filesystem::path& directory,
+                                        double                       seconds = 0.0);
+
     [[nodiscard]] bool isRecording() const noexcept { return recorder_.isRecording(); }
 
     /// Live counters for the UI while recording.

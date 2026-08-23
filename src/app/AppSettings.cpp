@@ -47,6 +47,7 @@ std::string AppSettings::toJson() const
     audioObject.set("outputChannels", static_cast<std::int64_t>(audio.outputChannels));
     audioObject.set("inputChannels", static_cast<std::int64_t>(audio.inputChannels));
     audioObject.set("openInputAtLaunch", openInputAtLaunch);
+    audioObject.set("inputPreRecord", inputPreRecordEnabled);
     root.set("audio", std::move(audioObject));
 
     Json midiObject = Json::object();
@@ -103,6 +104,7 @@ AppSettings AppSettings::fromJson(const std::string& text)
                                                                   static_cast<std::int64_t>(settings.audio.inputChannels)),
                                                               settings.audio.inputChannels);
         settings.openInputAtLaunch    = audioObject["openInputAtLaunch"].asBool(false);
+        settings.inputPreRecordEnabled = audioObject["inputPreRecord"].asBool(false);
     }
 
     const Json& inputs = root["midi"]["inputs"];

@@ -21,6 +21,7 @@ add_executable(incdaw_tests
     unit/MidiFeedbackTests.cpp
     unit/DeviceWatcherTests.cpp
     unit/MpeTests.cpp
+    unit/PreRecordTests.cpp
     unit/CommandTests.cpp
     unit/ProjectSessionTests.cpp
     unit/StoppedTransportTests.cpp

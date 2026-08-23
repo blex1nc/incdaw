@@ -8,6 +8,32 @@ public version yet.
 
 ## [Unreleased]
 
+### Recording — the take nobody armed — 2026-08-23
+
+- **An input-side pre-record buffer.** The last minute of whatever is
+  coming *in*, kept whether or not a recording was started, and landed as
+  a take ending at the playhead — so the pass that was meant as a
+  rehearsal, and was better than the three that followed it, is still
+  there. Audio → Input Pre-Record Buffer, and Keep Last Input as Take.
+- **A second `AudioLogger`, not a mode on the first.** Mechanically the
+  same keep-newest circle the master logger has used since Phase 12; the
+  separation is the point. The two capture different sound and are
+  switched on by different decisions, and one of them is a microphone. A
+  buffer that quietly became the room because playback logging was on is
+  a privacy bug, not a convenience.
+- **Off by default and prepared only when an input actually opened.** The
+  preference is remembered, but it is re-applied on each device start and
+  only where there is something to record — the difference between
+  honouring a preference and pretending to.
+- **It ends now.** The window is placed so its last frame sits at the
+  playhead: the sound just played lands under the playhead it was played
+  against. Anywhere else and the feature is worse than not having it. A
+  window longer than the song so far clamps to zero rather than placing a
+  clip before time.
+- Fed before the monitor path, so what it holds is the input itself
+  rather than anything monitoring did to it.
+
+
 ### Audio editor — the markers become visible and editable — 2026-08-23
 
 - **Drawn over the waveform.** A point is a line with a flag and its name;

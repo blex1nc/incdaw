@@ -18,10 +18,12 @@ namespace incdaw::engine {
 /// the copy. A grab is at worst a few milliseconds short at its far end,
 /// never torn in the middle, and never a lock anywhere near the callback.
 ///
-/// This logs the MASTER — what the graph rendered, which includes monitored
-/// input only while monitoring is on. An input-side pre-record buffer is a
-/// separate (deferred) feature; conflating them would log the microphone
-/// while the user believed only playback was kept.
+/// One instance logs the MASTER — what the graph rendered, which includes
+/// monitored input only while monitoring is on. A SECOND instance logs the
+/// input, and the two are separate on purpose rather than by omission:
+/// conflating them would log the microphone while the user believed only
+/// playback was kept, and each is switched on by its own decision
+/// (`AudioEngine::logger` and `AudioEngine::inputLogger`).
 class AudioLogger {
 public:
     /// Allocates for `seconds` of `channelCount` audio. Off the audio

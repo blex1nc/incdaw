@@ -1443,6 +1443,79 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self refreshStatus];
 }
 
+/// The input-side pre-record buffer: the last minute of what is coming IN,
+/// kept whether or not anything asked for a recording.
+///
+/// A separate switch from the Audio Logger and not an oversight: one of these
+/// is a microphone. A buffer that quietly became the room because playback
+/// logging was on is a privacy bug, not a convenience (engine/audio/
+/// AudioLogger.h).
+/// Restores the pre-record buffer's switch after the device opens.
+///
+/// The buffer is prepared per device start and defaults to off, so a
+/// preference that says "on" has to be re-applied — and only when an input
+/// actually opened, which is the difference between honouring the preference
+/// and pretending to.
+- (void)applyInputBufferSetting
+{
+    if (!_audioReady)
+        return;
+
+    auto& logger = _audio->inputLogger();
+    logger.setEnabled(_settings.inputPreRecordEnabled && logger.channelCount() > 0);
+}
+
+- (void)toggleInputBuffer:(NSMenuItem*)sender
+{
+    if (!_audioReady)
+        return;
+
+    auto& logger = _audio->inputLogger();
+
+    if (logger.channelCount() == 0) {
+        _lastRecordError = @"input buffer: no input device is open";
+        [self refreshStatus];
+        return;
+    }
+
+    logger.setEnabled(!logger.isEnabled());
+    sender.state = logger.isEnabled() ? NSControlStateValueOn : NSControlStateValueOff;
+
+    _settings.inputPreRecordEnabled = logger.isEnabled();
+    [self persistSettings];
+    [self refreshStatus];
+}
+
+/// Lands what the input has been doing as a take, ending at the playhead.
+///
+/// This is the take nobody armed: the pass that was meant as a rehearsal, and
+/// was better than the three that followed it.
+- (void)keepInputBuffer:(id)sender
+{
+    (void)sender;
+
+    if (!_audioReady)
+        return;
+
+    NSString* music = [NSSearchPathForDirectoriesInDomains(NSMusicDirectory,
+                                                           NSUserDomainMask, YES) firstObject];
+    const std::filesystem::path directory =
+        std::filesystem::path{music.UTF8String} / "INCDAW" / "Recordings";
+
+    const auto placement = _recording.keepPreRoll(*_audio, directory);
+
+    if (!placement) {
+        _lastRecordError = @(placement.error.c_str());
+        [self refreshStatus];
+        return;
+    }
+
+    (void)_registry->execute(std::make_unique<app::InsertRecordedTakeCommand>(placement));
+
+    _lastRecordError = nil;
+    [self audioAssetChanged];
+}
+
 - (void)grabAudioLog:(id)sender
 {
     (void)sender;
@@ -1793,6 +1866,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     _audioReady = YES;
     _chosenOutputWasPresent = YES;
     _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
+    [self applyInputBufferSetting];
 
     NSLog(@"INCDAW: audio started — %s, %.0f Hz, %lld frames",
           _audio->deviceName().c_str(), _audio->sampleRate(),
@@ -1926,6 +2000,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     _chosenOutputWasPresent = YES;   // whatever it opened on is what it is now on
     _audio->transport().tempoMapForEdit().setSampleRate(_audio->sampleRate());
     _audio->transport().seekToTick(position);
+    [self applyInputBufferSetting];
 
     [self openMidiInputs];
     [self rebuildGraph];
@@ -5221,6 +5296,18 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                 action:@selector(grabAudioLog:)
                                          keyEquivalent:@""];
     grabItem.target = self;
+
+    // The input side of the same idea, on its own switch: one of these two
+    // buffers is a microphone.
+    NSMenuItem* inputBufferItem = [audioMenu addItemWithTitle:@"Input Pre-Record Buffer"
+                                                       action:@selector(toggleInputBuffer:)
+                                                keyEquivalent:@""];
+    inputBufferItem.target = self;
+
+    NSMenuItem* keepInputItem = [audioMenu addItemWithTitle:@"Keep Last Input as Take"
+                                                     action:@selector(keepInputBuffer:)
+                                              keyEquivalent:@""];
+    keepInputItem.target = self;
 
     [audioMenu addItem:[NSMenuItem separatorItem]];
 

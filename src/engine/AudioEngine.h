@@ -124,6 +124,20 @@ public:
     [[nodiscard]] AudioLogger&       logger()       noexcept { return logger_; }
     [[nodiscard]] const AudioLogger& logger() const noexcept { return logger_; }
 
+    /// The input-side pre-record buffer: the last N seconds of whatever is
+    /// coming IN, whether or not anything asked for a recording.
+    ///
+    /// The same mechanism as the master logger and deliberately a second
+    /// instance of it rather than a mode on the first. They capture different
+    /// sound, they are switched on by different decisions, and one of them is
+    /// a microphone — a buffer that quietly became the room because playback
+    /// logging was on would be a privacy bug, not a convenience.
+    ///
+    /// Off by default, and prepared only when the device actually opened an
+    /// input.
+    [[nodiscard]] AudioLogger&       inputLogger()       noexcept { return inputLogger_; }
+    [[nodiscard]] const AudioLogger& inputLogger() const noexcept { return inputLogger_; }
+
     /// The Browser's preview source, mixed after the project graph.
     ///
     /// Deliberately not a graph node: a preview must sound with the transport
@@ -284,6 +298,7 @@ private:
     std::atomic<bool>   monitorEnabled_{false};
 
     AudioLogger logger_;
+    AudioLogger inputLogger_;
 };
 
 } // namespace incdaw::engine

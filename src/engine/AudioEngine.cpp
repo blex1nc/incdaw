@@ -189,6 +189,17 @@ void AudioEngine::audioDeviceAboutToStart(double sampleRateHz, std::int64_t bloc
                                        : 2,
                     60.0);
 
+    // The input side, prepared only when there IS an input: allocating a
+    // minute of a microphone that was never opened is a minute of memory for
+    // silence that will never arrive.
+    const std::size_t inputChannels =
+        device_ != nullptr ? device_->actualInputChannels() : 0;
+
+    if (inputChannels > 0)
+        inputLogger_.prepare(sampleRateHz, inputChannels, 60.0);
+    else
+        inputLogger_.setEnabled(false);
+
     rt::resetViolations();
 }
 
@@ -331,6 +342,11 @@ void AudioEngine::captureAudioBlock(const float* const* inputChannels, std::size
 
     if (AudioCaptureSink* sink = captureSink_.load(std::memory_order_acquire))
         sink->captureAudioBlock(inputChannels, channelCount, frameCount, blockHostTimeNanos);
+
+    // The pre-record buffer: the last minute of the input, kept whether or not
+    // anything asked for a recording. Before the monitor path, so what it
+    // holds is the input itself rather than anything monitoring did to it.
+    inputLogger_.log(inputChannels, channelCount, frameCount);
 
     // The monitor path: interleave into the ring for the output side to
     // drain. Whole frames only, dropped when full — a full ring means the
