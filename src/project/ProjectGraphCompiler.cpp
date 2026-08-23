@@ -736,8 +736,12 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 placed.length        = clip.length;
                 placed.sourceOffset  = clip.sourceOffset;
                 placed.gain          = static_cast<engine::Sample>(clip.gain);
-                placed.fadeInFrames  = clip.fadeInFrames;
-                placed.fadeOutFrames = clip.fadeOutFrames;
+                // Manual fades, or the overlap where this edge crossfades —
+                // resolved by the model so the ramp drawn in the playlist and
+                // the ramp the speakers play are the same arithmetic.
+                const ClipFades fades = clipFades(project, clip);
+                placed.fadeInFrames  = fades.in;
+                placed.fadeOutFrames = fades.out;
 
                 if (warped && placed.audio != nullptr && clip.stretchRatio > 0.0) {
                     // The source span that fills the clip's timeline length at

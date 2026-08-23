@@ -88,6 +88,7 @@ requires a migration step.
 | 1.7 | TRACK B / B4 | Tracks gained `collapsed`, whether a folder track hides its children. `type` has always serialized as an integer and `parent` has always been written, so folder tracks themselves need no conversion. Additive. |
 | 1.8 | TRACK B / B5 | Clips gained `group`, the clip group they belong to. A group is exactly the set of clips carrying one id; it names no entity of its own. Additive. |
 | 1.9 | TRACK B / B6 | Clips gained `lane`, which lane of their track they occupy. A track's lane count is derived from its clips rather than stored, so nothing else moved. Additive. |
+| 1.10 | TRACK B / B7 | Clips gained `crossfadeIn` / `crossfadeOut`, whether each edge crossfades with the clip it overlaps on its lane. Per edge, so three chained clips can keep one crossfade and lose the other. The fade lengths stay derived from the overlap. Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -152,6 +153,11 @@ two of them grouped) is kept permanently.
 per track, which is all those projects ever had.
 `tests/fixtures/v1.9/Fixture.incdaw` (frozen: two pattern clips sharing a span
 on two lanes of one track) is kept permanently.
+
+**Reading a 1.9 file.** Purely additive: neither crossfade flag, read back
+false — those clips play the manual fades they always did.
+`tests/fixtures/v1.10/Fixture.incdaw` (frozen: two audio clips overlapping by
+1,000 frames with the pair crossfaded) is kept permanently.
 
 ---
 

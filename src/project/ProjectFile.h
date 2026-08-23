@@ -55,7 +55,12 @@ inline constexpr int projectFormatMajor = 1;
 /// track's lane count is derived from its clips, so nothing else moved.
 /// Additive: a 1.8 file has no `lane` and reads back on lane zero, which is
 /// the single lane those projects had.
-inline constexpr int projectFormatMinor = 9;
+///
+/// 1.10 (TRACK B / B7): a clip carries whether each of its edges crossfades
+/// with the clip it overlaps. The fade lengths stay derived from the overlap,
+/// so nothing else moved. Additive: a 1.9 file has neither flag and plays the
+/// manual fades it always did.
+inline constexpr int projectFormatMinor = 10;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

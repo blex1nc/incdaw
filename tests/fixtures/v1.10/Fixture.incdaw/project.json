@@ -1,0 +1,129 @@
+{
+  "metadata": {
+    "title": "Format v1.10 fixture",
+    "artist": "INCDAW",
+    "comment": ""
+  },
+  "tempo": {
+    "events": [
+      {
+        "tick": 0,
+        "bpm": 120
+      }
+    ],
+    "timeSignatures": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "masterMixerNode": 1,
+  "nextEntityId": 6,
+  "mixerNodes": [
+    {
+      "id": 1,
+      "type": 2,
+      "name": "Master",
+      "colour": 4287141030,
+      "volume": 1,
+      "pan": 0,
+      "muted": false,
+      "soloed": false,
+      "polarityFlip": false,
+      "stereoSeparation": 0,
+      "inserts": []
+    }
+  ],
+  "tracks": [
+    {
+      "id": 2,
+      "type": 1,
+      "name": "Audio",
+      "colour": 4282034687,
+      "parent": 0,
+      "outputMixerNode": 1,
+      "muted": false,
+      "soloed": false,
+      "height": 64,
+      "collapsed": false
+    }
+  ],
+  "channels": [],
+  "clips": [
+    {
+      "id": 4,
+      "type": 0,
+      "track": 2,
+      "source": 3,
+      "startTick": 0,
+      "lengthTicks": 0,
+      "sourceOffsetTicks": 0,
+      "start": 0,
+      "length": 4000,
+      "sourceOffset": 0,
+      "gain": 1,
+      "pan": 0,
+      "normalize": false,
+      "reversed": false,
+      "muted": false,
+      "locked": false,
+      "group": 0,
+      "lane": 0,
+      "crossfadeIn": false,
+      "crossfadeOut": true,
+      "fadeInFrames": 0,
+      "fadeOutFrames": 0,
+      "pitchSemitones": 0,
+      "stretchRatio": 1,
+      "name": "A",
+      "colour": 4284914124
+    },
+    {
+      "id": 5,
+      "type": 0,
+      "track": 2,
+      "source": 3,
+      "startTick": 0,
+      "lengthTicks": 0,
+      "sourceOffsetTicks": 0,
+      "start": 3000,
+      "length": 4000,
+      "sourceOffset": 0,
+      "gain": 1,
+      "pan": 0,
+      "normalize": false,
+      "reversed": false,
+      "muted": false,
+      "locked": false,
+      "group": 0,
+      "lane": 0,
+      "crossfadeIn": true,
+      "crossfadeOut": false,
+      "fadeInFrames": 0,
+      "fadeOutFrames": 0,
+      "pitchSemitones": 0,
+      "stretchRatio": 1,
+      "name": "B",
+      "colour": 4284914124
+    }
+  ],
+  "automation": [],
+  "audioAssets": [
+    {
+      "id": 3,
+      "relativePath": "",
+      "absolutePath": "/Users/toprak/INCDAW X/.claude/worktrees/arrange/tests/fixtures/v1.10/Fixture.incdaw/flat.wav",
+      "contentHash": "",
+      "embedded": false,
+      "sampleRate": 48000,
+      "frameCount": 8000,
+      "channelCount": 0
+    }
+  ],
+  "midiMappings": [],
+  "markers": [],
+  "routing": [],
+  "patterns": []
+}

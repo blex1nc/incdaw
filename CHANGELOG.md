@@ -8,6 +8,28 @@ public version yet.
 
 ## [Unreleased]
 
+### Playlist — crossfades, and clip fades you can actually set — 2026-08-23
+
+- **Per-clip fades have a command at last.** `Clip::fadeInFrames` and
+  `fadeOutFrames` were applied by the compiler and set by nothing; **Fade
+  In…** and **Fade Out…** on the clip menu now set them, in milliseconds
+  rather than frames, mergeable so a change is one undo entry. These are
+  the non-destructive placement fades — the audio editor's Fade In is a
+  different operation that rewrites the file.
+- **Crossfade is a verb over a pair.** Two audio clips that overlap on one
+  lane join with **Crossfade**; the command marks the two edges and nothing
+  else. The fade lengths are the overlap, worked out wherever the fades are
+  read, so the pair stays complementary when either clip is moved or
+  resized — there is no stored length to go stale. Two clips of the same
+  material sum to exactly the level of one across the whole overlap, before
+  and after a resize.
+- **Per edge, not per clip.** Three clips chained on a lane keep two
+  separate crossfades, and removing the second leaves the first standing.
+- **Drawn from the same arithmetic it is played from**, so the ramp on
+  screen is the ramp in the speakers rather than a picture of one.
+- **Project format 1.10.** Clips gained the two flags. A 1.9 file plays the
+  manual fades it always did.
+
 ### Playlist — a track more than one clip deep — 2026-08-23
 
 - **Lanes.** A clip carries which lane of its track it sits on, so two clips

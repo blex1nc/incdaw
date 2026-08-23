@@ -390,11 +390,52 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         else
             [self drawPatternPreviewFor:model inBody:body];
 
+        if (model.type == project::ClipType::audio)
+            [self drawFadesFor:model inBody:body];
+
         if (model.group.isValid())
             [self drawGroupTieIn:body forGroup:model.group];
 
         if (model.locked)
             [self drawLockMarkIn:body];
+    }
+}
+
+/// The fade ramps, drawn from the same arithmetic the compiler plays: a
+/// crossfaded edge shows the whole overlap, so what the eye reads as the
+/// crossover is where it actually is.
+- (void)drawFadesFor:(const project::Clip&)clip inBody:(NSRect)body
+{
+    const project::ClipFades fades = project::clipFades(*_project, clip);
+    if ((fades.in == 0 && fades.out == 0) || clip.length == 0 || body.size.width < 2.0)
+        return;
+
+    const CGFloat perFrame = body.size.width / static_cast<CGFloat>(clip.length);
+
+    [theme::withAlpha(theme::ink(Ink::panel), 0.55) setFill];
+
+    if (fades.in > 0) {
+        const CGFloat width = std::min(body.size.width,
+                                       static_cast<CGFloat>(fades.in) * perFrame);
+
+        NSBezierPath* wedge = [NSBezierPath bezierPath];
+        [wedge moveToPoint:NSMakePoint(NSMinX(body), NSMinY(body))];
+        [wedge lineToPoint:NSMakePoint(NSMinX(body) + width, NSMaxY(body))];
+        [wedge lineToPoint:NSMakePoint(NSMinX(body), NSMaxY(body))];
+        [wedge closePath];
+        [wedge fill];
+    }
+
+    if (fades.out > 0) {
+        const CGFloat width = std::min(body.size.width,
+                                       static_cast<CGFloat>(fades.out) * perFrame);
+
+        NSBezierPath* wedge = [NSBezierPath bezierPath];
+        [wedge moveToPoint:NSMakePoint(NSMaxX(body), NSMinY(body))];
+        [wedge lineToPoint:NSMakePoint(NSMaxX(body) - width, NSMaxY(body))];
+        [wedge lineToPoint:NSMakePoint(NSMaxX(body), NSMaxY(body))];
+        [wedge closePath];
+        [wedge fill];
     }
 }
 
@@ -1310,6 +1351,28 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
     [menu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem* fadeIn = [menu addItemWithTitle:@"Fade In\u2026"
+                                         action:@selector(fadeInFromMenu:)
+                                  keyEquivalent:@""];
+    fadeIn.target = self;
+
+    NSMenuItem* fadeOut = [menu addItemWithTitle:@"Fade Out\u2026"
+                                          action:@selector(fadeOutFromMenu:)
+                                   keyEquivalent:@""];
+    fadeOut.target = self;
+
+    NSMenuItem* crossfade = [menu addItemWithTitle:@"Crossfade"
+                                            action:@selector(crossfadeFromMenu:)
+                                     keyEquivalent:@""];
+    crossfade.target = self;
+
+    NSMenuItem* uncrossfade = [menu addItemWithTitle:@"Remove Crossfade"
+                                              action:@selector(removeCrossfadeFromMenu:)
+                                       keyEquivalent:@""];
+    uncrossfade.target = self;
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem* group = [menu addItemWithTitle:@"Group"
                                         action:@selector(groupFromMenu:)
                                  keyEquivalent:@""];
@@ -1520,6 +1583,78 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     (void)sender;
     [self commit:std::make_unique<app::SetClipMutedCommand>(_model->selection(), false)];
+}
+
+- (void)crossfadeFromMenu:(id)sender
+{
+    (void)sender;
+
+    if (!_registry->execute(
+            std::make_unique<app::CrossfadeClipsCommand>(_model->selection(), true))) {
+        [self refuse:@"Select two audio clips that overlap on one lane."];
+        return;
+    }
+
+    [self changed];
+}
+
+- (void)removeCrossfadeFromMenu:(id)sender
+{
+    (void)sender;
+    [self commit:std::make_unique<app::CrossfadeClipsCommand>(_model->selection(), false)];
+}
+
+- (void)fadeInFromMenu:(id)sender { (void)sender; [self editFadeIncoming:YES]; }
+- (void)fadeOutFromMenu:(id)sender { (void)sender; [self editFadeIncoming:NO]; }
+
+/// The fade length in milliseconds, not frames: a fade is a duration the ear
+/// judges, and the sample rate is not the user's problem.
+- (void)editFadeIncoming:(BOOL)incoming
+{
+    const app::ClipIds& selection = _model->selection();
+    if (selection.empty())
+        return;
+
+    const project::Clip* first = nullptr;
+    for (const project::EntityId id : selection) {
+        const project::Clip* clip = _project->findClip(id);
+        if (clip != nullptr && clip->type == project::ClipType::audio) {
+            first = clip;
+            break;
+        }
+    }
+
+    if (first == nullptr) {
+        [self refuse:@"Clip fades apply to audio clips."];
+        return;
+    }
+
+    const double rate = _project->tempoMap().sampleRate() > 0.0
+                            ? _project->tempoMap().sampleRate()
+                            : 48000.0;
+
+    const auto current = static_cast<double>(incoming ? first->fadeInFrames
+                                                      : first->fadeOutFrames);
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = incoming ? @"Fade in" : @"Fade out";
+    alert.informativeText = @"Length in milliseconds.";
+    [alert addButtonWithTitle:@"Set"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 160, 24)];
+    field.stringValue = [NSString stringWithFormat:@"%.0f", current / rate * 1000.0];
+    alert.accessoryView = field;
+
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return;
+
+    const auto frames = static_cast<long long>(
+        std::max(0.0, field.doubleValue) / 1000.0 * rate);
+
+    [self commit:std::make_unique<app::SetClipFadesCommand>(selection,
+                                                            incoming ? frames : -1,
+                                                            incoming ? -1 : frames)];
 }
 
 - (void)groupFromMenu:(id)sender

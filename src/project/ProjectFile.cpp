@@ -344,6 +344,8 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("locked", clip.locked);
         json.set("group", toJson(clip.group));
         json.set("lane", static_cast<std::int64_t>(clip.lane));
+        json.set("crossfadeIn", clip.crossfadeIn);
+        json.set("crossfadeOut", clip.crossfadeOut);
         json.set("fadeInFrames", static_cast<std::int64_t>(clip.fadeInFrames));
         json.set("fadeOutFrames", static_cast<std::int64_t>(clip.fadeOutFrames));
         json.set("pitchSemitones", clip.pitchSemitones);
@@ -731,6 +733,8 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         clip.locked         = json["locked"].asBool(false);
         clip.group          = idFrom(json["group"]);
         clip.lane           = std::max(0, static_cast<int>(json["lane"].asInt(0)));
+        clip.crossfadeIn    = json["crossfadeIn"].asBool(false);
+        clip.crossfadeOut   = json["crossfadeOut"].asBool(false);
         clip.fadeInFrames   = json["fadeInFrames"].asInt(0);
         clip.fadeOutFrames  = json["fadeOutFrames"].asInt(0);
         clip.pitchSemitones = json["pitchSemitones"].asDouble(0.0);
@@ -959,6 +963,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // and reads back zero — one lane per track, which is all those projects
     // ever had.
     if (major == 1 && minor == 8) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.9 -> 1.10. Purely additive: `crossfadeIn` / `crossfadeOut` are absent
+    // from a 1.9 document and read back false — the manual fades those clips
+    // carried are exactly what they play, which is what they always did.
+    if (major == 1 && minor == 9) {
         result.succeeded = true;
         return result;
     }

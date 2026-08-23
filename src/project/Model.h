@@ -207,6 +207,16 @@ struct Clip {
     FrameCount    fadeInFrames  = 0;
     FrameCount    fadeOutFrames = 0;
 
+    /// Whether this edge crossfades with the clip it overlaps on its lane.
+    ///
+    /// Per edge rather than per clip, so that three clips chained on one lane
+    /// can keep the first crossfade while the second is removed — one flag per
+    /// clip could not say that. The fade LENGTHS are not stored: they are the
+    /// overlap, worked out wherever the fades are needed, which is what keeps
+    /// a crossfade complementary when either clip is moved or resized.
+    bool          crossfadeIn   = false;
+    bool          crossfadeOut  = false;
+
     double        pitchSemitones = 0.0;
     double        stretchRatio   = 1.0;
 
@@ -620,6 +630,26 @@ private:
 /// than defended against afterwards: a cycle in the tree is a corrupt project,
 /// and the only honest moment to refuse one is before it exists.
 [[nodiscard]] bool trackWouldCycle(const Project& project, EntityId track, EntityId parent) noexcept;
+
+/// The fades a clip actually plays with.
+///
+/// Manual fades, except on an edge where this clip and the clip it overlaps on
+/// its lane have both asked to crossfade — there the fade is the overlap, so
+/// the pair sums to unity across it and stays that way when either clip moves
+/// or is resized. Derived rather than stored, and derived HERE rather than in
+/// the compiler, so the ramp the playlist draws is the ramp the speakers play.
+struct ClipFades {
+    FrameCount in  = 0;
+    FrameCount out = 0;
+
+    [[nodiscard]] friend bool operator==(const ClipFades&, const ClipFades&) = default;
+};
+
+[[nodiscard]] ClipFades clipFades(const Project& project, const Clip& clip) noexcept;
+
+/// The clip `clip` crossfades with on the named edge, or null.
+[[nodiscard]] const Clip* crossfadePartner(const Project& project, const Clip& clip,
+                                           bool incoming) noexcept;
 
 /// How many lanes a track shows: one more than the highest lane in use, and
 /// never fewer than one.

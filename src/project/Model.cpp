@@ -725,6 +725,69 @@ bool trackWouldCycle(const Project& project, EntityId track, EntityId parent) no
                        [track](const Track& node) { return node.id == track; });
 }
 
+const Clip* crossfadePartner(const Project& project, const Clip& clip, bool incoming) noexcept
+{
+    if (clip.type != ClipType::audio)
+        return nullptr;
+    if (incoming ? !clip.crossfadeIn : !clip.crossfadeOut)
+        return nullptr;
+
+    const FramePosition start = clip.start;
+    const FramePosition end   = clip.start + static_cast<FramePosition>(clip.length);
+
+    const Clip* best = nullptr;
+
+    for (const Clip& other : project.clips()) {
+        if (other.id == clip.id || other.type != ClipType::audio)
+            continue;
+        if (other.track != clip.track || other.lane != clip.lane)
+            continue;
+
+        const FramePosition otherStart = other.start;
+        const FramePosition otherEnd   = other.start
+                                       + static_cast<FramePosition>(other.length);
+
+        // The incoming edge pairs with a clip that started earlier and is
+        // still sounding; the outgoing edge with one that starts inside this
+        // clip and carries on.
+        const bool matches = incoming
+                                 ? (other.crossfadeOut && otherStart < start && otherEnd > start)
+                                 : (other.crossfadeIn && otherStart > start && otherStart < end);
+        if (!matches)
+            continue;
+
+        // Nearest wins, so a stack of three keeps its two separate pairs.
+        if (best == nullptr
+            || (incoming ? other.start > best->start : other.start < best->start))
+            best = &other;
+    }
+
+    return best;
+}
+
+ClipFades clipFades(const Project& project, const Clip& clip) noexcept
+{
+    ClipFades fades{clip.fadeInFrames, clip.fadeOutFrames};
+
+    if (const Clip* partner = crossfadePartner(project, clip, true)) {
+        const FramePosition partnerEnd = partner->start
+                                       + static_cast<FramePosition>(partner->length);
+        const FramePosition overlapEnd =
+            std::min(partnerEnd, clip.start + static_cast<FramePosition>(clip.length));
+
+        fades.in = static_cast<FrameCount>(std::max<FramePosition>(0, overlapEnd - clip.start));
+    }
+
+    if (const Clip* partner = crossfadePartner(project, clip, false)) {
+        const FramePosition end = clip.start + static_cast<FramePosition>(clip.length);
+        const FramePosition overlapStart = std::max(partner->start, clip.start);
+
+        fades.out = static_cast<FrameCount>(std::max<FramePosition>(0, end - overlapStart));
+    }
+
+    return fades;
+}
+
 int trackLaneCount(const Project& project, EntityId track) noexcept
 {
     int highest = 0;

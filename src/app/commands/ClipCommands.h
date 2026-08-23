@@ -269,6 +269,79 @@ private:
     std::vector<double> previous_;
 };
 
+/// The clip's own fade in and out, in frames.
+///
+/// Non-destructive and part of the placement: the asset is untouched, and two
+/// clips of one recording can fade differently. The audio editor's Fade In is
+/// a different operation on a different thing — it rewrites the file.
+/// Mergeable, so dragging a fade handle is one undo entry.
+class SetClipFadesCommand final : public Command {
+public:
+    /// A negative length leaves that edge alone, so one command can set either
+    /// fade without needing to know the other.
+    SetClipFadesCommand(ClipIds clips, long long fadeInFrames, long long fadeOutFrames)
+        : clips_(std::move(clips)), in_(fadeInFrames), out_(fadeOutFrames) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.setFades"; }
+    [[nodiscard]] std::string name() const override { return "Set Clip Fade"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    [[nodiscard]] bool canMergeWith(const Command& next) const noexcept override;
+    void mergeWith(const Command& next) override;
+
+private:
+    struct Previous {
+        EntityId            id;
+        project::FrameCount in  = 0;
+        project::FrameCount out = 0;
+    };
+
+    ClipIds               clips_;
+    long long             in_  = -1;
+    long long             out_ = -1;
+    std::vector<Previous> previous_;
+};
+
+/// Crossfades a pair of audio clips that overlap on one lane.
+///
+/// The verb marks the two edges; the fade lengths are the overlap, worked out
+/// wherever the fades are read. That is what makes the pair stay complementary
+/// when either clip is later moved or resized — there is no stored length to
+/// go stale.
+///
+/// It does not expand to groups: a crossfade is a fact about one edge meeting
+/// one other, not about a set. It is allowed on locked clips, because a lock
+/// protects an arrangement decision and a fade is a mix one.
+class CrossfadeClipsCommand final : public Command {
+public:
+    /// Pass the two clips to join, or a wider selection to crossfade every
+    /// overlapping same-lane pair in it.
+    explicit CrossfadeClipsCommand(ClipIds clips, bool crossfade = true)
+        : clips_(std::move(clips)), crossfade_(crossfade) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.crossfade"; }
+    [[nodiscard]] std::string name() const override
+    {
+        return crossfade_ ? "Crossfade" : "Remove Crossfade";
+    }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    struct Previous {
+        EntityId id;
+        bool     in  = false;
+        bool     out = false;
+    };
+
+    ClipIds               clips_;
+    bool                  crossfade_ = true;
+    std::vector<Previous> previous_;
+};
+
 /// Ties clips together so that they move, copy and delete as one.
 ///
 /// The group is project state: it is saved with the song, it survives reopen,

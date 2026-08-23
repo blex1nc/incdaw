@@ -729,6 +729,144 @@ void SetClipPanCommand::mergeWith(const Command& next)
         pan_ = other->pan_;
 }
 
+// ── SetClipFadesCommand ───────────────────────────────────────────────────────
+
+bool SetClipFadesCommand::execute(Project& project)
+{
+    expandToGroups(project, clips_);
+
+    previous_.clear();
+
+    bool changed = false;
+
+    for (const EntityId id : clips_) {
+        Clip* clip = project.findClip(id);
+        if (clip == nullptr || clip->type != project::ClipType::audio)
+            continue;
+
+        previous_.push_back({id, clip->fadeInFrames, clip->fadeOutFrames});
+
+        // A fade longer than the clip would ramp past its own end.
+        const auto limit = static_cast<long long>(clip->length);
+
+        if (in_ >= 0) {
+            const auto wanted = static_cast<project::FrameCount>(std::min(in_, limit));
+            changed = changed || wanted != clip->fadeInFrames;
+            clip->fadeInFrames = wanted;
+        }
+
+        if (out_ >= 0) {
+            const auto wanted = static_cast<project::FrameCount>(std::min(out_, limit));
+            changed = changed || wanted != clip->fadeOutFrames;
+            clip->fadeOutFrames = wanted;
+        }
+    }
+
+    return changed;
+}
+
+void SetClipFadesCommand::undo(Project& project)
+{
+    for (const Previous& entry : previous_) {
+        if (Clip* clip = project.findClip(entry.id)) {
+            clip->fadeInFrames  = entry.in;
+            clip->fadeOutFrames = entry.out;
+        }
+    }
+}
+
+bool SetClipFadesCommand::canMergeWith(const Command& next) const noexcept
+{
+    const auto* other = dynamic_cast<const SetClipFadesCommand*>(&next);
+    return other != nullptr && other->clips_ == clips_
+        && (other->in_ >= 0) == (in_ >= 0) && (other->out_ >= 0) == (out_ >= 0);
+}
+
+void SetClipFadesCommand::mergeWith(const Command& next)
+{
+    if (const auto* other = dynamic_cast<const SetClipFadesCommand*>(&next)) {
+        in_  = other->in_;
+        out_ = other->out_;
+    }
+}
+
+// ── CrossfadeClipsCommand ─────────────────────────────────────────────────────
+
+bool CrossfadeClipsCommand::execute(Project& project)
+{
+    previous_.clear();
+
+    // Every overlapping same-lane pair inside the selection. A two-clip
+    // selection is the common case and falls straight out of this.
+    std::vector<const Clip*> audio;
+    for (const EntityId id : clips_) {
+        const Clip* clip = project.findClip(id);
+        if (clip != nullptr && clip->type == project::ClipType::audio)
+            audio.push_back(clip);
+    }
+
+    std::sort(audio.begin(), audio.end(),
+              [](const Clip* a, const Clip* b) { return a->start < b->start; });
+
+    std::vector<std::pair<EntityId, EntityId>> pairs;
+
+    for (std::size_t index = 0; index + 1 < audio.size(); ++index) {
+        const Clip* earlier = audio[index];
+        const Clip* later   = audio[index + 1];
+
+        if (earlier->track != later->track || earlier->lane != later->lane)
+            continue;
+
+        const auto earlierEnd = earlier->start
+                              + static_cast<project::FramePosition>(earlier->length);
+        if (later->start >= earlierEnd || later->start <= earlier->start)
+            continue;   // no overlap, or one swallows the other
+
+        pairs.emplace_back(earlier->id, later->id);
+    }
+
+    if (pairs.empty())
+        return false;
+
+    const auto remember = [this, &project](EntityId id) {
+        if (std::find_if(previous_.begin(), previous_.end(),
+                         [id](const Previous& entry) { return entry.id == id; })
+            != previous_.end())
+            return;
+
+        const Clip* clip = project.findClip(id);
+        previous_.push_back({id, clip->crossfadeIn, clip->crossfadeOut});
+    };
+
+    bool changed = false;
+
+    for (const auto& [earlierId, laterId] : pairs) {
+        remember(earlierId);
+        remember(laterId);
+
+        Clip* earlier = project.findClip(earlierId);
+        Clip* later   = project.findClip(laterId);
+
+        changed = changed || earlier->crossfadeOut != crossfade_
+               || later->crossfadeIn != crossfade_;
+
+        earlier->crossfadeOut = crossfade_;
+        later->crossfadeIn    = crossfade_;
+    }
+
+    return changed;
+}
+
+void CrossfadeClipsCommand::undo(Project& project)
+{
+    for (const Previous& entry : previous_) {
+        if (Clip* clip = project.findClip(entry.id)) {
+            clip->crossfadeIn  = entry.in;
+            clip->crossfadeOut = entry.out;
+        }
+    }
+}
+
 // ── GroupClipsCommand ─────────────────────────────────────────────────────────
 
 bool GroupClipsCommand::execute(Project& project)
