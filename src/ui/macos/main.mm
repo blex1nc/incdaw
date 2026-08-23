@@ -37,6 +37,7 @@
 #include "platform/MidiDevice.h"
 #include "platform/SystemInfo.h"
 #include "plugins/PluginInstanceManager.h"
+#include "plugins/au/AudioUnitInstrument.h"
 #include "plugins/PluginRegistry.h"
 #include "project/MidiFile.h"
 #include "project/Model.h"
@@ -2761,6 +2762,38 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     options.parameters    = parameters;
     options.midiFeedback  = &_audio->midiFeedback();
+
+    // Hosted instruments. Audio Units have hosted as EFFECTS since Phase 13;
+    // instruments were excluded at the enumeration step, so every AU synth on
+    // the machine was invisible to a DAW that could already load its effects.
+    //
+    // The factory is only reached for a channel whose instrument is NOT a
+    // builtin — the compiler dispatches those itself — so the whole of hosted
+    // instrument support is this lambda plus the class it builds.
+    options.instrumentFactory = [parameters, sampleRate, maxFrames](
+                                    const project::Channel& channel)
+        -> std::unique_ptr<engine::Instrument> {
+        if (channel.instrument.format != plugins::Format::audioUnit)
+            return nullptr;   // a channel with no working instrument is silent
+
+        std::string error;
+        auto instrument = plugins::AudioUnitInstrument::create(channel.instrument.uid, sampleRate,
+                                                               maxFrames, error);
+
+        if (instrument == nullptr) {
+            NSLog(@"INCDAW: AU instrument %s: %s", channel.instrument.uid.c_str(), error.c_str());
+            return nullptr;
+        }
+
+        // Discovery lands in the registry here, exactly as it does for an
+        // insert: automation and MIDI learn bind to an AU instrument's
+        // parameters through the same keys they use for everything else.
+        if (parameters != nullptr)
+            parameters->registerPluginParameters(channel.instrument.uid, instrument->parameters());
+
+        return instrument;
+    };
+
     options.insertFactory = [instances, parameters, sampleRate, maxFrames](
                                 const project::PluginSlot& slot,
                                 std::string& error) -> std::unique_ptr<engine::Node> {

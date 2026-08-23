@@ -167,3 +167,156 @@ TEST_CASE("an Audio Unit is hosted as an insert like any other plugin")
     manager.retainOnlyInstances({});
     CHECK(manager.liveInstanceCount() == 0);
 }
+
+// ── C16: AU instrument hosting ───────────────────────────────────────────────
+//
+// AU effects have hosted since Phase 13; instruments were excluded at the
+// enumeration step, so every AU synth on the machine was invisible to a DAW
+// that could already load its effects. These run against whatever Apple ships,
+// which on every Mac includes DLSMusicDevice — a real instrument, not a stub.
+
+#include "engine/core/AudioBufferPool.h"
+#include "plugins/au/AudioUnitInstrument.h"
+
+namespace {
+
+/// The first Apple-supplied instrument the system reports, or an empty string.
+std::string firstAppleInstrument()
+{
+    for (const platform::AudioUnitDescription& unit : platform::scanAudioUnits()) {
+        if (unit.isInstrument && unit.uid.rfind("aumu:", 0) == 0
+            && unit.uid.size() > 5 && unit.uid.substr(unit.uid.size() - 5) == ":appl")
+            return unit.uid;
+    }
+
+    return {};
+}
+
+} // namespace
+
+TEST_CASE("the system reports instruments as well as effects")
+{
+    const auto units = platform::scanAudioUnits();
+
+    bool sawInstrument = false;
+    for (const platform::AudioUnitDescription& unit : units)
+        if (unit.isInstrument)
+            sawInstrument = true;
+
+    // Every Mac ships at least DLSMusicDevice. A machine that reports none is
+    // one where this feature has nothing to be tested against, so say so
+    // rather than passing quietly.
+    if (!sawInstrument) {
+        MESSAGE("no Audio Unit instruments on this machine — C16 not exercised");
+        return;
+    }
+
+    CHECK(sawInstrument);
+}
+
+TEST_CASE("an effect refuses to open as an instrument")
+{
+    const std::string effect = firstAppleEffect();
+    if (effect.empty()) {
+        MESSAGE("no Apple effect available");
+        return;
+    }
+
+    std::string error;
+
+    // Opening an effect as an instrument would attach no input callback and
+    // then render silence forever. Refused at the description, before anything
+    // is instantiated.
+    CHECK(platform::AudioUnitHandle::openInstrument(effect, 48000.0, 512, error) == nullptr);
+    CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("an instrument opens, takes MIDI and makes sound")
+{
+    const std::string uid = firstAppleInstrument();
+    if (uid.empty()) {
+        MESSAGE("no Apple instrument available");
+        return;
+    }
+
+    std::string error;
+    auto instrument = plugins::AudioUnitInstrument::create(uid, 48000.0, 512, error);
+
+    REQUIRE_MESSAGE(instrument != nullptr, error);
+
+    CHECK(instrument->activeVoiceCount() == 0);
+
+    engine::AudioBufferPool pool;
+    pool.allocate(1, 2, 512);
+
+    // Silence before the note: an instrument that produces sound unasked is
+    // not silent, it is broken.
+    pool.buffer(0).clear();
+    {
+        engine::MidiBuffer empty;
+        instrument->processBlock(pool.buffer(0), empty);
+    }
+
+    double before = 0.0;
+    for (engine::FrameCount frame = 0; frame < 512; ++frame)
+        before += std::abs(static_cast<double>(pool.buffer(0).channel(0)[frame]));
+
+    CHECK(before == doctest::Approx(0.0).epsilon(0.001));
+
+    // A note on, then several blocks: an instrument with an attack needs more
+    // than one block to be audible, and asserting on the first is how this
+    // test would fail against a perfectly good synthesiser.
+    engine::MidiBuffer midi;
+    (void)midi.insert(engine::MidiMessage::noteOn(0, 60, 110, 0));
+
+    double loudest = 0.0;
+
+    for (int block = 0; block < 20; ++block) {
+        pool.buffer(0).clear();
+        instrument->processBlock(pool.buffer(0), block == 0 ? midi : engine::MidiBuffer{});
+
+        for (engine::FrameCount frame = 0; frame < 512; ++frame)
+            loudest = std::max(loudest,
+                               std::abs(static_cast<double>(pool.buffer(0).channel(0)[frame])));
+    }
+
+    CHECK(instrument->activeVoiceCount() == 1);
+    CHECK(loudest > 0.0001);
+
+    // And it stops when told to.
+    instrument->allNotesOff();
+    CHECK(instrument->activeVoiceCount() == 0);
+}
+
+TEST_CASE("an instrument's state round-trips")
+{
+    const std::string uid = firstAppleInstrument();
+    if (uid.empty()) {
+        MESSAGE("no Apple instrument available");
+        return;
+    }
+
+    std::string error;
+    auto instrument = plugins::AudioUnitInstrument::create(uid, 48000.0, 512, error);
+    REQUIRE(instrument != nullptr);
+
+    std::vector<std::uint8_t> blob;
+    REQUIRE(instrument->saveState(blob));
+    CHECK_FALSE(blob.empty());
+
+    // Into a second instance, which is what loading a project does.
+    auto reloaded = plugins::AudioUnitInstrument::create(uid, 48000.0, 512, error);
+    REQUIRE(reloaded != nullptr);
+    CHECK(reloaded->loadState(blob.data(), blob.size()));
+}
+
+TEST_CASE("an instrument that does not exist is refused, not crashed into")
+{
+    std::string error;
+
+    CHECK(plugins::AudioUnitInstrument::create("aumu:zzzz:zzzz", 48000.0, 512, error) == nullptr);
+    CHECK_FALSE(error.empty());
+
+    CHECK(plugins::AudioUnitInstrument::create("nonsense", 48000.0, 512, error) == nullptr);
+    CHECK_FALSE(error.empty());
+}

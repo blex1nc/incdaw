@@ -41,8 +41,11 @@ struct AudioUnitParameterDescription {
 
 /// One instantiated, initialised Audio Unit.
 ///
-/// Effects only for now: two in, two out, processed in place, which is the
-/// shape the render graph's insert chain already has.
+/// Two shapes, chosen at open time. An EFFECT is two in, two out, processed in
+/// place — the shape the render graph's insert chain has. An INSTRUMENT has no
+/// input bus at all: it is fed MIDI and asked for audio, which is the shape a
+/// channel has. Configuring the wrong one is not a detail an AU forgives: a
+/// music device with an input callback attached refuses to initialise.
 class AudioUnitHandle {
 public:
     virtual ~AudioUnitHandle() = default;
@@ -57,6 +60,25 @@ public:
                                                                double             sampleRate,
                                                                std::uint32_t      maxFrames,
                                                                std::string&       error);
+
+    /// The instrument shape: no input bus, MIDI in, audio out.
+    [[nodiscard]] static std::unique_ptr<AudioUnitHandle> openInstrument(const std::string& uid,
+                                                                        double        sampleRate,
+                                                                        std::uint32_t maxFrames,
+                                                                        std::string&  error);
+
+    /// True when this handle was opened as an instrument.
+    [[nodiscard]] virtual bool isInstrument() const noexcept = 0;
+
+    /// Audio thread. Hands one channel-voice message to an instrument, to take
+    /// effect `frameOffset` frames into the next render.
+    ///
+    /// False for an effect, and for a unit that refuses the message. Not a
+    /// queue: `MusicDeviceMIDIEvent` is the format's own realtime path, the
+    /// same way `AudioUnitSetParameter` is for parameters.
+    [[nodiscard]] virtual bool sendMidi(std::uint8_t status, std::uint8_t data1,
+                                        std::uint8_t data2,
+                                        std::uint32_t frameOffset) noexcept = 0;
 
     /// Audio thread. Processes one stereo block in place. Allocation-free:
     /// the buffer lists and the input scratch are built at open time.

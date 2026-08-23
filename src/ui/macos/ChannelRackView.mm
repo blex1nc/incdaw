@@ -10,6 +10,7 @@
 #include "app/commands/StepCommands.h"
 #include "engine/instrument/BuiltinInstruments.h"
 #include "plugins/PluginIdentifier.h"
+#include "platform/AudioUnitHost.h"
 #include "project/Model.h"
 #include "ui/macos/Theme.h"
 
@@ -624,6 +625,41 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
                           : NSControlStateValueOff;
     }
 
+    // Audio Unit instruments, under the builtins. No scan: the system's
+    // component registry IS their catalogue, and enumerating it runs no plugin
+    // code (docs/PLUGIN_HOST.md §3). Effects are left out — a channel is a
+    // sound source.
+    bool separated = false;
+
+    for (const platform::AudioUnitDescription& unit : platform::scanAudioUnits()) {
+        if (!unit.isInstrument)
+            continue;
+
+        if (!separated) {
+            [instruments addItem:[NSMenuItem separatorItem]];
+            separated = true;
+        }
+
+        NSString* label = unit.manufacturer.empty()
+                              ? @(unit.name.c_str())
+                              : [NSString stringWithFormat:@"%s — %s", unit.name.c_str(),
+                                                           unit.manufacturer.c_str()];
+
+        NSMenuItem* entry = [instruments addItemWithTitle:label
+                                                   action:@selector(setAudioUnitInstrumentFromMenu:)
+                                            keyEquivalent:@""];
+        entry.target            = self;
+        entry.representedObject = @{
+            @"channel": @(channelId.value()),
+            @"uid":     @(unit.uid.c_str()),
+        };
+
+        entry.state = channel.instrument.format == plugins::Format::audioUnit
+                              && channel.instrument.uid == unit.uid
+                          ? NSControlStateValueOn
+                          : NSControlStateValueOff;
+    }
+
     instrumentItem.submenu = instruments;
 
     NSMenuItem* loadSample = [menu addItemWithTitle:@"Load Sample…"
@@ -693,6 +729,21 @@ static NSString* droppedSamplePath(id<NSDraggingInfo> info)
 
     [self commit:std::make_unique<app::SetChannelInstrumentCommand>(channelId,
                                                                     identifier)];
+}
+
+- (void)setAudioUnitInstrumentFromMenu:(NSMenuItem*)item
+{
+    id payload = item.representedObject;
+    if (![payload isKindOfClass:[NSDictionary class]])
+        return;
+
+    const project::EntityId channelId{[payload[@"channel"] unsignedLongLongValue]};
+
+    plugins::PluginIdentifier identifier;
+    identifier.format = plugins::Format::audioUnit;
+    identifier.uid    = [payload[@"uid"] UTF8String];
+
+    [self commit:std::make_unique<app::SetChannelInstrumentCommand>(channelId, identifier)];
 }
 
 - (void)editInstrumentFromMenu:(NSMenuItem*)item

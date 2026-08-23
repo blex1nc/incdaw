@@ -91,9 +91,23 @@ public:
         }
     }
 
-    [[nodiscard]] bool openWith(const AudioComponentDescription& description, double sampleRate,
-                                std::uint32_t maxFrames, std::string& error)
+    [[nodiscard]] bool isInstrument() const noexcept override { return isInstrument_; }
+
+    [[nodiscard]] bool sendMidi(std::uint8_t status, std::uint8_t data1, std::uint8_t data2,
+                                std::uint32_t frameOffset) noexcept override
     {
+        if (unit_ == nullptr || !isInstrument_)
+            return false;
+
+        return MusicDeviceMIDIEvent(unit_, status, data1, data2, frameOffset) == noErr;
+    }
+
+    [[nodiscard]] bool openWith(const AudioComponentDescription& description, double sampleRate,
+                                std::uint32_t maxFrames, std::string& error,
+                                bool asInstrument = false)
+    {
+        isInstrument_ = asInstrument;
+
         AudioComponent component = AudioComponentFindNext(nullptr, &description);
 
         if (component == nullptr) {
@@ -119,10 +133,17 @@ public:
         format.mBytesPerFrame    = sizeof(float);
         format.mBytesPerPacket   = sizeof(float);
 
-        if (AudioUnitSetProperty(unit_, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0,
-                                 &format, sizeof(format)) != noErr
-            || AudioUnitSetProperty(unit_, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0,
+        // An instrument has no input bus to describe, and describing one it
+        // does not have is how a music device ends up refusing to initialise.
+        if (!isInstrument_
+            && AudioUnitSetProperty(unit_, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0,
                                     &format, sizeof(format)) != noErr) {
+            error = "the Audio Unit refused stereo float at this sample rate";
+            return false;
+        }
+
+        if (AudioUnitSetProperty(unit_, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0,
+                                 &format, sizeof(format)) != noErr) {
             error = "the Audio Unit refused stereo float at this sample rate";
             return false;
         }
@@ -131,14 +152,17 @@ public:
         AudioUnitSetProperty(unit_, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global,
                              0, &slice, sizeof(slice));
 
-        AURenderCallbackStruct callback{};
-        callback.inputProc       = &MacAudioUnitHandle::supplyInput;
-        callback.inputProcRefCon = this;
+        if (!isInstrument_) {
+            AURenderCallbackStruct callback{};
+            callback.inputProc       = &MacAudioUnitHandle::supplyInput;
+            callback.inputProcRefCon = this;
 
-        if (AudioUnitSetProperty(unit_, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input,
-                                 0, &callback, sizeof(callback)) != noErr) {
-            error = "the Audio Unit refused an input callback";
-            return false;
+            if (AudioUnitSetProperty(unit_, kAudioUnitProperty_SetRenderCallback,
+                                     kAudioUnitScope_Input, 0, &callback, sizeof(callback))
+                != noErr) {
+                error = "the Audio Unit refused an input callback";
+                return false;
+            }
         }
 
         if (AudioUnitInitialize(unit_) != noErr) {
@@ -167,12 +191,16 @@ public:
 
         // The input is copied aside first: an AU that reads its input after
         // writing its output would otherwise read what it just wrote, because
-        // INCDAW processes in place.
-        std::memcpy(scratch_[0].data(), left, static_cast<std::size_t>(frames) * sizeof(float));
-        std::memcpy(scratch_[1].data(), right, static_cast<std::size_t>(frames) * sizeof(float));
+        // INCDAW processes in place. An instrument has no input to copy.
+        if (!isInstrument_) {
+            std::memcpy(scratch_[0].data(), left,
+                        static_cast<std::size_t>(frames) * sizeof(float));
+            std::memcpy(scratch_[1].data(), right,
+                        static_cast<std::size_t>(frames) * sizeof(float));
 
-        pending_[0] = scratch_[0].data();
-        pending_[1] = scratch_[1].data();
+            pending_[0] = scratch_[0].data();
+            pending_[1] = scratch_[1].data();
+        }
 
         const auto bytes = static_cast<UInt32>(frames * sizeof(float));
 
@@ -391,6 +419,7 @@ private:
 
     AudioUnit     unit_      = nullptr;
     std::uint32_t maxFrames_ = 0;
+    bool          isInstrument_ = false;
     std::uint32_t latency_   = 0;
     Float64       sampleTime_ = 0.0;
 
@@ -461,8 +490,11 @@ std::vector<AudioUnitDescription> scanAudioUnits()
     return found;
 }
 
-std::unique_ptr<AudioUnitHandle> AudioUnitHandle::open(const std::string& uid, double sampleRate,
-                                                       std::uint32_t maxFrames, std::string& error)
+namespace {
+
+std::unique_ptr<AudioUnitHandle> openHandle(const std::string& uid, double sampleRate,
+                                            std::uint32_t maxFrames, std::string& error,
+                                            bool asInstrument)
 {
     error.clear();
 
@@ -473,12 +505,33 @@ std::unique_ptr<AudioUnitHandle> AudioUnitHandle::open(const std::string& uid, d
         return nullptr;
     }
 
+    if (asInstrument && description.componentType != kAudioUnitType_MusicDevice) {
+        error = "not an Audio Unit instrument: " + uid;
+        return nullptr;
+    }
+
     auto handle = std::make_unique<MacAudioUnitHandle>();
 
-    if (!handle->openWith(description, sampleRate, maxFrames, error))
+    if (!handle->openWith(description, sampleRate, maxFrames, error, asInstrument))
         return nullptr;
 
     return handle;
+}
+
+} // namespace
+
+std::unique_ptr<AudioUnitHandle> AudioUnitHandle::open(const std::string& uid, double sampleRate,
+                                                       std::uint32_t maxFrames, std::string& error)
+{
+    return openHandle(uid, sampleRate, maxFrames, error, false);
+}
+
+std::unique_ptr<AudioUnitHandle> AudioUnitHandle::openInstrument(const std::string& uid,
+                                                                 double        sampleRate,
+                                                                 std::uint32_t maxFrames,
+                                                                 std::string&  error)
+{
+    return openHandle(uid, sampleRate, maxFrames, error, true);
 }
 
 } // namespace incdaw::platform

@@ -8,6 +8,41 @@ public version yet.
 
 ## [Unreleased]
 
+### Plugins — Audio Unit instruments — 2026-08-23
+
+AU **effects** have hosted since Phase 13. Instruments were excluded at
+the enumeration step, so every AU synth on the machine was invisible to a
+DAW that could already load its effects.
+
+- **An AU instrument on a channel**, chosen from the Channel Rack's
+  instrument menu under the builtins. MIDI in, audio out, the unit's own
+  editor, and its state saved with the project through the same opaque
+  blob an insert already uses.
+- **The shapes are different and an AU does not forgive the wrong one.**
+  An effect is two in, two out, processed in place; an instrument has no
+  input bus at all, and attaching an input callback to a music device is
+  how it ends up refusing to initialise. Opening an effect *as* an
+  instrument is refused at the description, before anything is
+  instantiated.
+- **An `engine::Instrument`, not a `HostedPlugin`.** That is the
+  interface a channel's sound source has, so the base class's block
+  splitting applies unchanged and an AU note lands on the same frame a
+  builtin one does. The cost is stated rather than hidden: a dense chord
+  renders in several short calls instead of one, which is cheaper than an
+  instrument whose notes quantise to the block.
+- **Its parameters register like any other's**, so automation and MIDI
+  learn bind to an AU synth's cutoff exactly as they bind to the builtin
+  sampler's.
+- The unit renders into its own buffers and its output is **added**: a
+  channel's buffer is shared, and `AudioUnitRender` overwrites.
+
+**Tested against what Apple ships** — DLSMusicDevice is on every Mac, so
+the tests open a real instrument, send it a note, and assert it makes
+sound over several blocks rather than the first (an instrument with an
+attack is silent in block one, and asserting there is how this test would
+fail against a perfectly good synthesiser).
+
+
 ### Audio editor — a spectral view, and an eraser that works in it — 2026-08-23
 
 - **Audio → Spectral View** draws the same samples as time against

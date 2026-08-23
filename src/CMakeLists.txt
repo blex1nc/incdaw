@@ -115,7 +115,8 @@ add_library(incdaw_plugins STATIC
     plugins/PluginRegistry.cpp
     plugins/PluginInstanceManager.cpp
     plugins/clap/ClapLibrary.cpp
-    plugins/au/AudioUnitInstance.cpp)
+    plugins/au/AudioUnitInstance.cpp
+    plugins/au/AudioUnitInstrument.cpp)
 target_include_directories(incdaw_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # The CLAP C ABI (third_party/clap, MIT, D-027). PUBLIC because the host's

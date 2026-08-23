@@ -145,7 +145,7 @@ and note tools · a synthesized piano · **automation touch/latch/write modes**
 | C13 | FLAC export/import | ✗ | **§41 — libFLAC. Proposal + approval required** |
 | C14 | MP3 export | ✗ | **§41 — LAME (LGPL). AAC/ALAC through AudioToolbox is the zero-dependency alternative and should be proposed alongside** |
 | C15 | Out-of-process plugin sandboxing | ✗ | its own program; sequence last |
-| C16 | AU **instrument** hosting | ✗ AU effects host fine | — |
+| C16 | AU **instrument** hosting | **DONE** — `AudioUnitHandle::openInstrument` + `sendMidi`, `plugins::AudioUnitInstrument` as an `engine::Instrument`, offered in the Channel Rack menu; parameters register for automation | — |
 
 ### Out of scope, unchanged
 
