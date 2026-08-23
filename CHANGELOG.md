@@ -8,6 +8,32 @@ public version yet.
 
 ## [Unreleased]
 
+### Performance Mode — pads from a controller — 2026-08-23
+
+- **A MIDI pad triggers a performance clip.** `MidiMapping` gained a kind
+  and, for a pad mapping, the pad it presses; a pad mapping reads
+  `controller` as a note number rather than a CC. Learn it from the clip
+  menu — "Learn Controller for Pad *n*" — and the next note claims it,
+  replacing whatever already answered that note, because a controller pad
+  pressing two INCDAW pads at once would be unplayable.
+- **`src/platform/` was not touched**, and the earlier note saying this was
+  blocked on it was wrong. `MidiInput` was already publishing for a watcher
+  outside the audio thread — that is what MIDI learn reads — so this adds a
+  second lock-free queue beside it carrying notes with their host times. A
+  second queue rather than a tap, so a watcher and the audio thread cannot
+  take messages from each other and both see every note; a watcher that
+  never looks drops notes rather than growing a backlog to replay.
+- **A pad lands where it was pressed**, not where the poller noticed: the
+  host time travels with the note and is converted through the same anchor a
+  recorded take is placed by. The typing keyboard has no host time worth
+  having and posts the transport position instead, which the design document
+  says plainly.
+- **A CC and a note that share a number stay separate**, which the kind is
+  what guarantees — MIDI learn for a knob no longer sweeps up a pad mapping
+  whose note happens to match.
+- **Project format 1.13**, additive. A mapping with no kind is a parameter
+  mapping, which is what every mapping written since 1.4 was.
+
 ### Performance Mode — playable from the window — 2026-08-23
 
 - **The zone is visible**: the region before the start marker is washed, its

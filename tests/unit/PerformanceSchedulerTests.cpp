@@ -1188,3 +1188,214 @@ TEST_CASE("a pad resolves to the clip the compiler put behind it")
     CHECK_FALSE(project::performanceTargetFor(project, compiled, project::EntityId{999}, 0).found);
     CHECK_FALSE(project::performanceTargetFor(project, compiled, track, -1).found);
 }
+
+// ── TRACK B (B12, increment 6) — pads from a controller ──────────────────────
+//
+// A pad is not a parameter, so it needed a second kind of mapping — but not a
+// second collection, and not a change in `src/platform/`. The MIDI thread
+// already had somewhere to publish for a watcher (the learn tap); this adds a
+// note queue beside it, which is the whole of the platform question.
+
+#include "app/commands/MidiMappingCommands.h"
+#include "engine/midi/MidiInput.h"
+
+namespace {
+
+platform::TimestampedMidiMessage noteMessage(std::uint8_t status, int note, int velocity,
+                                             std::uint64_t hostTime = 1000)
+{
+    platform::TimestampedMidiMessage message;
+    message.hostTimeNanos = hostTime;
+    message.status        = status;
+    message.data1         = static_cast<std::uint8_t>(note);
+    message.data2         = static_cast<std::uint8_t>(velocity);
+    return message;
+}
+
+} // namespace
+
+TEST_CASE("the MIDI thread publishes notes for a watcher without disturbing the audio thread")
+{
+    engine::MidiInput input;
+
+    input.injectForTesting(noteMessage(0x90, 60, 100, 5000));
+    input.injectForTesting(noteMessage(0x80, 60, 0, 6000));
+
+    // A note-on at velocity zero is a note-off, which every controller that
+    // ever sent running status relies on.
+    input.injectForTesting(noteMessage(0x92, 62, 0, 7000));
+
+    engine::MidiInput::ObservedNote note;
+
+    REQUIRE(input.nextObservedNote(note));
+    CHECK(note.on);
+    CHECK(note.note == 60);
+    CHECK(note.channel == 0);
+    CHECK(note.hostTimeNanos == 5000);
+
+    REQUIRE(input.nextObservedNote(note));
+    CHECK_FALSE(note.on);
+    CHECK(note.note == 60);
+
+    REQUIRE(input.nextObservedNote(note));
+    CHECK_FALSE(note.on);
+    CHECK(note.note == 62);
+    CHECK(note.channel == 2);
+
+    CHECK_FALSE(input.nextObservedNote(note));
+
+    // The audio thread's own queue is untouched by the watcher: both saw all
+    // three, which is what makes this a second queue rather than a tap.
+    engine::MidiBuffer buffer;
+    input.collectForBlock(buffer, 0, 512, 48000.0);
+    CHECK(buffer.size() == 3);
+
+    // Controls are not notes.
+    input.injectForTesting(noteMessage(0xB0, 74, 64));
+    CHECK_FALSE(input.nextObservedNote(note));
+}
+
+TEST_CASE("a watcher that never looks drops notes rather than growing")
+{
+    engine::MidiInput input;
+
+    for (std::size_t index = 0; index < engine::MidiInput::observerCapacity + 20; ++index)
+        input.injectForTesting(noteMessage(0x90, 60, 100));
+
+    CHECK(input.unobservedNoteCount() > 0);
+
+    // And the audio thread still got every one of them.
+    CHECK(input.droppedCount() == 0);
+}
+
+TEST_CASE("a controller pad binds to a performance pad, and re-binding moves it")
+{
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddPerformancePadMappingCommand>(0, 36, 0)));
+
+    REQUIRE(project.midiMappings().size() == 1);
+    const project::MidiMapping& mapping = project.midiMappings()[0];
+    CHECK(mapping.kind == project::MidiMappingKind::performancePad);
+    CHECK(mapping.controller == 36);        // read as a note, not a CC
+    CHECK(mapping.performancePad == 0);
+
+    // A second pad on a different note is a second mapping.
+    REQUIRE(registry.execute(std::make_unique<app::AddPerformancePadMappingCommand>(0, 37, 1)));
+    CHECK(project.midiMappings().size() == 2);
+
+    // The SAME note learning a different pad replaces rather than doubling: a
+    // controller pad pressing two INCDAW pads at once would be unplayable.
+    REQUIRE(registry.execute(std::make_unique<app::AddPerformancePadMappingCommand>(0, 36, 5)));
+    CHECK(project.midiMappings().size() == 2);
+
+    std::size_t forNote36 = 0;
+    for (const project::MidiMapping& entry : project.midiMappings())
+        if (entry.controller == 36)
+            ++forNote36;
+
+    CHECK(forNote36 == 1);
+
+    REQUIRE(registry.undo());
+    CHECK(project.midiMappings().size() == 2);
+
+    for (const project::MidiMapping& entry : project.midiMappings())
+        if (entry.controller == 36)
+            CHECK(entry.performancePad == 0);   // the replaced one came back
+}
+
+TEST_CASE("a parameter mapping and a pad mapping do not collide on the same number")
+{
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    // CC 36 on the master, and note 36 on a pad. Both are "36", and they must
+    // stay separate — the kind is what keeps them so.
+    REQUIRE(registry.execute(std::make_unique<app::AddMidiMappingCommand>(
+        -1, 36, std::string{"volume"}, project.masterMixerNode())));
+    REQUIRE(registry.execute(std::make_unique<app::AddPerformancePadMappingCommand>(-1, 36, 2)));
+
+    REQUIRE(project.midiMappings().size() == 2);
+    CHECK(project.midiMappings()[0].kind == project::MidiMappingKind::parameter);
+    CHECK(project.midiMappings()[1].kind == project::MidiMappingKind::performancePad);
+
+    // Learning the pad again replaces only the pad mapping.
+    REQUIRE(registry.execute(std::make_unique<app::AddPerformancePadMappingCommand>(-1, 36, 3)));
+    CHECK(project.midiMappings().size() == 2);
+
+    std::size_t parameters = 0;
+    for (const project::MidiMapping& entry : project.midiMappings())
+        if (entry.kind == project::MidiMappingKind::parameter)
+            ++parameters;
+
+    CHECK(parameters == 1);
+}
+
+TEST_CASE("pad mappings round-trip through the project file")
+{
+    ScratchDir scratch{"padmap"};
+
+    project::Project project;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::AddPerformancePadMappingCommand>(3, 42, 6)));
+    REQUIRE(registry.execute(std::make_unique<app::AddMidiMappingCommand>(
+        -1, 74, std::string{"pan"}, project.masterMixerNode())));
+
+    const fs::path file = scratch.path / "Pads.incdaw";
+    REQUIRE(bool(project::ProjectFile::save(project, file)));
+
+    project::Project reloaded;
+    REQUIRE(bool(project::ProjectFile::load(reloaded, file)));
+
+    REQUIRE(reloaded.midiMappings().size() == 2);
+    CHECK(reloaded.midiMappings()[0].kind == project::MidiMappingKind::performancePad);
+    CHECK(reloaded.midiMappings()[0].midiChannel == 3);
+    CHECK(reloaded.midiMappings()[0].controller == 42);
+    CHECK(reloaded.midiMappings()[0].performancePad == 6);
+
+    CHECK(reloaded.midiMappings()[1].kind == project::MidiMappingKind::parameter);
+    CHECK(reloaded.midiMappings()[1].performancePad == -1);
+
+    CHECK(reloaded == project);
+}
+
+TEST_CASE("a 1.12 mapping reads back as a parameter mapping")
+{
+    const fs::path fixture = fs::path{INCDAW_FIXTURE_DIR} / "v1.4" / "Fixture.incdaw";
+    REQUIRE(fs::exists(fixture));
+
+    project::Project project;
+    REQUIRE(project::ProjectFile::load(project, fixture).succeeded);
+
+    // 1.4 is where mappings arrived; every one written since, up to 1.12, had
+    // no `kind` at all.
+    REQUIRE_FALSE(project.midiMappings().empty());
+
+    for (const project::MidiMapping& mapping : project.midiMappings()) {
+        CHECK(mapping.kind == project::MidiMappingKind::parameter);
+        CHECK(mapping.performancePad == -1);
+    }
+}
+
+TEST_CASE("the v1.13 fixture still loads")
+{
+    const fs::path fixture = fs::path{INCDAW_FIXTURE_DIR} / "v1.13" / "Fixture.incdaw";
+    REQUIRE(fs::exists(fixture));
+
+    project::Project project;
+    REQUIRE(project::ProjectFile::load(project, fixture).succeeded);
+
+    CHECK(project.metadata().title == "Format v1.13 fixture");
+
+    REQUIRE(project.midiMappings().size() == 3);
+    CHECK(project.midiMappings()[0].kind == project::MidiMappingKind::parameter);
+    CHECK(project.midiMappings()[0].parameterKey == "volume");
+
+    CHECK(project.midiMappings()[1].kind == project::MidiMappingKind::performancePad);
+    CHECK(project.midiMappings()[1].midiChannel == 9);
+    CHECK(project.midiMappings()[1].controller == 36);
+    CHECK(project.midiMappings()[1].performancePad == 0);
+    CHECK(project.midiMappings()[2].performancePad == 1);
+}

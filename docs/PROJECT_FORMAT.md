@@ -91,6 +91,7 @@ requires a migration step.
 | 1.10 | TRACK B / B7 | Clips gained `crossfadeIn` / `crossfadeOut`, whether each edge crossfades with the clip it overlaps on its lane. Per edge, so three chained clips can keep one crossfade and lose the other. The fade lengths stay derived from the overlap. Additive. |
 | 1.11 | TRACK B / B11 | The project gained `arrangements[]` and `currentArrangement`. Clips and markers moved from the top level into an arrangement; patterns, channels, tracks, the mixer and automation stay shared. **Shape change**, converted at the read site. |
 | 1.12 | TRACK B / B12 | Tracks gained their Performance Mode press, motion, trigger sync and position sync; clips gained `performanceKey`, the pad that triggers them; markers gained `isStart`, which makes the region before one a performance zone. Additive. |
+| 1.13 | TRACK B / B12 | A MIDI mapping gained `kind` and, for a pad mapping, `performancePad`. A pad mapping reads `controller` as a note number rather than a CC. Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -177,6 +178,11 @@ clip has a pad and no marker is a start marker, which reads back as a project
 with no performance zone — exactly what those projects were.
 `tests/fixtures/v1.12/Fixture.incdaw` (frozen: a latching, marching performance
 track of two pads with a start marker at bar 5) is kept permanently.
+
+**Reading a 1.12 file.** Purely additive: a mapping with no `kind` is a
+parameter mapping, which is what every mapping written since 1.4 was.
+`tests/fixtures/v1.13/Fixture.incdaw` (frozen: one CC mapping and two pad
+mappings on MIDI channel 10) is kept permanently.
 
 ---
 

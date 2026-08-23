@@ -23,6 +23,27 @@ void MidiInput::midiMessageReceived(const platform::TimestampedMidiMessage& mess
         lastControl_.store(packed, std::memory_order_relaxed);
     }
 
+    // The pad tap, alongside the learn tap above and for the same reason: a
+    // watcher outside the audio thread needs to see presses. A SECOND queue
+    // rather than a tap on the audio one, so a watcher and the audio thread
+    // cannot take messages from each other.
+    const auto kind = static_cast<std::uint8_t>(message.status & 0xF0u);
+
+    if (kind == 0x90u || kind == 0x80u) {
+        ObservedNote note;
+        note.hostTimeNanos = message.hostTimeNanos;
+        note.channel       = static_cast<int>(message.status & 0x0Fu);
+        note.note          = static_cast<int>(message.data1);
+        note.velocity      = static_cast<int>(message.data2);
+
+        // A note-on at velocity zero is a note-off; every controller that ever
+        // sent running status relies on it.
+        note.on = kind == 0x90u && message.data2 > 0;
+
+        if (!notes_.push(note))
+            unobserved_.fetch_add(1, std::memory_order_relaxed);
+    }
+
     if (!queue_.push(message))
         dropped_.fetch_add(1, std::memory_order_relaxed);
 }

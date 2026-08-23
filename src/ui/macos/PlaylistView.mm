@@ -2421,7 +2421,30 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
                                                                       : NSControlStateValueOff;
     }
 
+    // Learning binds the CONTROLLER's pad to this clip's pad number, which is
+    // why it needs the clip to have one first: the number row and the hardware
+    // press the same eight pads, rather than two parallel layouts.
+    if (first != nullptr && first->performanceKey >= 0) {
+        [menu addItem:[NSMenuItem separatorItem]];
+
+        NSMenuItem* learn =
+            [menu addItemWithTitle:[NSString stringWithFormat:@"Learn Controller for Pad %d\u2026",
+                                                              first->performanceKey + 1]
+                            action:@selector(learnPadFromMenu:)
+                     keyEquivalent:@""];
+        learn.target            = self;
+        learn.representedObject = @(first->performanceKey);
+    }
+
     return menu;
+}
+
+- (void)learnPadFromMenu:(NSMenuItem*)item
+{
+    if (self.onPerformancePadLearn != nil) {
+        self.onPerformancePadLearn([item.representedObject intValue]);
+        [self refuse:@"Press a pad on your controller."];
+    }
 }
 
 - (void)setPadFromMenu:(NSMenuItem*)item
@@ -2682,6 +2705,12 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     }
 
     [super keyUp:event];
+}
+
+- (void)triggerPerformancePad:(int)pad pressed:(BOOL)pressed
+{
+    if (_performanceMode)
+        [self triggerPad:pad pressed:pressed == YES];
 }
 
 /// Sends the pad to every track that has a clip bound to it. One pad drives one

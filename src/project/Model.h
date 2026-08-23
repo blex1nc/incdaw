@@ -437,18 +437,36 @@ struct RoutingConnection {
 
 // ── MIDI mappings ─────────────────────────────────────────────────────────────
 
-/// One hardware control bound to one parameter.
+/// What a mapped hardware control drives.
+enum class MidiMappingKind : std::uint8_t {
+    parameter,        ///< a knob or fader moving a value
+    performancePad,   ///< a pad triggering a Performance Mode clip
+};
+
+/// One hardware control bound to one thing.
 ///
-/// The parameter is named exactly the way an automation lane names its
-/// target — a registry key plus a target entity — so a mapped knob and an
-/// automation lane are interchangeable views of the same parameter system,
-/// and a mapping can drive anything a lane can (CLAUDE.md §22).
+/// A parameter mapping names its target exactly the way an automation lane
+/// does — a registry key plus a target entity — so a mapped knob and an
+/// automation lane are interchangeable views of the same parameter system, and
+/// a mapping can drive anything a lane can (CLAUDE.md §22).
+///
+/// A **pad** mapping is the other kind, and it is here rather than in a
+/// collection of its own because everything around a mapping is the same for
+/// both: the learn flow, the list, the removal, the file. It reads `controller`
+/// as the NOTE number rather than a CC, and `performancePad` as the pad it
+/// presses; `parameterKey`, `targetEntity` and the range are unused. That
+/// overloading is documented rather than hidden, and the enum is what makes it
+/// impossible to read one kind as the other by accident.
 struct MidiMapping {
-    EntityId    id;
-    int         midiChannel = -1;    ///< -1 matches any channel
-    int         controller  = 0;     ///< CC number
-    std::string parameterKey;        ///< ParameterRegistry key
-    EntityId    targetEntity;        ///< mixer node, channel, or insert slot
+    EntityId        id;
+    MidiMappingKind kind        = MidiMappingKind::parameter;
+    int             midiChannel = -1;    ///< -1 matches any channel
+    int             controller  = 0;     ///< CC number, or note number for a pad
+    std::string     parameterKey;        ///< ParameterRegistry key (parameter kind)
+    EntityId        targetEntity;        ///< mixer node, channel, or insert slot
+
+    /// The pad this control presses, for `performancePad`. -1 means none.
+    int             performancePad = -1;
 
     /// The mapped output range, normalised. min > max inverts the control.
     double minValue = 0.0;

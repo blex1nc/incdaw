@@ -4,7 +4,9 @@
 #include "project/Identity.h"
 #include "project/Model.h"
 
+#include <cstddef>
 #include <string>
+#include <vector>
 
 namespace incdaw::app {
 
@@ -38,6 +40,36 @@ private:
 
     project::MidiMapping mapping_;
     bool                 minted_ = false;
+};
+
+/// Binds a pad — a note on a channel — to a Performance Mode pad number.
+///
+/// The other tail end of MIDI learn. Re-learning a note replaces whatever pad
+/// mapping already held it, in the same command, because a controller pad that
+/// pressed two pads at once would be unplayable and the user would have no way
+/// to see why.
+class AddPerformancePadMappingCommand final : public Command {
+public:
+    AddPerformancePadMappingCommand(int midiChannel, int note, int pad)
+        : midiChannel_(midiChannel), note_(note), pad_(pad) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "midi.addPadMapping"; }
+    [[nodiscard]] std::string name() const override { return "Map Performance Pad"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    [[nodiscard]] EntityId mappingId() const noexcept { return mapping_.id; }
+
+private:
+    int midiChannel_ = -1;
+    int note_        = 0;
+    int pad_         = -1;
+
+    project::MidiMapping              mapping_;
+    std::vector<project::MidiMapping> replaced_;
+    std::vector<std::size_t>          replacedIndices_;
+    bool                              minted_ = false;
 };
 
 class RemoveMidiMappingCommand final : public Command {

@@ -1,9 +1,7 @@
 # INCDAW — Performance Mode
 
-**Status:** increments 2–5 implemented. A performance can be set up in the
-playlist and played from the typing keyboard. Increment 6 — triggering from a
-MIDI controller — is still design, and is blocked on a file boundary this track
-does not own (see below).
+**Status:** complete. A performance is set up in the playlist and played from
+the typing keyboard or a MIDI controller.
 
 TRACK B item B12 asks for a written plan before any code, and names the
 scheduling design as the deliverable of the first increment. This is that
@@ -230,13 +228,32 @@ That is **one format bump, additive** (1.12), with every default meaning
    again. The clip order behind a slot is the compiler's — lane, then start,
    then id — and a second implementation of that rule would eventually disagree
    and trigger the wrong clip with nothing to say so.
-6. **Controller triggering.** Not done, and **blocked on ownership rather than
-   on design**: the MIDI mapping system binds hardware controls to *parameters*
-   by registry key, and a pad is not a parameter, so it needs a second kind of
-   mapping and a hook in the MIDI input path — which lives in `src/platform/`,
-   a directory TRACK B does not own. The scheduler side needs nothing new: the
-   trigger ring is already single-producer and already takes a timeline frame,
-   so a MIDI thread can post into it exactly as the window does.
+6. ~~**Controller triggering.**~~ **Done, and `src/platform/` was not touched.**
+   The earlier note that this was blocked on that directory was wrong, and
+   worth correcting rather than quietly dropping.
+
+   A pad is not a parameter, so `MidiMapping` gained a `kind` and, for a pad
+   mapping, the pad it presses; it reads `controller` as a NOTE number rather
+   than a CC. A second collection would have duplicated the learn flow, the
+   list, the removal and the file for no gain, so the overloading is documented
+   and the enum makes reading one kind as the other impossible by accident.
+   Format 1.13, additive: a mapping with no kind is a parameter mapping, which
+   is what every mapping written since 1.4 was.
+
+   What made `src/platform/` unnecessary is that `MidiInput` — which is in
+   `src/engine/midi/`, and merely *includes* the platform header — was already
+   publishing for a watcher outside the audio thread: the MIDI-learn tap. This
+   adds a second lock-free queue beside it carrying note events with their host
+   times. A second queue rather than a tap on the audio thread's, so a watcher
+   and the audio thread cannot take messages from each other, and both see
+   every note. A watcher that never looks drops notes rather than growing a
+   backlog to replay.
+
+   The host time travels with the note and is converted through
+   `AudioEngine::latestAnchor` — the same anchor a recorded take is placed by —
+   so a pad lands where it was actually pressed rather than where the UI poller
+   noticed it. The typing keyboard has no host time worth having, so it posts
+   the transport's position and says so.
 
 Increments 2 and 3 were the risky ones and were deliberately first. Nothing in
 1–5 changes an existing project or an existing render: the mode is off by
@@ -259,3 +276,7 @@ Stated rather than hidden:
   graph, not to the trigger, and the correct fix is to advance the trigger's
   effective frame by the track's reported latency. It is one line, and it is
   one line that needs a test.
+
+- **Controller feedback.** A pad controller with lit pads has no idea what is
+  sounding, because nothing sends back to it. The scheduler knows — `voiceAt`
+  answers per track — so the missing piece is an output path, not a query.

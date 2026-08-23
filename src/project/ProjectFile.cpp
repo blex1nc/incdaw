@@ -418,6 +418,8 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("id", toJson(mapping.id));
         json.set("midiChannel", static_cast<std::int64_t>(mapping.midiChannel));
         json.set("controller", static_cast<std::int64_t>(mapping.controller));
+        json.set("kind", static_cast<std::int64_t>(mapping.kind));
+        json.set("performancePad", static_cast<std::int64_t>(mapping.performancePad));
         json.set("parameterKey", mapping.parameterKey);
         json.set("targetEntity", toJson(mapping.targetEntity));
         json.set("minValue", mapping.minValue);
@@ -879,6 +881,8 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         mapping.id           = idFrom(json["id"]);
         mapping.midiChannel  = static_cast<int>(json["midiChannel"].asInt(-1));
         mapping.controller   = static_cast<int>(json["controller"].asInt(0));
+        mapping.kind         = static_cast<MidiMappingKind>(json["kind"].asInt(0));
+        mapping.performancePad = static_cast<int>(json["performancePad"].asInt(-1));
         mapping.parameterKey = json["parameterKey"].asString();
         mapping.targetEntity = idFrom(json["targetEntity"]);
         mapping.minValue     = json["minValue"].asDouble(0.0);
@@ -1090,6 +1094,13 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // clip has a pad, and no marker is a start marker — which reads back as a
     // project with no performance zone, exactly what those projects were.
     if (major == 1 && minor == 11) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.12 -> 1.13. Purely additive: a mapping without a `kind` is a parameter
+    // mapping, which is what every mapping written before now was.
+    if (major == 1 && minor == 12) {
         result.succeeded = true;
         return result;
     }

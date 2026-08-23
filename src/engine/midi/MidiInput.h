@@ -58,6 +58,42 @@ public:
         return static_cast<int>((packed >> 8) & 0xFFu);
     }
 
+    /// A note as a watcher sees it: what arrived, and when.
+    ///
+    /// Trivially copyable, because it crosses a lock-free queue like everything
+    /// else here.
+    struct ObservedNote {
+        std::uint64_t hostTimeNanos = 0;
+        int           channel       = 0;
+        int           note          = 0;
+        int           velocity      = 0;
+        bool          on            = false;
+    };
+
+    /// How many note events can wait to be watched. Shallower than the audio
+    /// queue on purpose: a watcher polls at UI rate and only ever cares about
+    /// recent presses, so a deep backlog would replay stale pads rather than
+    /// dropping them.
+    static constexpr std::size_t observerCapacity = 256;
+
+    /// Takes the next note nobody has watched yet. Single consumer — the
+    /// window's poller — and it does not disturb the audio thread's own view:
+    /// this is a SECOND queue fed alongside the first, not a tap on it.
+    ///
+    /// The host time comes with it, so a watcher can place a pad press where it
+    /// actually happened instead of where its poll noticed.
+    [[nodiscard]] bool nextObservedNote(ObservedNote& out) noexcept
+    {
+        return notes_.pop(out);
+    }
+
+    /// Note events dropped because nobody was watching fast enough. Not a
+    /// fault: it is what a project with no pad mappings does all day.
+    [[nodiscard]] std::uint64_t unobservedNoteCount() const noexcept
+    {
+        return unobserved_.load(std::memory_order_relaxed);
+    }
+
     /// Messages dropped because the queue was full. Must be zero.
     [[nodiscard]] std::uint64_t droppedCount() const noexcept { return dropped_.load(std::memory_order_relaxed); }
 
@@ -92,6 +128,9 @@ private:
     std::atomic<std::uint64_t> dropped_{0};
     std::atomic<std::uint64_t> late_{0};
     std::atomic<std::uint64_t> lastControl_{0};
+
+    LockFreeQueue<ObservedNote, observerCapacity> notes_;
+    std::atomic<std::uint64_t>                    unobserved_{0};
 };
 
 } // namespace incdaw::engine

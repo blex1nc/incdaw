@@ -72,7 +72,11 @@ inline constexpr int projectFormatMajor = 1;
 /// and a marker can be the arrangement's start marker, which is what makes the
 /// region before it a performance zone. Additive: a 1.11 file has none of
 /// them and reads back as a project with no performance zone.
-inline constexpr int projectFormatMinor = 12;
+///
+/// 1.13 (TRACK B / B12 increment 6): a MIDI mapping carries its kind and, for
+/// a pad mapping, the pad it presses. Additive: a mapping with no `kind` is a
+/// parameter mapping, which is what every mapping written before now was.
+inline constexpr int projectFormatMinor = 13;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

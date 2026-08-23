@@ -57,6 +57,15 @@ namespace incdaw::app     { class CommandRegistry; }
 /// which is the only place that knows which scheduler slot a track is.
 @property (nonatomic, copy) void (^onPerformanceTrigger)(unsigned long long, int, bool);
 
+/// Called when the user asks a controller to claim a pad: the host arms MIDI
+/// learn and binds the first note that arrives.
+@property (nonatomic, copy) void (^onPerformancePadLearn)(int);
+
+/// Presses or releases a pad, fanning it out to every track that has a clip
+/// bound to it. The host calls this for a MIDI pad; the number row calls it
+/// for the typing keyboard. A no-op unless Performance Mode is on.
+- (void)triggerPerformancePad:(int)pad pressed:(BOOL)pressed;
+
 /// Drops cached clip waveforms. The host calls this after any edit, undo or
 /// redo that may have rewritten an asset's file.
 - (void)invalidateWaveformCache;

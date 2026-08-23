@@ -210,6 +210,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     /// MIDI learn: armed by the mixer's context menu, resolved by
     /// housekeeping when the next CC arrives at the input tap.
     bool          _learnArmed;
+
+    /// The pad waiting for a controller to claim it, or -1. Armed from the
+    /// playlist's Performance Pad menu; disarmed by the first note that
+    /// arrives.
+    int           _padLearnPad;
     NSString*     _learnParameterKey;
     unsigned long long _learnTarget;
     std::uint64_t _learnControlSeen;
@@ -378,6 +383,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     _pluginInstances = std::make_unique<plugins::PluginInstanceManager>(_pluginRegistry);
     _parameters      = project::ParameterRegistry::withBuiltins();
+    _padLearnPad     = -1;
 
     // Builtin effect and instrument parameters register once at launch
     // through the same path a scanned plugin's discovery does; there is
@@ -540,6 +546,10 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
         self.playlist.onPerformanceTrigger = ^(unsigned long long track, int pad, bool pressed) {
             [weakSelf performanceTrigger:project::EntityId{track} pad:pad pressed:pressed];
+        };
+
+        self.playlist.onPerformancePadLearn = ^(int pad) {
+            [weakSelf armPerformancePadLearn:pad];
         };
     }
 
@@ -2135,10 +2145,102 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     if (!target.found)
         return;
 
-    // The transport's position now. The scheduler rounds it forward to the
-    // track's own grid, so a press between beats still lands on one.
+    // A key press has no host time worth having — the event reaches the window
+    // after the run loop has already had it — so the transport's position now
+    // is the honest answer. The scheduler rounds it forward to the track's own
+    // grid, so a press between beats still lands on one.
     (void)_live.performance->postTrigger(target.slot, target.clip, pressed,
                                          _audio->transport().position());
+}
+
+/// Takes every pad press the MIDI thread has seen since the last poll and
+/// turns it into a trigger — or, while pad learn is armed, into a binding.
+///
+/// The ring is drained whether or not anything is listening, so a project with
+/// no pad mappings does not accumulate a backlog to replay the moment one is
+/// made.
+- (void)armPerformancePadLearn:(int)pad
+{
+    _padLearnPad = pad;
+
+    // Anything already waiting in the ring is from before the user asked, and
+    // binding to it would claim whatever they last played.
+    engine::MidiInput::ObservedNote stale;
+    while (_audio != nullptr && _audioReady && _audio->midiInput().nextObservedNote(stale)) {
+    }
+}
+
+- (void)drainPerformanceNotes
+{
+    engine::MidiInput::ObservedNote note;
+
+    while (_audio->midiInput().nextObservedNote(note)) {
+        if (_padLearnPad >= 0) {
+            if (!note.on)
+                continue;   // learn on the press, not on the release
+
+            const int pad = _padLearnPad;
+            _padLearnPad  = -1;
+
+            (void)_registry->execute(std::make_unique<app::AddPerformancePadMappingCommand>(
+                note.channel, note.note, pad));
+
+            [self refreshStatus];
+            continue;
+        }
+
+        const project::MidiMapping* mapping = nullptr;
+        for (const project::MidiMapping& candidate : _project->midiMappings()) {
+            if (candidate.kind != project::MidiMappingKind::performancePad)
+                continue;
+            if (candidate.controller != note.note)
+                continue;
+            if (candidate.midiChannel >= 0 && candidate.midiChannel != note.channel)
+                continue;
+
+            mapping = &candidate;
+            break;
+        }
+
+        if (mapping == nullptr)
+            continue;
+
+        [self triggerPerformancePad:mapping->performancePad
+                            pressed:note.on
+                           hostTime:note.hostTimeNanos];
+    }
+}
+
+/// A pad, placed where it actually happened.
+///
+/// The host time comes with the note, and the engine publishes an anchor
+/// mapping host time to timeline frames — the same one a recorded take is
+/// placed by. Without it a pad would land wherever the UI timer noticed it,
+/// which is up to a frame of the poller late and would be heard as swing
+/// nobody played.
+- (void)triggerPerformancePad:(int)pad pressed:(bool)pressed hostTime:(std::uint64_t)hostTime
+{
+    if (_live.performance == nullptr)
+        return;
+
+    engine::TimelineAnchor anchor;
+    const bool anchored = _audio->latestAnchor(anchor) && hostTime != 0;
+
+    const engine::FramePosition frame =
+        anchored ? anchor.frameAt(hostTime) : _audio->transport().position();
+
+    for (const project::Track& track : _project->tracks()) {
+        bool bound = false;
+        for (const project::Clip& clip : _project->clips())
+            bound = bound || (clip.track == track.id && clip.performanceKey == pad);
+
+        if (!bound)
+            continue;
+
+        const auto target = project::performanceTargetFor(*_project, _live, track.id, pad);
+        if (target.found)
+            (void)_live.performance->postTrigger(target.slot, target.clip, pressed, frame);
+    }
 }
 
 - (void)rebuildGraph
@@ -4376,6 +4478,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     for (bool again = true; again;) {
         again = false;
         for (const project::MidiMapping& mapping : _project->midiMappings()) {
+            // Pad mappings read `controller` as a note number, so they must
+            // not be swept up by a CC that happens to share the number.
+            if (mapping.kind != project::MidiMappingKind::parameter)
+                continue;
+
             if (mapping.controller != controller || mapping.midiChannel != -1)
                 continue;
 
@@ -4415,6 +4522,8 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         if (packed != _learnControlSeen && packed != 0)
             [self completeMidiLearnWithPacked:packed];
     }
+
+    [self drainPerformanceNotes];
 
     // An undo or redo may have rewritten the file the editor and the
     // playlist's clip waveforms are showing.

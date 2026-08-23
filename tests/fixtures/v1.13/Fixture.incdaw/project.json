@@ -1,0 +1,89 @@
+{
+  "metadata": {
+    "title": "Format v1.13 fixture",
+    "artist": "INCDAW",
+    "comment": ""
+  },
+  "tempo": {
+    "events": [
+      {
+        "tick": 0,
+        "bpm": 120
+      }
+    ],
+    "timeSignatures": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "masterMixerNode": 1,
+  "nextEntityId": 6,
+  "mixerNodes": [
+    {
+      "id": 1,
+      "type": 2,
+      "name": "Master",
+      "colour": 4287141030,
+      "volume": 1,
+      "pan": 0,
+      "muted": false,
+      "soloed": false,
+      "polarityFlip": false,
+      "stereoSeparation": 0,
+      "inserts": []
+    }
+  ],
+  "tracks": [],
+  "channels": [],
+  "automation": [],
+  "audioAssets": [],
+  "midiMappings": [
+    {
+      "id": 3,
+      "midiChannel": -1,
+      "controller": 74,
+      "kind": 0,
+      "performancePad": -1,
+      "parameterKey": "volume",
+      "targetEntity": 1,
+      "minValue": 0,
+      "maxValue": 1
+    },
+    {
+      "id": 4,
+      "midiChannel": 9,
+      "controller": 36,
+      "kind": 1,
+      "performancePad": 0,
+      "parameterKey": "",
+      "targetEntity": 0,
+      "minValue": 0,
+      "maxValue": 1
+    },
+    {
+      "id": 5,
+      "midiChannel": 9,
+      "controller": 37,
+      "kind": 1,
+      "performancePad": 1,
+      "parameterKey": "",
+      "targetEntity": 0,
+      "minValue": 0,
+      "maxValue": 1
+    }
+  ],
+  "arrangements": [
+    {
+      "id": 2,
+      "name": "Arrangement 1",
+      "clips": [],
+      "markers": []
+    }
+  ],
+  "currentArrangement": 2,
+  "routing": [],
+  "patterns": []
+}
