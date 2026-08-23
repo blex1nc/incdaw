@@ -8,6 +8,30 @@ public version yet.
 
 ## [Unreleased]
 
+### Playlist — consolidate a selection down to one clip — 2026-08-23
+
+- **Consolidate** renders the clips selected on one track into a single
+  audio clip covering exactly their span, through the same compiler and the
+  same graph the engine plays — there is no second, offline DSP path.
+- **It changes nothing you can hear.** The render runs on a stripped copy
+  of the project holding only those clips, with every mixer strip made
+  *truly* unity — which means compensating the pan law's −3 dB at centre and
+  the standing headroom trim, not merely setting the numbers to their
+  defaults. The result carries the clips' own audio, so dropping it back on
+  the same track through the same strip reproduces what was there. The test
+  renders the arrangement before and after and compares them sample by
+  sample.
+- **Sends are dropped from the render**: consolidating a clip captures what
+  the clip is, not a copy of it arriving through a reverb bus.
+- **One undo entry** puts the source clips back and drops the asset the
+  render created. The file stays on disk, exactly as an undone recording
+  leaves its take.
+- Pattern clips consolidate too — the instrument plays, and what comes back
+  is audio.
+- The render runs on the window's thread for now, so a long selection makes
+  the window wait. A background render with progress is the next increment;
+  a silent one that left the project half-edited would not be.
+
 ### Playlist — crossfades, and clip fades you can actually set — 2026-08-23
 
 - **Per-clip fades have a command at last.** `Clip::fadeInFrames` and

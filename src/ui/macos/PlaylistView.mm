@@ -4,16 +4,22 @@
 #include "app/CommandRegistry.h"
 #include "app/PlaylistModel.h"
 #include "app/commands/ClipCommands.h"
+#include "app/commands/ConsolidateCommands.h"
 #include "app/commands/ImportCommands.h"
 #include "app/commands/MarkerCommands.h"
 #include "app/commands/TrackCommands.h"
 #include "engine/audio/WaveformOverview.h"
+#include "project/ParameterRegistry.h"
 #include "project/PatternCompiler.h"
 #include "project/Model.h"
 #include "ui/macos/Theme.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <ctime>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -89,6 +95,10 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     /// The row the open track menu belongs to. Set when the menu is built, so
     /// its verbs act on what was right-clicked rather than on the selection.
     project::EntityId _menuTrack;
+
+    /// The host's parameter registry, so a consolidation renders plugin
+    /// parameters the way playback does. Null is safe: builtin and stored
+    /// instrument parameters are applied by the compiler either way.
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -1351,6 +1361,13 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
     [menu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem* consolidate = [menu addItemWithTitle:@"Consolidate"
+                                              action:@selector(consolidateFromMenu:)
+                                       keyEquivalent:@""];
+    consolidate.target = self;
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem* fadeIn = [menu addItemWithTitle:@"Fade In\u2026"
                                          action:@selector(fadeInFromMenu:)
                                   keyEquivalent:@""];
@@ -1583,6 +1600,56 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     (void)sender;
     [self commit:std::make_unique<app::SetClipMutedCommand>(_model->selection(), false)];
+}
+
+- (void)consolidateFromMenu:(id)sender
+{
+    (void)sender;
+
+    // Asked before the command is built: a command the registry refuses is
+    // destroyed on the way out, so there is nothing left to ask afterwards.
+    const std::string refusal =
+        app::consolidationRefusal(*_project, _model->selection());
+
+    if (!refusal.empty()) {
+        [self refuse:@(refusal.c_str())];
+        return;
+    }
+
+    NSString* music = [NSSearchPathForDirectoriesInDomains(NSMusicDirectory,
+                                                           NSUserDomainMask, YES) firstObject];
+    if (music == nil) {
+        [self refuse:@"No Music folder to write the render into."];
+        return;
+    }
+
+    const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm parts{};
+    localtime_r(&now, &parts);
+
+    char stamp[48];
+    std::snprintf(stamp, sizeof(stamp), "consolidated-%04d%02d%02d-%02d%02d%02d.wav",
+                  parts.tm_year + 1900, parts.tm_mon + 1, parts.tm_mday,
+                  parts.tm_hour, parts.tm_min, parts.tm_sec);
+
+    const std::filesystem::path output =
+        std::filesystem::path{music.UTF8String} / "INCDAW" / "Consolidated" / stamp;
+
+    auto command = std::make_unique<app::ConsolidateClipsCommand>(_model->selection(), output,
+                                                                   self.parameterRegistry);
+    app::ConsolidateClipsCommand* raw = command.get();
+
+    // The render runs here, on this thread. A long selection will make the
+    // window wait; a background render with progress is the next increment,
+    // not a silent one that leaves the project half-edited.
+    if (!_registry->execute(std::move(command))) {
+        [self refuse:@"The selection did not render."];
+        return;
+    }
+
+    _model->setSelection({raw->consolidatedClip()});
+    [self invalidateWaveformCache];
+    [self changed];
 }
 
 - (void)crossfadeFromMenu:(id)sender

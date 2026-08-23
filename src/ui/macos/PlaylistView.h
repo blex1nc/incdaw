@@ -2,7 +2,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-namespace incdaw::project { class Project; }
+namespace incdaw::project { class Project; class ParameterRegistry; }
 namespace incdaw::app     { class CommandRegistry; }
 
 /// The playlist: tracks down the side, pattern clips on a timeline.
@@ -28,6 +28,11 @@ namespace incdaw::app     { class CommandRegistry; }
 
 /// Called after any edit, so the host can rebuild the playback graph.
 @property (nonatomic, copy) void (^onChange)(void);
+
+/// The host's parameter registry, used when a consolidation renders. Optional:
+/// without it a render still applies builtin and stored instrument parameters,
+/// which is what the compiler does on its own.
+@property (nonatomic, assign) const incdaw::project::ParameterRegistry* parameterRegistry;
 
 /// Called when the user clicks the ruler, to move the transport.
 @property (nonatomic, copy) void (^onSeekTick)(long long);

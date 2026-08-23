@@ -523,8 +523,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
               project:_project.get()
              registry:_registry.get()];
 
-    self.playlist.patternIdValue = patternId.value();
-    self.playlist.hidden         = YES;
+    self.playlist.patternIdValue    = patternId.value();
+    self.playlist.parameterRegistry = &_parameters;
+    self.playlist.hidden            = YES;
 
     self.mixer = [[INCDAWMixerView alloc]
         initWithFrame:editorFrame
