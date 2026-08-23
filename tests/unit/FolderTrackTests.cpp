@@ -387,7 +387,9 @@ TEST_CASE("folders, parents and collapsed state round-trip through the project f
 
     const fs::path file = scratch.path / "Folders.incdaw";
     REQUIRE(bool(project::ProjectFile::save(fixture.project, file)));
-    CHECK(project::ProjectFile::versionOf(file) == "1.7");
+    // The current version, not a literal: this asserts that a save stamps what
+    // the build writes, and it must not need editing at every later bump.
+    CHECK(project::ProjectFile::versionOf(file) == project::projectFormatVersionString());
 
     project::Project reloaded;
     REQUIRE(bool(project::ProjectFile::load(reloaded, file)));

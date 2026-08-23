@@ -86,6 +86,7 @@ requires a migration step.
 | 1.5 | UI build-out 4 | Channels gained `instrumentParameters[]` — stored instrument parameter values ({id, value}, plain units), applied through the instrument's sink at every compile (D-034). Additive. |
 | 1.6 | FL2026 P3/P5 | The project gained `markers[]` — named musical positions with an optional length — and mixer nodes gained `stereoWidth`. Additive. |
 | 1.7 | TRACK B / B4 | Tracks gained `collapsed`, whether a folder track hides its children. `type` has always serialized as an integer and `parent` has always been written, so folder tracks themselves need no conversion. Additive. |
+| 1.8 | TRACK B / B5 | Clips gained `group`, the clip group they belong to. A group is exactly the set of clips carrying one id; it names no entity of its own. Additive. |
 
 **Reading a 1.0 file.** Two of the three changes need context the migration hook
 does not have — the pattern files are separate documents, and converting clip
@@ -140,6 +141,11 @@ a folder in a track's `parent` gets that folder's mute and solo propagation
 under 1.7 without any conversion. `tests/fixtures/v1.7/Fixture.incdaw` (frozen:
 a collapsed folder holding an instrument track and an audio track) is kept
 permanently.
+
+**Reading a 1.7 file.** Purely additive: no `group`, read back invalid — every
+clip on its own, which is what those projects had, since 1.7 had no way to
+group one. `tests/fixtures/v1.8/Fixture.incdaw` (frozen: three pattern clips,
+two of them grouped) is kept permanently.
 
 ---
 

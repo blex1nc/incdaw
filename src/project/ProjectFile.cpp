@@ -341,6 +341,7 @@ ProjectFile::Result ProjectFile::save(const Project& project, const fs::path& pa
         json.set("reversed", clip.reversed);
         json.set("muted", clip.muted);
         json.set("locked", clip.locked);
+        json.set("group", toJson(clip.group));
         json.set("fadeInFrames", static_cast<std::int64_t>(clip.fadeInFrames));
         json.set("fadeOutFrames", static_cast<std::int64_t>(clip.fadeOutFrames));
         json.set("pitchSemitones", clip.pitchSemitones);
@@ -726,6 +727,7 @@ ProjectFile::Result ProjectFile::load(Project& project, const fs::path& path)
         clip.reversed       = json["reversed"].asBool(false);
         clip.muted          = json["muted"].asBool(false);
         clip.locked         = json["locked"].asBool(false);
+        clip.group          = idFrom(json["group"]);
         clip.fadeInFrames   = json["fadeInFrames"].asInt(0);
         clip.fadeOutFrames  = json["fadeOutFrames"].asInt(0);
         clip.pitchSemitones = json["pitchSemitones"].asDouble(0.0);
@@ -938,6 +940,14 @@ ProjectFile::Result ProjectFile::migrate(Json& document, int major, int minor)
     // document and reads back false — every folder open, which is how those
     // projects were last drawn, since 1.6 had no way to close one.
     if (major == 1 && minor == 6) {
+        result.succeeded = true;
+        return result;
+    }
+
+    // 1.7 -> 1.8. Purely additive: `Clip::group` is absent from a 1.7 document
+    // and reads back invalid — every clip on its own, which is what those
+    // projects had, since 1.7 had no way to group one.
+    if (major == 1 && minor == 7) {
         result.succeeded = true;
         return result;
     }

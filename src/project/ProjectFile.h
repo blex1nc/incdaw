@@ -46,7 +46,11 @@ inline constexpr int projectFormatMajor = 1;
 /// written, so folder tracks themselves need no conversion — a 1.6 file simply
 /// has no `collapsed` field and reads back with every folder open, which is
 /// the state those projects were last seen in.
-inline constexpr int projectFormatMinor = 7;
+///
+/// 1.8 (TRACK B / B5): a clip carries the group it belongs to. Additive: a 1.7
+/// file has no `group` and reads back with every clip on its own, which is
+/// what those projects had.
+inline constexpr int projectFormatMinor = 8;
 
 [[nodiscard]] std::string projectFormatVersionString();
 

@@ -10,6 +10,43 @@ namespace {
 /// which reads to the user as a clip that vanished.
 constexpr Tick minimumClipLength = 1;
 
+/// Pulls in every clip that shares a group with one already in the list.
+///
+/// A group is a decision about the arrangement — these four bars belong
+/// together — so a verb aimed at one of them is aimed at all of them, however
+/// the user happened to select. Applied inside the commands, like the lock, so
+/// every route to an edit gets it.
+void expandToGroups(const Project& project, ClipIds& clips)
+{
+    std::vector<EntityId> groups;
+
+    for (const EntityId id : clips) {
+        const Clip* clip = project.findClip(id);
+        if (clip == nullptr || !clip->group.isValid())
+            continue;
+
+        if (std::find(groups.begin(), groups.end(), clip->group) == groups.end())
+            groups.push_back(clip->group);
+    }
+
+    if (groups.empty())
+        return;
+
+    // Walked in project order so the expanded list is stable: two commands
+    // built from the same selection target the same clips in the same order,
+    // which is what keeps `canMergeWith` comparing lists meaningful.
+    for (const Clip& clip : project.clips()) {
+        if (!clip.group.isValid())
+            continue;
+        if (std::find(groups.begin(), groups.end(), clip.group) == groups.end())
+            continue;
+        if (std::find(clips.begin(), clips.end(), clip.id) != clips.end())
+            continue;
+
+        clips.push_back(clip.id);
+    }
+}
+
 /// Drops locked clips from an edit's target list.
 ///
 /// A lock refuses the verb rather than being checked in the UI: the playlist,
@@ -19,12 +56,36 @@ constexpr Tick minimumClipLength = 1;
 /// — the redone gesture is the one the lock now allows.
 void dropLocked(const Project& project, ClipIds& clips)
 {
+    // A group moves as one, so it locks as one: one locked member pins the
+    // whole group, rather than the rest sliding out from under it.
+    std::vector<EntityId> lockedGroups;
+    for (const EntityId id : clips) {
+        const Clip* clip = project.findClip(id);
+        if (clip != nullptr && clip->locked && clip->group.isValid())
+            lockedGroups.push_back(clip->group);
+    }
+
     clips.erase(std::remove_if(clips.begin(), clips.end(),
-                               [&project](const EntityId id) {
+                               [&project, &lockedGroups](const EntityId id) {
                                    const Clip* clip = project.findClip(id);
-                                   return clip != nullptr && clip->locked;
+                                   if (clip == nullptr)
+                                       return false;
+                                   if (clip->locked)
+                                       return true;
+
+                                   return clip->group.isValid()
+                                       && std::find(lockedGroups.begin(), lockedGroups.end(),
+                                                    clip->group) != lockedGroups.end();
                                }),
                 clips.end());
+}
+
+/// What every geometry verb does to its target list before it starts: the
+/// group comes with the clip, and a lock refuses the lot.
+void resolveTargets(const Project& project, ClipIds& clips)
+{
+    expandToGroups(project, clips);
+    dropLocked(project, clips);
 }
 
 /// The track a row offset lands on, or an invalid id when it falls off either
@@ -98,7 +159,7 @@ std::string RemoveClipsCommand::name() const
 bool RemoveClipsCommand::execute(Project& project)
 {
     removed_.clear();
-    dropLocked(project, clips_);
+    resolveTargets(project, clips_);
 
     // Collect first, then erase back to front, so the recorded positions stay
     // valid for undo however the ids were ordered.
@@ -133,7 +194,7 @@ void RemoveClipsCommand::undo(Project& project)
 
 bool MoveClipsCommand::execute(Project& project)
 {
-    dropLocked(project, clips_);
+    resolveTargets(project, clips_);
 
     if (clips_.empty() || (tickDelta_ == 0 && trackDelta_ == 0))
         return false;
@@ -244,7 +305,7 @@ void MoveClipsCommand::mergeWith(const Command& next)
 
 bool ResizeClipsCommand::execute(Project& project)
 {
-    dropLocked(project, clips_);
+    resolveTargets(project, clips_);
 
     if (clips_.empty() || lengthDelta_ == 0)
         return false;
@@ -331,6 +392,12 @@ void ResizeClipsCommand::mergeWith(const Command& next)
 bool DuplicateClipsCommand::execute(Project& project)
 {
     if (!minted_) {
+        // A copy of a group is a group — its own, not the original's, so that
+        // moving the copy afterwards does not drag the source along with it.
+        expandToGroups(project, clips_);
+
+        std::vector<std::pair<EntityId, EntityId>> newGroups;
+
         created_.clear();
         createdIds_.clear();
 
@@ -350,6 +417,20 @@ bool DuplicateClipsCommand::execute(Project& project)
                 continue;
 
             Clip& added = project.addClip(project::ClipType::pattern, track, source->source);
+
+            if (copy.group.isValid()) {
+                const auto found = std::find_if(
+                    newGroups.begin(), newGroups.end(),
+                    [&copy](const auto& pair) { return pair.first == copy.group; });
+
+                if (found != newGroups.end()) {
+                    copy.group = found->second;
+                } else {
+                    const EntityId minted = project.ids().next();
+                    newGroups.emplace_back(copy.group, minted);
+                    copy.group = minted;
+                }
+            }
 
             copy.id        = added.id;
             copy.track     = track;
@@ -383,7 +464,7 @@ void DuplicateClipsCommand::undo(Project& project)
 
 bool StretchClipsCommand::execute(Project& project)
 {
-    dropLocked(project, clips_);
+    resolveTargets(project, clips_);
 
     if (lengthDelta_ == 0)
         return false;
@@ -590,6 +671,105 @@ void SetClipPanCommand::mergeWith(const Command& next)
 {
     if (const auto* other = dynamic_cast<const SetClipPanCommand*>(&next))
         pan_ = other->pan_;
+}
+
+// ── GroupClipsCommand ─────────────────────────────────────────────────────────
+
+bool GroupClipsCommand::execute(Project& project)
+{
+    // Grouping a clip that is already in a group folds that whole group in:
+    // the gesture means "these belong together", and half a group left behind
+    // would be a group the user cannot see they still have.
+    expandToGroups(project, clips_);
+
+    previous_.clear();
+
+    std::vector<EntityId> valid;
+    for (const EntityId id : clips_)
+        if (project.findClip(id) != nullptr)
+            valid.push_back(id);
+
+    // One clip is not a group.
+    if (valid.size() < 2)
+        return false;
+
+    if (!group_.isValid())
+        group_ = project.ids().next();
+
+    bool changed = false;
+
+    for (const EntityId id : valid) {
+        Clip* clip = project.findClip(id);
+        previous_.push_back({id, clip->group});
+        changed    = changed || clip->group != group_;
+        clip->group = group_;
+    }
+
+    return changed;
+}
+
+void GroupClipsCommand::undo(Project& project)
+{
+    for (const Previous& entry : previous_) {
+        if (Clip* clip = project.findClip(entry.id))
+            clip->group = entry.group;
+    }
+}
+
+// ── UngroupClipsCommand ───────────────────────────────────────────────────────
+
+bool UngroupClipsCommand::execute(Project& project)
+{
+    expandToGroups(project, clips_);
+
+    previous_.clear();
+
+    for (const EntityId id : clips_) {
+        Clip* clip = project.findClip(id);
+        if (clip == nullptr || !clip->group.isValid())
+            continue;
+
+        previous_.push_back({id, clip->group});
+        clip->group = {};
+    }
+
+    return !previous_.empty();
+}
+
+void UngroupClipsCommand::undo(Project& project)
+{
+    for (const Previous& entry : previous_) {
+        if (Clip* clip = project.findClip(entry.id))
+            clip->group = entry.group;
+    }
+}
+
+// ── SetClipColourCommand ──────────────────────────────────────────────────────
+
+bool SetClipColourCommand::execute(Project& project)
+{
+    expandToGroups(project, clips_);
+
+    previous_.clear();
+
+    for (const EntityId id : clips_) {
+        Clip* clip = project.findClip(id);
+        if (clip == nullptr || clip->colour == colour_)
+            continue;
+
+        previous_.push_back({id, clip->colour});
+        clip->colour = colour_;
+    }
+
+    return !previous_.empty();
+}
+
+void SetClipColourCommand::undo(Project& project)
+{
+    for (const Previous& entry : previous_) {
+        if (Clip* clip = project.findClip(entry.id))
+            clip->colour = entry.colour;
+    }
 }
 
 // ── SetClipLockedCommand ──────────────────────────────────────────────────────

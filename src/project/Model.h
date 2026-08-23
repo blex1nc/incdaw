@@ -210,6 +210,15 @@ struct Clip {
     double        pitchSemitones = 0.0;
     double        stretchRatio   = 1.0;
 
+    /// The group this clip belongs to, or an invalid id when it is on its own.
+    ///
+    /// A group is project state, not a selection: it is saved with the song
+    /// and it is still there when the file is reopened. The id is minted like
+    /// any other entity id but names no entity — a group is exactly the set of
+    /// clips that carry it, which is what makes ungrouping a single field
+    /// write per clip rather than a list to keep in step.
+    EntityId      group;
+
     std::string   name;
     std::uint32_t colour = 0xFF6699CCu;
 

@@ -8,6 +8,27 @@ public version yet.
 
 ## [Unreleased]
 
+### Playlist — clips that move as one — 2026-08-23
+
+- **Clip groups.** Several clips tie together and then move, resize, copy,
+  delete and colour as one, however the user happened to select. A group is
+  project state rather than a selection: it is saved with the song, and a
+  chorus arranged as four clips is still arranged that way when the file is
+  reopened. ⌘G groups, ⇧⌘G ungroups, and both are on the clip menu.
+- **The verbs meet the group inside the commands**, next to the lock, so a
+  drag, a menu item, a shortcut and an eventual script all get it rather
+  than one of them.
+- **A copy of a group is a group of its own**, so moving the copy afterwards
+  does not drag the source along with it. Splitting a grouped clip leaves
+  both halves in the group, and ungrouping breaks the whole group rather
+  than the part that happened to be selected.
+- **A locked member pins the whole group** instead of letting the rest slide
+  out from under it.
+- **Members share a tint** along the top edge, keyed to the group so that
+  two adjacent groups almost never wear the same one.
+- **Project format 1.8.** Clips gained `group`. A 1.7 file reads back with
+  every clip on its own.
+
 ### Playlist — folder tracks, and a group that mutes as one — 2026-08-23
 
 - **Folders group tracks.** `TrackType::folder` and `Track::parent` were in

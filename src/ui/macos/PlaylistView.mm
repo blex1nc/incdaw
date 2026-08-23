@@ -370,9 +370,33 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         else
             [self drawPatternPreviewFor:model inBody:body];
 
+        if (model.group.isValid())
+            [self drawGroupTieIn:body forGroup:model.group];
+
         if (model.locked)
             [self drawLockMarkIn:body];
     }
+}
+
+/// A tinted strip along the region's top edge, its hue derived from the group
+/// id so that every member of one group carries the same one and two adjacent
+/// groups almost never share it. Cheaper to read than a badge and it survives
+/// down to a clip two points wide.
+- (void)drawGroupTieIn:(NSRect)body forGroup:(project::EntityId)group
+{
+    if (body.size.height < 6.0 || body.size.width < 4.0)
+        return;
+
+    // The golden-ratio step spreads consecutive ids across the wheel instead
+    // of leaving neighbours a shade apart.
+    const CGFloat hue = std::fmod(static_cast<CGFloat>(group.value()) * 0.6180339887, 1.0);
+
+    NSColor* tint = [NSColor colorWithCalibratedHue:hue
+                                         saturation:0.55
+                                         brightness:0.95
+                                              alpha:0.85];
+
+    fillRect(NSMakeRect(NSMinX(body), NSMaxY(body) - 3.0, body.size.width, 3.0), tint);
 }
 
 /// A bar-and-shackle glyph in the region's bottom-right corner. Drawn rather
@@ -1056,6 +1080,20 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
         return;
     }
 
+    if (command && (character == 'g' || character == 'G')
+        && !_model->selection().empty()) {
+        if (shift) {
+            [self commit:std::make_unique<app::UngroupClipsCommand>(_model->selection())];
+        } else if (!_registry->execute(
+                       std::make_unique<app::GroupClipsCommand>(_model->selection()))) {
+            [self refuse:@"Select two or more clips to group them."];
+        } else {
+            [self changed];
+        }
+
+        return;
+    }
+
     // M drops a marker at the playhead (or the viewport's left edge when the
     // transport has never rolled); Shift+M makes it a one-bar region.
     if (!command && (character == 'm' || character == 'M')) {
@@ -1225,6 +1263,21 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
                                             action:@selector(unreverseFromMenu:)
                                      keyEquivalent:@""];
     unreverse.target = self;
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* group = [menu addItemWithTitle:@"Group"
+                                        action:@selector(groupFromMenu:)
+                                 keyEquivalent:@""];
+    group.target = self;
+
+    NSMenuItem* ungroup = [menu addItemWithTitle:@"Ungroup"
+                                          action:@selector(ungroupFromMenu:)
+                                   keyEquivalent:@""];
+    ungroup.target = self;
+
+    NSMenuItem* colour = [menu addItemWithTitle:@"Colour" action:nil keyEquivalent:@""];
+    colour.submenu = [self clipColourMenu];
 
     [menu addItem:[NSMenuItem separatorItem]];
 
@@ -1423,6 +1476,53 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     (void)sender;
     [self commit:std::make_unique<app::SetClipMutedCommand>(_model->selection(), false)];
+}
+
+- (void)groupFromMenu:(id)sender
+{
+    (void)sender;
+
+    if (!_registry->execute(std::make_unique<app::GroupClipsCommand>(_model->selection()))) {
+        [self refuse:@"Select two or more clips to group them."];
+        return;
+    }
+
+    [self changed];
+}
+
+- (void)ungroupFromMenu:(id)sender
+{
+    (void)sender;
+    [self commit:std::make_unique<app::UngroupClipsCommand>(_model->selection())];
+}
+
+/// The clip palette, matching the track menu's: a colour is a one-click
+/// decision, and the group takes it together.
+- (NSMenu*)clipColourMenu
+{
+    static const struct { const char* name; unsigned int argb; } swatches[] = {
+        {"Blue",   0xFF6699CCu}, {"Teal",   0xFF3E9E96u}, {"Green",  0xFF5C9E4Au},
+        {"Amber",  0xFFC8963Cu}, {"Orange", 0xFFC86E3Cu}, {"Red",    0xFFBE4A4Au},
+        {"Pink",   0xFFB4569Eu}, {"Violet", 0xFF7E5CBEu}, {"Grey",   0xFF6E6E78u},
+    };
+
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    for (const auto& swatch : swatches) {
+        NSMenuItem* item = [menu addItemWithTitle:@(swatch.name)
+                                           action:@selector(setClipColourFromMenu:)
+                                    keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @(swatch.argb);
+    }
+
+    return menu;
+}
+
+- (void)setClipColourFromMenu:(NSMenuItem*)item
+{
+    const auto argb = static_cast<std::uint32_t>([item.representedObject unsignedIntValue]);
+    [self commit:std::make_unique<app::SetClipColourCommand>(_model->selection(), argb)];
 }
 
 - (void)lockFromMenu:(id)sender

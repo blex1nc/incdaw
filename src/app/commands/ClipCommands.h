@@ -5,6 +5,7 @@
 #include "project/Model.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -260,6 +261,82 @@ private:
     ClipIds             clips_;
     double              pan_ = 0.0;
     std::vector<double> previous_;
+};
+
+/// Ties clips together so that they move, copy and delete as one.
+///
+/// The group is project state: it is saved with the song, it survives reopen,
+/// and it is not the selection. Selecting one member and dragging moves the
+/// lot, which is the whole point — a chorus that was arranged as four clips
+/// stays arranged that way.
+class GroupClipsCommand final : public Command {
+public:
+    explicit GroupClipsCommand(ClipIds clips) : clips_(std::move(clips)) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.group"; }
+    [[nodiscard]] std::string name() const override { return "Group Clips"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    /// Valid only after the first execute.
+    [[nodiscard]] EntityId groupId() const noexcept { return group_; }
+
+private:
+    struct Previous {
+        EntityId id;
+        EntityId group;
+    };
+
+    ClipIds               clips_;
+    EntityId              group_;    ///< minted once, so redo lands on the same id
+    std::vector<Previous> previous_;
+};
+
+/// Breaks the group a clip is in — the whole group, not the selection: the
+/// gesture undoes a decision, and leaving two of five clips still tied
+/// together would be a group nobody asked for.
+class UngroupClipsCommand final : public Command {
+public:
+    explicit UngroupClipsCommand(ClipIds clips) : clips_(std::move(clips)) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.ungroup"; }
+    [[nodiscard]] std::string name() const override { return "Ungroup Clips"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    struct Previous {
+        EntityId id;
+        EntityId group;
+    };
+
+    ClipIds               clips_;
+    std::vector<Previous> previous_;
+};
+
+/// Recolours clips — a group at a time, like the verbs that move them.
+class SetClipColourCommand final : public Command {
+public:
+    SetClipColourCommand(ClipIds clips, std::uint32_t colour)
+        : clips_(std::move(clips)), colour_(colour) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "clip.setColour"; }
+    [[nodiscard]] std::string name() const override { return "Set Clip Colour"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+private:
+    struct Previous {
+        EntityId      id;
+        std::uint32_t colour = 0u;
+    };
+
+    ClipIds               clips_;
+    std::uint32_t         colour_ = 0u;
+    std::vector<Previous> previous_;
 };
 
 /// Pins a clip in place.
