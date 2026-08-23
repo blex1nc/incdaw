@@ -78,7 +78,8 @@ add_executable(incdaw_tests
     unit/ThemeLibraryTests.cpp
     unit/PresetTests.cpp
     unit/WavetableTests.cpp
-    unit/WavetableSynthTests.cpp)
+    unit/WavetableSynthTests.cpp
+    unit/FmSynthTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.

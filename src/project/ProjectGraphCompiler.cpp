@@ -9,6 +9,7 @@
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/graph/ParameterSink.h"
+#include "engine/instrument/FmSynth.h"
 #include "engine/instrument/PianoInstrument.h"
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
@@ -465,6 +466,9 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         // identifier was built from in the first place.
         if (channel.instrument.uid == "incdaw.wavetable")
             return std::make_unique<engine::WavetableSynth>();
+
+        if (channel.instrument.uid == "incdaw.fm")
+            return std::make_unique<engine::FmSynth>();
 
         if (channel.instrument.uid == plugins::builtinSampler().uid) {
             auto sampler = std::make_unique<engine::Sampler>();

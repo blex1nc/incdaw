@@ -1,5 +1,6 @@
 #include "engine/instrument/BuiltinInstruments.h"
 
+#include "engine/instrument/FmSynth.h"
 #include "engine/instrument/PianoInstrument.h"
 #include "engine/instrument/Sampler.h"
 #include "engine/instrument/SimpleSynth.h"
@@ -159,6 +160,78 @@ constexpr PresetValue pianoBar[] = {
     {static_cast<std::uint32_t>(PianoParam::hammerNoise), 0.5},
 };
 
+constexpr PresetValue fmElectricPiano[] = {
+    {FmParam::forOperator(0, FmParam::ratio), 1.0},
+    {FmParam::forOperator(0, FmParam::outLevel), 1.0},
+    {FmParam::forOperator(0, FmParam::decay), 2.5},
+    {FmParam::forOperator(0, FmParam::sustain), 0.0},
+    {FmParam::forOperator(1, FmParam::ratio), 14.0},
+    {FmParam::forOperator(1, FmParam::decay), 0.18},
+    {FmParam::forOperator(1, FmParam::sustain), 0.0},
+    {FmParam::forRoute(1, 0), 1.4},
+};
+constexpr PresetValue fmBrass[] = {
+    {FmParam::forOperator(0, FmParam::outLevel), 1.0},
+    {FmParam::forOperator(0, FmParam::attack), 0.08},
+    {FmParam::forOperator(0, FmParam::sustain), 0.85},
+    {FmParam::forOperator(1, FmParam::ratio), 1.0},
+    {FmParam::forOperator(1, FmParam::attack), 0.16},
+    {FmParam::forOperator(1, FmParam::sustain), 0.6},
+    {FmParam::forRoute(1, 0), 2.6},
+};
+constexpr PresetValue fmBell[] = {
+    {FmParam::forOperator(0, FmParam::outLevel), 1.0},
+    {FmParam::forOperator(0, FmParam::decay), 4.0},
+    {FmParam::forOperator(0, FmParam::sustain), 0.0},
+    {FmParam::forOperator(0, FmParam::release), 2.0},
+    {FmParam::forOperator(1, FmParam::ratio), 3.5},
+    {FmParam::forOperator(1, FmParam::decay), 1.5},
+    {FmParam::forOperator(1, FmParam::sustain), 0.0},
+    {FmParam::forRoute(1, 0), 4.0},
+};
+constexpr PresetValue fmBass[] = {
+    {FmParam::forOperator(0, FmParam::outLevel), 1.0},
+    {FmParam::forOperator(0, FmParam::decay), 0.35},
+    {FmParam::forOperator(0, FmParam::sustain), 0.55},
+    {FmParam::forOperator(0, FmParam::release), 0.12},
+    {FmParam::forOperator(1, FmParam::ratio), 1.0},
+    {FmParam::forOperator(1, FmParam::decay), 0.2},
+    {FmParam::forOperator(1, FmParam::sustain), 0.15},
+    {FmParam::forRoute(1, 0), 1.8},
+    {FmParam::forRoute(0, 0), 0.35},
+};
+constexpr PresetValue fmFeedbackLead[] = {
+    {FmParam::forOperator(0, FmParam::outLevel), 1.0},
+    {FmParam::forOperator(0, FmParam::sustain), 0.8},
+    {FmParam::forRoute(0, 0), 2.2},
+    {FmParam::forOperator(2, FmParam::ratio), 2.0},
+    {FmParam::forOperator(2, FmParam::sustain), 0.4},
+    {FmParam::forRoute(2, 0), 0.8},
+};
+constexpr PresetValue fmChimeStack[] = {
+    {FmParam::forOperator(0, FmParam::outLevel), 0.6},
+    {FmParam::forOperator(0, FmParam::decay), 3.0},
+    {FmParam::forOperator(0, FmParam::sustain), 0.0},
+    {FmParam::forOperator(1, FmParam::ratio), 5.0},
+    {FmParam::forOperator(1, FmParam::outLevel), 0.35},
+    {FmParam::forOperator(1, FmParam::decay), 1.2},
+    {FmParam::forOperator(1, FmParam::sustain), 0.0},
+    {FmParam::forOperator(2, FmParam::ratio), 7.0},
+    {FmParam::forOperator(2, FmParam::decay), 0.6},
+    {FmParam::forOperator(2, FmParam::sustain), 0.0},
+    {FmParam::forRoute(2, 1), 3.0},
+    {FmParam::forRoute(1, 0), 2.0},
+};
+
+constexpr FactoryPreset fmPresets[] = {
+    {"Electric Piano", fmElectricPiano, std::size(fmElectricPiano)},
+    {"Brass",          fmBrass,         std::size(fmBrass)},
+    {"Bell",           fmBell,          std::size(fmBell)},
+    {"FM Bass",        fmBass,          std::size(fmBass)},
+    {"Feedback Lead",  fmFeedbackLead,  std::size(fmFeedbackLead)},
+    {"Chime Stack",    fmChimeStack,    std::size(fmChimeStack)},
+};
+
 constexpr PresetValue wavetableSupersaw[] = {
     {static_cast<std::uint32_t>(WavetableParam::oscALevel), 0.45},
     {static_cast<std::uint32_t>(WavetableParam::oscADetune), -12.0},
@@ -235,6 +308,8 @@ const std::vector<BuiltinInstrumentInfo>& builtinInstruments()
          {pianoPresets, std::size(pianoPresets)}},
         {"incdaw.wavetable", "INCDAW Wavetable", wavetableParameters(),
          wavetableParameterCount(), {wavetablePresets, std::size(wavetablePresets)}},
+        {"incdaw.fm", "INCDAW FM", fmParameters(), fmParameterCount(),
+         {fmPresets, std::size(fmPresets)}},
     };
 
     return infos;

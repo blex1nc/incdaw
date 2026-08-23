@@ -8,6 +8,27 @@ public version yet.
 
 ## [Unreleased]
 
+### Instruments — INCDAW FM — 2026-08-23
+
+- **Six operators and a modulation matrix, not a list of algorithms.** A
+  classic FM synth ships numbered algorithms, each of which is one wiring of
+  "which operator modulates which". Storing the wiring itself as thirty-six
+  ordinary parameters costs nothing, makes every route automatable through
+  the registry like anything else, and lets a patch sit between two
+  algorithms — which a numbered list cannot express.
+- **Feedback is the diagonal.** An operator routed into itself. There is no
+  separate feedback parameter, because there is no separate mechanism.
+- **Cycles are legal.** An operator reads its modulators from the previous
+  sample, the way FM hardware has always resolved feedback, so every wiring
+  is computable in one pass and there are no illegal patches.
+- **Per operator:** ratio or a fixed frequency, detune, output level and its
+  own ADSR. Six factory presets — Electric Piano, Brass, Bell, FM Bass,
+  Feedback Lead, Chime Stack. The piano's electric voicing has an FM tine
+  inside it; it is not reused here, because it is voiced for a tine.
+- **Held to the Bessel functions.** A sine carrier phase-modulated at index
+  I has sidebands of amplitude J_k(I); the test computes those by numerical
+  integration and holds the rendered spectrum to them within 3%.
+
 ### Instruments — INCDAW Wavetable — 2026-08-23
 
 - **A wavetable synth that does not alias.** Two wavetable oscillators, a
