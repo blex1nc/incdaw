@@ -50,6 +50,7 @@ add_library(incdaw_engine STATIC
     engine/core/RealtimeGuard.cpp
     engine/graph/RenderGraph.cpp
     engine/transport/TempoMap.cpp
+    engine/performance/PerformanceScheduler.cpp
     engine/transport/Transport.cpp
     engine/dsp/SineOscillatorNode.cpp
     engine/dsp/GainNode.cpp

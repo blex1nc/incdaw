@@ -8,6 +8,25 @@ public version yet.
 
 ## [Unreleased]
 
+### Performance Mode — the scheduler — 2026-08-23
+
+- **`engine::PerformanceScheduler`**: the scene table D-041 describes,
+  headless and complete. Slots per track, a lock-free trigger ring, forward
+  quantisation to each track's own grid, all five press behaviours, all
+  seven motion behaviours, position sync and deterministic randomness.
+- **Triggers wait in the ring until they are due**, and each block scans the
+  unconsumed ones in posted order. The first design drained the ring into a
+  single pending slot per track; that holds two presses correctly and loses
+  a press-and-release pair queued before either is due, so the clip never
+  sounded. The correction is recorded in the design document rather than
+  quietly applied.
+- **A block of triggers allocates nothing and takes no lock**, asserted by
+  the realtime guard over forty beats of three tracks with different grids,
+  press modes and motions.
+- Nothing is wired to audio yet: no node reads the scheduler and no project
+  can create one. That is the next increment, and it is deliberately after
+  this one.
+
 ### Performance Mode — the design, not the feature — 2026-08-23
 
 - **`docs/PERFORMANCE_MODE.md`**: the scheduling design TRACK B asks for as

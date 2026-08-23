@@ -64,6 +64,7 @@ add_executable(incdaw_tests
     unit/ConsolidateTests.cpp
     unit/AutomationEditorTests.cpp
     unit/ArrangementTests.cpp
+    unit/PerformanceSchedulerTests.cpp
     unit/AutomationClipTests.cpp
     unit/InputMonitorTests.cpp
     unit/LoopRecordingTests.cpp

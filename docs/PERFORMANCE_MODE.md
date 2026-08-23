@@ -1,6 +1,7 @@
 # INCDAW — Performance Mode
 
-**Status:** design. Nothing in this document is implemented.
+**Status:** increment 2 implemented (`engine::PerformanceScheduler`, headless and
+tested). Increments 3–6 are still design.
 
 TRACK B item B12 asks for a written plan before any code, and names the
 scheduling design as the deliverable of the first increment. This is that
@@ -116,9 +117,23 @@ frame, and the block is split there — the same segment mechanism the transport
 already uses for loop wraps. A clip therefore starts on the exact frame of the
 bar line, not at the top of the block containing it.
 
-Bound: at most one pending trigger per track slot. A second press before the
-first has landed replaces it, which is also the musically correct answer — the
-last thing the player pressed is what they meant.
+Bound: the ring itself. Triggers **wait in the ring** until their quantised
+frame is due, and each block scans the unconsumed ones — in the order they were
+posted — applying those that have come due, then walks the read cursor over the
+consumed prefix.
+
+> **Corrected during increment 2.** The first design drained the ring into a
+> single pending slot per track, on the reasoning that a second press before
+> the first has landed replaces it. That is right for two presses and wrong for
+> a press and its release: queue both before either is due and the release
+> overwrites the press, so the clip never sounds at all. The ring already had
+> the room and the ordering; what it needed was the patience. Two presses still
+> resolve to the later one, because both apply on the same quantised frame and
+> the second one lands last.
+
+Scanning rather than popping the head also matters: trigger grids are per
+track, so the ring is not in due-order, and popping only the head would let one
+track's un-due trigger block another track's due one.
 
 ---
 
@@ -160,10 +175,13 @@ this one.
 ## 7. Increments
 
 1. **This document**, plus the decision record (D-041).
-2. **The scheduler, headless.** `PerformanceScheduler` with its slot table,
-   trigger ring and quantisation, tested without any audio: feed it triggers
-   and blocks, assert which clip is sounding at which frame, for every press
-   and motion behaviour. This is where the design is proved or discarded.
+2. ~~**The scheduler, headless.**~~ **Done.** `PerformanceScheduler` with its
+   slot table, trigger ring and quantisation, tested without any audio: 21
+   cases covering every press and motion behaviour, forward-only quantisation,
+   position sync, deterministic randomness, a full ring, a zero-length clip,
+   and a realtime-safety case asserting that a block of triggers allocates
+   nothing and takes no lock. One design correction came out of it, recorded
+   in §4.
 3. **The engine path.** `PerformanceSource` on `AudioClipNode` and the
    instrument path; a realtime-safety test that a block with triggers pending
    allocates nothing and takes no lock.
