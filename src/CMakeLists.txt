@@ -209,6 +209,7 @@ if(APPLE)
         ui/macos/MixerView.mm
         ui/macos/PluginPickerView.mm
         ui/macos/AudioEditorView.mm
+        ui/macos/AutomationEditorView.mm
         ui/macos/InsertParameterPanel.mm
         ui/macos/SpectrumView.mm
         ui/macos/TonePanel.mm

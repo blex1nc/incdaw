@@ -12,6 +12,7 @@
 #include "project/ParameterRegistry.h"
 #include "project/PatternCompiler.h"
 #include "project/Model.h"
+#include "ui/macos/AutomationEditorView.h"
 #include "ui/macos/Theme.h"
 
 #include <algorithm>
@@ -91,6 +92,11 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     /// not" and "it does not work".
     NSString* _refusal;
     NSTimer*  _refusalTimer;
+
+    /// The automation editor and its panel, made on first use: a project with
+    /// no automation never pays for either.
+    INCDAWAutomationEditorView* _automationEditor;
+    NSPanel*                    _automationPanel;
 
     /// The row the open track menu belongs to. Set when the menu is built, so
     /// its verbs act on what was right-clicked rather than on the selection.
@@ -967,6 +973,13 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     if (event.clickCount == 2 && clicked.type == project::ClipType::audio) {
         if (self.onOpenAudioAsset != nil)
             self.onOpenAudioAsset(clicked.source.value());
+        return;
+    }
+
+    // The same idea one clip type over: an automation clip is the handle, the
+    // lane is the thing being edited.
+    if (event.clickCount == 2 && clicked.type == project::ClipType::automation) {
+        [self openAutomationLane:clicked.source];
         return;
     }
 
@@ -1897,6 +1910,46 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     [self commit:std::make_unique<app::RenameTrackCommand>(trackId, field.stringValue.UTF8String)];
 }
 
+/// Opens the lane in its own panel.
+///
+/// A panel rather than a fifth tab in the editor switcher: the switcher's
+/// segments belong to the control bar, and an automation lane is edited
+/// ALONGSIDE the arrangement it sits in rather than instead of it.
+- (void)openAutomationLane:(project::EntityId)lane
+{
+    if (_automationEditor == nil) {
+        const NSRect frame = NSMakeRect(0, 0, 720, 260);
+
+        _automationEditor = [[INCDAWAutomationEditorView alloc]
+            initWithFrame:frame
+                  project:_project
+                 registry:_registry];
+
+        __weak INCDAWPlaylistView* weakSelf = self;
+        _automationEditor.onChange = ^{
+            [weakSelf changed];
+        };
+
+        _automationPanel = [[NSPanel alloc]
+            initWithContentRect:frame
+                      styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                               | NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+
+        _automationPanel.releasedWhenClosed = NO;
+        _automationPanel.contentView        = _automationEditor;
+        _automationEditor.autoresizingMask  = NSViewWidthSizable | NSViewHeightSizable;
+    }
+
+    _automationEditor.laneIdValue = lane.value();
+    _automationEditor.playheadTick = _playheadTick;
+    _automationPanel.title         = @"Automation";
+
+    [_automationPanel makeKeyAndOrderFront:nil];
+    [_automationPanel makeFirstResponder:_automationEditor];
+}
+
 - (void)commit:(app::CommandPtr)command
 {
     if (_registry->execute(std::move(command)))
@@ -1924,6 +1977,7 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
         return;
 
     _playheadTick = tick;
+    _automationEditor.playheadTick = tick;
     [self setNeedsDisplay:YES];
 }
 

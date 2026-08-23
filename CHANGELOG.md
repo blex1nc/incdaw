@@ -8,6 +8,31 @@ public version yet.
 
 ## [Unreleased]
 
+### Automation — the editor — 2026-08-23
+
+- **A surface for editing lanes at last.** Double-clicking an automation
+  clip in the playlist opens its lane in a panel: the curve, its points,
+  the grid and the playhead. A panel rather than a fifth editor tab —
+  a lane is worked on *alongside* the arrangement it sits in.
+- **Draw, erase, drag.** Clicking empty space draws a point on the grid;
+  Option-click erases one; dragging moves the selection in time and value
+  as one merged undo entry. Shift-drag box-selects, Shift-click adds and
+  removes, ⌘A takes the lot.
+- **Curve and tension per segment**, from the right-click menu, on the
+  point that starts the segment — which is where the evaluator reads them.
+  Held segments carry a tick on their point, so the shape of an envelope is
+  readable without clicking anything.
+- **Scale a selection in time or in value.** A time scale is anchored at
+  the earliest selected point and a value scale at the selection's mean, so
+  the gesture stays where the user is looking.
+- **Copy and paste, between lanes.** The clipboard is rebased to zero, so a
+  filter sweep copied off one lane pastes onto a send level as a plain
+  translation; ⌘V lands it at the playhead.
+- **The grid is the Piano Roll's**, in the same divisions and the same
+  words, cycled with G.
+- **The lane says what it automates** in the panel's header — target and
+  parameter — which is the first time a lane could be asked.
+
 ### Automation — the editor's model — 2026-08-23
 
 - **A model for editing lanes**, the fourth of its shape after the Channel
