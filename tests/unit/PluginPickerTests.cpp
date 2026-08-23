@@ -93,15 +93,16 @@ TEST_CASE("search narrows by name and by category, case-insensitively")
     app::PluginPickerModel picker = builtinPicker();
     const std::size_t everything = entryRows(picker);
 
+    // Two reverbs now: the Schroeder network and the convolver.
     picker.setSearch("REVERB");
-    CHECK(entryRows(picker) == 1);
+    CHECK(entryRows(picker) == 2);
     REQUIRE(picker.highlightedEntry() != nullptr);
     CHECK(picker.highlightedEntry()->plugin.uid == "incdaw.reverb");
 
     // A category is a search term too: it is how the user finds "something
     // that squashes this" without knowing the name.
     picker.setSearch("dynamics");
-    CHECK(entryRows(picker) == 5);
+    CHECK(entryRows(picker) == 7);
 
     picker.setSearch("");
     CHECK(entryRows(picker) == everything);

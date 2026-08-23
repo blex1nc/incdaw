@@ -1,5 +1,6 @@
 #include "engine/dsp/effects/EffectPresets.h"
 
+#include "engine/dsp/effects/ConvolutionReverb.h"
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/MultibandEffects.h"
@@ -551,6 +552,47 @@ constexpr FactoryPreset eqpPresets[] = {
     {"Rumble Cut", eqpRumble,   std::size(eqpRumble)},
 };
 
+// ── Convolution reverb ───────────────────────────────────────────────────────
+//
+// Only the shape, never a file: a preset that named an impulse would break
+// the moment it reached another machine, and INCDAW ships no impulses to
+// name (§20/§43).
+
+using Convolver = ConvolutionReverbEffect;
+
+constexpr PresetValue convolverRoom[] = {
+    {Convolver::mix, 0.18},
+    {Convolver::decaySeconds, 0.7},
+    {Convolver::dampingHz, 6000.0},
+};
+constexpr PresetValue convolverHall[] = {
+    {Convolver::mix, 0.3},
+    {Convolver::preDelayMs, 25.0},
+    {Convolver::decaySeconds, 3.5},
+    {Convolver::dampingHz, 9000.0},
+    {Convolver::lowCutHz, 120.0},
+    {Convolver::width, 1.3},
+};
+constexpr PresetValue convolverPlate[] = {
+    {Convolver::mix, 0.28},
+    {Convolver::decaySeconds, 2.0},
+    {Convolver::dampingHz, 14000.0},
+    {Convolver::lowCutHz, 200.0},
+};
+constexpr PresetValue convolverReverse[] = {
+    {Convolver::mix, 0.4},
+    {Convolver::reverse, 1.0},
+    {Convolver::decaySeconds, 8.0},
+    {Convolver::preDelayMs, 10.0},
+};
+
+constexpr FactoryPreset convolverPresets[] = {
+    {"Short Room",  convolverRoom,    std::size(convolverRoom)},
+    {"Long Hall",   convolverHall,    std::size(convolverHall)},
+    {"Plate-ish",   convolverPlate,   std::size(convolverPlate)},
+    {"Reverse",     convolverReverse, std::size(convolverReverse)},
+};
+
 struct Row {
     std::string_view   uid;
     FactoryPresetTable table;
@@ -580,6 +622,7 @@ constexpr Row rows[] = {
     {"incdaw.imager",         {imagerPresets,     std::size(imagerPresets)}},
     {"incdaw.shaper",         {shaperPresets,     std::size(shaperPresets)}},
     {"incdaw.eqp",            {eqpPresets,        std::size(eqpPresets)}},
+    {"incdaw.convolver",      {convolverPresets,  std::size(convolverPresets)}},
 };
 
 } // namespace

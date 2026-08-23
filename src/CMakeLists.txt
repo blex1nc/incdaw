@@ -60,6 +60,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/MixerStripNode.cpp
     engine/dsp/effects/BuiltinEffect.cpp
     engine/dsp/effects/BuiltinEffects.cpp
+    engine/dsp/effects/ConvolutionReverb.cpp
     engine/dsp/effects/DynamicsEffects.cpp
     engine/dsp/effects/EffectPresets.cpp
     engine/dsp/effects/ModulationEffects.cpp
@@ -224,6 +225,7 @@ if(APPLE)
         ui/macos/TonePanel.mm
         ui/macos/ShaperPanel.mm
         ui/macos/EqCurvePanel.mm
+        ui/macos/ConvolverPanel.mm
         ui/macos/BrowserView.mm
         ui/macos/SettingsWindow.mm
         ui/macos/CommandPalette.mm)

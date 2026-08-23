@@ -97,6 +97,44 @@ public:
     decodeState(const std::uint8_t* data, std::size_t size,
                 std::vector<std::pair<std::uint32_t, double>>& out);
 
+    /// The same decoder's other half: the named strings a state blob carries.
+    /// Empty for a version 1 blob, which had none.
+    [[nodiscard]] static bool
+    decodeStateStrings(const std::uint8_t* data, std::size_t size,
+                       std::vector<std::pair<std::string, std::string>>& out);
+
+    /// Builds a blob from values and strings, without an effect instance —
+    /// how the shell hands an effect a new file to load: read its state,
+    /// replace one string, hand it back through loadState.
+    [[nodiscard]] static std::vector<std::uint8_t>
+    encodeState(const std::vector<std::pair<std::uint32_t, double>>& values,
+                const std::vector<std::pair<std::string, std::string>>& strings);
+
+    // ── Named strings in the state ───────────────────────────────────────
+    //
+    // Almost every builtin is entirely described by its numbers, and the
+    // blob's {id, value} pairs say all of it. A convolver is not: it names a
+    // FILE, and a file name is not a double. Rather than give one effect a
+    // private side channel — or push a path into the project model, which
+    // would be a format change for one plugin's benefit — the blob grew an
+    // optional section of named strings that any effect may use and almost
+    // none do.
+
+    /// Called at save. Default: an effect with no strings to keep.
+    virtual void collectStateStrings(
+        std::vector<std::pair<std::string, std::string>>& out) const
+    {
+        (void)out;
+    }
+
+    /// Called at load, once per string the blob carries, on the MAIN thread —
+    /// which is what lets an implementation open a file here.
+    virtual void applyStateString(const std::string& key, const std::string& value)
+    {
+        (void)key;
+        (void)value;
+    }
+
     // ── Introspection (build/UI side) ────────────────────────────────────
     [[nodiscard]] const EffectParameter* parameters() const noexcept { return parameters_; }
     [[nodiscard]] std::size_t parameterCount() const noexcept { return values_.size(); }

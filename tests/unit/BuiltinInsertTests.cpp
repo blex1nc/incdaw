@@ -7,6 +7,7 @@
 #include "doctest.h"
 
 #include "engine/dsp/effects/BuiltinEffects.h"
+#include "engine/dsp/effects/ConvolutionReverb.h"
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
 #include "engine/transport/TempoMap.h"
@@ -147,13 +148,18 @@ TEST_CASE("every catalogued effect constructs, prepares and carries the shared i
         CHECK(node->parameterSink() != nullptr);
         CHECK(node->stateIO() != nullptr);
 
-        // Only the lookahead limiter buys latency; everything else is free,
-        // and delay compensation is told about the one that is not.
+        // Two effects buy latency — the lookahead limiter its window, the
+        // convolver its partition — and delay compensation is told about
+        // both. Everything else is free.
         if (std::string{info.uid} == "incdaw.limiterla")
             CHECK(node->latencyFrames()
                   == static_cast<engine::FrameCount>(
                          engine::dsp::LookaheadLimiterEffect::lookaheadMilliseconds * 0.001
                          * 48000.0));
+        else if (std::string{info.uid} == "incdaw.convolver")
+            CHECK(node->latencyFrames()
+                  == static_cast<engine::FrameCount>(
+                         engine::dsp::ConvolutionReverbEffect::partitionSize));
         else
             CHECK(node->latencyFrames() == 0);
     }

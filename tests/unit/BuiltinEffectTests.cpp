@@ -198,6 +198,11 @@ TEST_CASE("every effect at its transparent settings passes the signal bit-exact"
         nullThrough(makeBuiltinEffect("incdaw.eqp", 48000.0));
     }
 
+    SUBCASE("convolver at mix zero")
+    {
+        nullThrough(makeBuiltinEffect("incdaw.convolver", 48000.0));
+    }
+
     SUBCASE("reverb at mix zero")
     {
         auto node = makeBuiltinEffect("incdaw.reverb", 48000.0);

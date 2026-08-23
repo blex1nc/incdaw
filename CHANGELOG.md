@@ -8,6 +8,36 @@ public version yet.
 
 ## [Unreleased]
 
+### Effects — Convolution Reverb — 2026-08-23
+
+- **Uniform partitioned convolution.** The impulse is cut into 256-sample
+  partitions, each transformed once, and spectra are multiplied — the same
+  arithmetic as the naive O(N·M) convolution at a few per cent of the cost.
+  Uniform rather than non-uniform partitioning is deliberate: non-uniform
+  buys back the one block of latency at the price of several FFT schedules
+  running at different rates, and INCDAW has delay compensation, so the
+  latency is reported and removed and the simpler engine is the honest
+  choice.
+- **Held to impulses whose answer is known by hand.** Convolving with a unit
+  impulse hands the signal back sample for sample, one partition later; a
+  tap 700 samples in delays by exactly 700; two taps sum at their own
+  weights. Every partitioning bug breaks the first of those immediately.
+- **Impulses come from the user's own files.** INCDAW ships none (§20/§43).
+  A path is not a double, so the insert's state blob grew an optional
+  section of **named strings** — version 2, and a version 1 blob still
+  loads. A convolver with no file plays a hall generated from code, and a
+  file that has gone missing keeps its path (reconnect the drive and the
+  session is back) while playing the generated one rather than leaving a
+  hole in the mix.
+- **Loading is safe while playing.** The impulse lives in one of two sets and
+  becomes live in a single store, after a handshake that waits for the audio
+  thread to leave the set about to be overwritten.
+- **Decay, damping, low cut, width, pre-delay and reverse are all ordinary
+  parameters.** Decay shapes the tail per partition — a geometric sequence,
+  one exponential per block — so it automates instead of forcing a rebuild;
+  reverse is precomputed both ways for the same reason. Four factory
+  presets, none of which names a file.
+
 ### Effects — Parametric EQ — 2026-08-23
 
 - **Eight bands, seven types each** — off, low shelf, peak, high shelf, low

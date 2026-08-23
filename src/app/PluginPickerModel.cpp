@@ -16,20 +16,22 @@ namespace {
 const char* categoryFor(const std::string& uid)
 {
     if (uid == "incdaw.compressor" || uid == "incdaw.limiter" || uid == "incdaw.limiterla"
-        || uid == "incdaw.gate" || uid == "incdaw.transientsplit")
+        || uid == "incdaw.gate" || uid == "incdaw.transientsplit"
+        || uid == "incdaw.multiband" || uid == "incdaw.deesser")
         return "Dynamics";
 
     if (uid == "incdaw.eq" || uid == "incdaw.tone" || uid == "incdaw.filter"
-        || uid == "incdaw.saturator")
+        || uid == "incdaw.saturator" || uid == "incdaw.eqp" || uid == "incdaw.shaper")
         return "Tone";
 
     if (uid == "incdaw.chorus" || uid == "incdaw.flanger" || uid == "incdaw.phaser")
         return "Modulation";
 
-    if (uid == "incdaw.delay" || uid == "incdaw.reverb")
+    if (uid == "incdaw.delay" || uid == "incdaw.reverb" || uid == "incdaw.convolver")
         return "Space";
 
-    if (uid == "incdaw.utility" || uid == "incdaw.analyzer" || uid == "incdaw.loudness")
+    if (uid == "incdaw.utility" || uid == "incdaw.analyzer" || uid == "incdaw.loudness"
+        || uid == "incdaw.imager")
         return "Utility";
 
     // A builtin added later is still findable; it simply has no home yet.

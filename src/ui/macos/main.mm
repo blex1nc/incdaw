@@ -57,11 +57,13 @@
 #include "ui/macos/ControlBarView.h"
 #include "ui/macos/InsertParameterPanel.h"
 #include "ui/macos/PresetBar.h"
+#include "ui/macos/ConvolverPanel.h"
 #include "ui/macos/EqCurvePanel.h"
 #include "ui/macos/ShaperPanel.h"
 #include "ui/macos/SpectrumView.h"
 #include "ui/macos/TonePanel.h"
 #include "ui/macos/Theme.h"
+#include "engine/dsp/effects/ConvolutionReverb.h"
 #include "project/PresetLibrary.h"
 #include "app/commands/PresetCommands.h"
 #include "ui/ThemeLibrary.h"
@@ -2061,6 +2063,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         [INCDAWInsertParameterPanel refreshAppearance:window];
         [INCDAWShaperPanel refreshAppearance:window];
         [INCDAWEqCurvePanel refreshAppearance:window];
+        [INCDAWConvolverPanel refreshAppearance:window];
         [INCDAWPresetBar refreshAppearanceInWindow:window];
         ui::theme::refreshViewTree(window.contentView);
     }
@@ -2537,6 +2540,77 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     [self markDirty];
 }
 
+// ── The convolver's impulse ──────────────────────────────────────────────────
+//
+// An impulse is a FILE, and a file name is not a double, so it cannot travel
+// as a parameter. It rides in the insert's state instead, as a named string
+// (engine/dsp/effects/BuiltinEffect.h), and the shell moves it the only way
+// it can reach a live builtin: read the state, replace the one string, hand
+// it back. The effect swaps the loaded impulse between two sets, so doing so
+// while audio is running cannot tear a block in half.
+
+- (NSString*)impulsePathForSlotKey:(unsigned long long)slotKey
+{
+    engine::StateIO* state = _live.insertStateFor(project::EntityId{slotKey});
+    if (state == nullptr)
+        return nil;
+
+    std::vector<std::uint8_t> blob;
+    if (!state->saveState(blob))
+        return nil;
+
+    std::vector<std::pair<std::string, std::string>> strings;
+    if (!engine::dsp::BuiltinEffect::decodeStateStrings(blob.data(), blob.size(), strings))
+        return nil;
+
+    for (const auto& [key, value] : strings)
+        if (key == engine::dsp::ConvolutionReverbEffect::impulseKey && !value.empty())
+            return @(value.c_str());
+
+    return nil;
+}
+
+- (void)setImpulse:(NSString*)path forSlotKey:(unsigned long long)slotKey
+{
+    engine::StateIO* state = _live.insertStateFor(project::EntityId{slotKey});
+    if (state == nullptr) {
+        NSBeep();
+        return;
+    }
+
+    std::vector<std::uint8_t> blob;
+    if (!state->saveState(blob)) {
+        NSBeep();
+        return;
+    }
+
+    std::vector<std::pair<std::uint32_t, double>>    values;
+    std::vector<std::pair<std::string, std::string>> strings;
+
+    if (!engine::dsp::BuiltinEffect::decodeState(blob.data(), blob.size(), values)) {
+        NSBeep();
+        return;
+    }
+
+    (void)engine::dsp::BuiltinEffect::decodeStateStrings(blob.data(), blob.size(), strings);
+
+    const std::string key{engine::dsp::ConvolutionReverbEffect::impulseKey};
+    const std::string wanted = path != nil ? std::string{path.UTF8String} : std::string{};
+
+    std::erase_if(strings, [&key](const auto& entry) { return entry.first == key; });
+    strings.emplace_back(key, wanted);
+
+    const std::vector<std::uint8_t> updated =
+        engine::dsp::BuiltinEffect::encodeState(values, strings);
+
+    if (!state->loadState(updated.data(), updated.size())) {
+        NSBeep();
+        return;
+    }
+
+    [self markDirty];
+}
+
 // ── Presets ──────────────────────────────────────────────────────────────────
 //
 // The bar is attached to a panel from the outside and configured here, so the
@@ -2854,6 +2928,22 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                          ? _audio->sampleRate() : 48000.0
                                              onWrite:write];
 
+    // The convolver's most important control is a file path, which no slider
+    // can carry.
+    if (window == nil && slot->plugin.format == plugins::Format::builtin
+        && slot->plugin.uid == "incdaw.convolver") {
+        __weak INCDAWAppDelegate* weakForImpulse = self;
+
+        window = [INCDAWConvolverPanel
+            makePanelWithTitle:[self displayNameForSlotKey:slotKey]
+                          rows:rows
+                       impulse:[self impulsePathForSlotKey:slotKey]
+                       onWrite:write
+                     onImpulse:^(NSString* chosen) {
+                         [weakForImpulse setImpulse:chosen forSlotKey:slotKey];
+                     }];
+    }
+
     // Eight bands is thirty-two sliders, and nobody equalises by dragging
     // thirty-two sliders. The parametric EQ gets its curve instead.
     if (window == nil && slot->plugin.format == plugins::Format::builtin
@@ -3021,6 +3111,9 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
             [INCDAWTonePanel refreshWindow:_panelWindows[key] values:values];
             [INCDAWShaperPanel refreshWindow:_panelWindows[key] values:values];
             [INCDAWEqCurvePanel refreshWindow:_panelWindows[key] values:values];
+            [INCDAWConvolverPanel refreshWindow:_panelWindows[key]
+                                         values:values
+                                        impulse:[self impulsePathForSlotKey:entityKey]];
         }
     }
 }

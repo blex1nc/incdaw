@@ -1,5 +1,6 @@
 #include "engine/dsp/effects/BuiltinEffects.h"
 
+#include "engine/dsp/effects/ConvolutionReverb.h"
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/EffectPresets.h"
 #include "engine/dsp/effects/ModulationEffects.h"
@@ -79,6 +80,8 @@ const std::vector<CatalogueEntry>& catalogue()
             [](SampleRate) { return std::make_unique<WaveshaperEffect>(); });
         add("incdaw.eqp",       "Parametric EQ",
             [](SampleRate) { return std::make_unique<ParametricEqEffect>(); });
+        add("incdaw.convolver", "Convolution Reverb",
+            [](SampleRate) { return std::make_unique<ConvolutionReverbEffect>(); });
 
         return rows;
     }();
