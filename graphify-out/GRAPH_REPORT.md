@@ -1,35 +1,35 @@
 # Graph Report - timbre  (2026-08-23)
 
 ## Corpus Check
-- 401 files · ~363,201 words
+- 407 files · ~373,405 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 6354 nodes · 11417 edges · 306 communities (297 shown, 9 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 643 edges (avg confidence: 0.81)
+- 6476 nodes · 11636 edges · 320 communities (310 shown, 10 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 650 edges (avg confidence: 0.81)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `ee45d3d1`
+- Built from commit: `c80e009f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- MixerCommands.cpp
+- Command
 - Browser
 - NoteCommands.cpp
 - WavStreamWriter
 - WriteAutomationCommand
 - PresetLibrary.cpp
 - LoudnessMeterEffect
-- string
+- PatternCommands.cpp
 - TestGainPlugin.cpp
 - PianoRollModel
 - AudioEngine
-- Command
+- string
 - PluginInstanceManager
 - ProcessContext
-- EntityId
+- ConnectMixerCommand
 - Transport
 - AddInsertCommand
 - CoreAudioDevice
@@ -37,11 +37,11 @@
 - AddMarkerCommand
 - WavetableSynth.cpp
 - ArpeggiateNotesCommand
-- UpdateCheck.cpp
+- parseReleaseFeed
 - AuditionPlayer
 - AudioStream
-- LookaheadLimiterEffect
-- Sample
+- DynamicsEffects.cpp
+- PluginInsertTests.cpp
 - CompiledGraph
 - StretchAssetCommand
 - PresetBar.mm
@@ -58,7 +58,7 @@
 - TempoMap
 - FlangerEffect
 - AudioUnitInstance
-- CompiledProjectGraph
+- Node
 - MusicTheory.cpp
 - EqEffect
 - INCDAWMixerView
@@ -67,21 +67,21 @@
 - MetronomeNode
 - AudioLogger
 - read
-- LoadSampleCommand
+- AddSamplerZoneCommand
 - SetTempoCommand
 - WavetableSynth
 - DelayEffect
-- PluginRegistry.cpp
+- PluginRegistry
 - ImportAudioClipCommand
 - The work, in order
 - AudioDeviceConfig
-- Json.cpp
+- Json
 - RecordingSession
 - PlaylistView.mm
 - CoreAudioDevice.cpp
 - GraphCompileOptions
-- detectOnsets
-- -initWithFramebrowser
+- AudioFileData
+- INCDAWBrowserView
 - Clip
 - INCDAWAppDelegate
 - AppSettings
@@ -101,16 +101,16 @@
 - MidiInput
 - AudioDevice
 - ControlBarView.mm
-- Json
+- DrumMachine
 - AutomationWriteSession
 - InsertRecordedTakeCommand
 - ParameterRegistry
 - RenderOptions
 - project::compileProjectGraph
-- TrackCommands.cpp
+- FmSynth
 - AudioBufferPool
-- AudioFileData
-- InputMonitorNode
+- Region
+- renderBlock
 - PluginIdentifier
 - ThemePalette.cpp
 - RealtimeGuard.cpp
@@ -131,11 +131,11 @@
 - incdaw_tests suite target
 - write
 - CoreMidiDevice
-- SliceAssetCommand
-- SetInstrumentParameterCommand
+- MidiEvent
+- AudioUnitHandle
 - SampleRingBuffer
 - MixerStripNode
-- MixerStripNode.cpp
+- AudioAssetImport
 - MidiMapNode
 - SystemInfo
 - BasicMidiBuffer
@@ -143,9 +143,9 @@
 - Project
 - allocate
 - SplitFixture
-- Node
+- ConstantNode
 - SamplerTests.cpp
-- Options
+- main
 - TimingProbeInstrument
 - ioProcTrampoline
 - MidiRecorder
@@ -156,38 +156,38 @@
 - SampleCache
 - LevelMeter
 - LockFreeQueue
-- friend
+- Model.h
 - CountingCommand
 - GainNode
 - SineOscillatorNode
-- NoteSequence
+- collectForRange
 - MixerNode
 - capturePluginState
 - EditFixture
 - LoopbackResult
 - BuiltinEffectTests.cpp
-- MidiEvent
+- Pattern
 - BuiltinEffectInfo
 - PluginPickerModel
 - AutomationPoint
 - plugins::ClapInstance
-- Plugin Misbehaviour Matrix
+- .incdaw Package Directory
 - Permanent Version Fixtures (tests/fixtures)
 - PianoInstrument.cpp
 - Fft
 - ChannelRackView.mm
 - PluginPersistenceTests.cpp
 - SidechainFixture
-- UI Build-Out (post-phase increments)
+- Plugin Misbehaviour Matrix
 - ChannelCommands.cpp
 - ClapLibrary.cpp
 - SamplerWiringTests.cpp
 - Realtime Safety Guard (debug builds)
 - RenderGraph (compiled immutable graph)
-- Phase 19 — QA
+- INCDAW Testing Strategy
 - ParsedHeader
 - AddPatternClipCommand
-- AddTrackCommand
+- RemoveTrackCommand
 - PluginParameterInfo
 - Smoother
 - SimpleSynth.cpp
@@ -196,79 +196,83 @@
 - EditAssetRegionCommand
 - Phase 18 Measured Baseline (2026-08-16)
 - D-007 — Plugin format support: CLAP, AU, VST3 (VST2 excluded)
-- INCDAW Plugin Host
-- ClapInstance
+- Phase 1 — Foundation and Build System
+- UI Build-Out (post-phase increments)
 - Wavetable.cpp
 - KernelTable
-- MidiDevice
-- Release
+- ClapDescriptor
+- compileArrangement
 - incdaw_engine layer library
 - AutomationNode
 - Fixture
-- DiskStreamingTests.cpp
+- renderArrangement
 - Fixture
 - Wavetable
 - ChildResult
 - SettingsWindow.mm
 - Track
-- PatternCommands.cpp
+- LookaheadLimiterEffect
 - TimelineAnchor
-- SetPatternLengthCommand
+- -mouseDown
 - timeStretch
 - SharedLibrary
 - humanizeNoteStarts
-- RemoveTrackCommand
+- BrowserItem
 - PatternListView.mm
 - AudioAsset
 - TonePanel.mm
-- RemovePatternCommand
-- PianoInstrumentTests.cpp
+- AddAutomationLaneCommand
+- ChordDetection
 - RecordedEvent
-- ModulationEffectTests.cpp
+- processThrough
 - DiskStreamer
 - PluginFolder
 - SamplerStreamingTests.cpp
 - make-dmg.sh
 - Atomic Graph Pointer Swap
 - D-028 — Hosted plugins reach the graph through an injected factory
-- .incdaw versioned project format
+- Instrument
 - PianoModelSpec
 - MidiDeviceInfo
 - ToggleStepCommand
-- AddPatternCommand
+- renderClickFrames
 - SplitClipCommand
-- DuplicatePatternCommand
+- -dockRect
 - ScratchDirectory
-- BuiltinInstrumentInfo
+- EffectParameter
 - exportArrangement
-- SetTrackSoloedCommand
-- HttpResponse
-- BlobWriter
-- Denormals.h
+- AutomationCommands.cpp
+- main.mm
+- ClapLibrary
+- RealtimeSafetyTests.cpp
 - AudioDevice (platform device interface)
 - INCDAWSettingsWindow
-- ProjectMetadata
-- ClipCommands.cpp
-- Tick
+- PluginPickerModel.cpp
+- MoveClipsCommand
+- SendFixture
 - PluginPickerEntry
 - Version
 - TimestampedMidiMessage
-- InsertAudioCommand
-- INCDAWSpectrumView
+- LoadSampleCommand
+- vector
 - Fixture
 - AutomationProbe
 - RenderTests.cpp
 - makeTestSignal
 - project::compileProjectGraph
 - BlobReader
+- ClipCommands.cpp
 - INCDAWPianoRollView
 - ScratchDir
+- RemoveClipsCommand
 - ScratchDirectory
 - StoppedTransportTests.cpp
 - StressTests.cpp
 - engine/audio/AudioRecorder
-- RenderResult
+- ResizeClipsCommand
 - DuplicateClipsCommand
+- build
+- NoteSequence
 - v1.0/Fixture.incdaw/manifest.json
 - v1.1/Fixture.incdaw/manifest.json
 - v1.2/Fixture.incdaw/manifest.json
@@ -276,41 +280,51 @@
 - v1.4/Fixture.incdaw/manifest.json
 - v1.5/Fixture.incdaw/manifest.json
 - v1.6/Fixture.incdaw/manifest.json
-- Fixture
+- BrowserTests.cpp
+- renderRange
 - setParameter
 - main
 - SessionFixture
-- BuiltinInsertTests.cpp
+- StretchClipsCommand
 - ScratchDirectory
+- SetAutomationPointsCommand
 - collectForBlock
-- AppSettingsTests.cpp
+- RemoveAutomationLaneCommand
 - MidiTests.cpp
 - check
 - AudioCaptureSink
 - ParameterSink
 - ProjectSession.cpp
+- SetClipMutedCommand
 - Performance Targets (audio, UI, project)
 - create
 - D-020 — A mixer strip is one node
-- INCDAWControlBarView
+- string
 - CommandRegistry
 - Out-of-Process-Ready Plugin Host ABI
 - D-009 — Distribution: ad-hoc signed, un-notarized DMG
 - D-010 — Version control: git, initialised at Phase 0
+- PluginStateTests.cpp
+- ClapInstance
+- MintedAsset
 - MidiImportResult
+- load
+- AutomationFixture
 - SequencedNote
+- Fixture
+- InstrumentParameterTests.cpp
 - INCDAWAudioEditorView
 - INCDAWTonePanel
-- ThemePaletteTests.cpp
+- PatternTests.cpp
+- render
+- INCDAWPlaylistView
 - ModulationEffects.cpp
 - Legal / IP Boundary
 - emptyOutTryPush
 - DitherSource
-- StateIO
-- uint32_t
-- -mouseDragged
-- loopWithHits
-- UpdateCheckTests.cpp
+- INCDAWChannelRackView
+- ScratchDir
+- BuiltinInstruments.cpp
 
 ## God Nodes (most connected - your core abstractions)
 1. `Project` - 296 edges
@@ -319,21 +333,21 @@
 4. `TempoMap` - 83 edges
 5. `AudioEngine` - 70 edges
 6. `AudioFileData` - 65 edges
-7. `Sampler` - 61 edges
-8. `AudioBufferPool` - 60 edges
+7. `AudioBufferPool` - 62 edges
+8. `Sampler` - 61 edges
 9. `PianoInstrument` - 60 edges
 10. `CoreAudioDevice` - 59 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `INCDAW` --semantically_similar_to--> `INCDAW project mission`  [INFERRED] [semantically similar]
   CLAUDE.md → HANDOFF.md
-- `Performance Strategy` --semantically_similar_to--> `Measure-before-optimise performance strategy`  [INFERRED] [semantically similar]
-  CLAUDE.md → HANDOFF.md
 - `Clip / Project Data Model` --semantically_similar_to--> `Core data model (no collapsed entities)`  [INFERRED] [semantically similar]
   CLAUDE.md → HANDOFF.md
-- `main()` --calls--> `close`  [INFERRED]
-  tools/audiocheck/main.cpp → src/platform/MidiDevice.h
+- `Performance Strategy` --semantically_similar_to--> `Measure-before-optimise performance strategy`  [INFERRED] [semantically similar]
+  CLAUDE.md → HANDOFF.md
 - `Development Phases (0-20)` --semantically_similar_to--> `Phase 0-20 feature roadmap`  [INFERRED] [semantically similar]
+  CLAUDE.md → HANDOFF.md
+- `Testing Strategy` --semantically_similar_to--> `Multi-level testing strategy`  [INFERRED] [semantically similar]
   CLAUDE.md → HANDOFF.md
 
 ## Import Cycles
@@ -351,39 +365,39 @@
 - **Plugin hosting pipeline: scan, catalogue, instantiate, render, persist** — changelog_scanoutofprocess, changelog_pluginregistry, changelog_plugininstancemanager, changelog_clapinstance, changelog_audiounitinstance, changelog_hostedplugin, changelog_pluginnode, changelog_stateio, changelog_parametersink [INFERRED 0.85]
 - **Mechanically Enforced Realtime and Layering Safety** — docs_audio_engine_prime_directive, docs_audio_engine_realtime_guard, docs_audio_engine_denormal_handling, docs_architecture_threading_model, docs_architecture_layering_test, docs_architecture_reaper_queue [INFERRED 0.85]
 
-## Communities (306 total, 9 thin omitted)
+## Communities (320 total, 10 thin omitted)
 
-### Community 0 - "MixerCommands.cpp"
+### Community 0 - "Command"
 Cohesion: 0.02
-Nodes (84): RemovedRouting, AddMixerNodeCommand, execute, index_, minted_, node_, type_, undo (+76 more)
+Nodes (89): RemovedRouting, Command, execute, id, name, undo, AddMixerNodeCommand, execute (+81 more)
 
 ### Community 1 - "Browser"
-Cohesion: 0.07
-Nodes (62): directory_entry, Browser, addDefaultRoots, addRoot, canDecodeAudio, classify, clear, defaultSearchLimit (+54 more)
+Cohesion: 0.14
+Nodes (40): directory_entry, Browser, addDefaultRoots, addRoot, canDecodeAudio, classify, clear, defaultSearchLimit (+32 more)
 
 ### Community 2 - "NoteCommands.cpp"
 Cohesion: 0.04
-Nodes (64): AddNoteCommand, channel_, execute, index_, note_, pattern_, undo, NoteIndices (+56 more)
+Nodes (65): AddNoteCommand, channel_, execute, index_, note_, pattern_, undo, NoteIndices (+57 more)
 
 ### Community 3 - "WavStreamWriter"
 Cohesion: 0.05
 Nodes (59): ofstream, appendCanonicalHeader(), bitsFor(), codeFor(), decodeSample(), encodeSample(), FormatInfo, bitsPerSample (+51 more)
 
 ### Community 4 - "WriteAutomationCommand"
-Cohesion: 0.04
-Nodes (52): AddAutomationLaneCommand, execute, index_, key_, lane_, minted_, target_, undo (+44 more)
+Cohesion: 0.12
+Nodes (15): WriteAutomationCommand, clip_, clipIndex_, key_, laneAfter_, laneCreated_, laneId_, laneIndex_ (+7 more)
 
 ### Community 5 - "PresetLibrary.cpp"
-Cohesion: 0.06
+Cohesion: 0.05
 Nodes (72): ApplyInsertPresetCommand, after_, before_, execute, presetName_, undo, write, writer_ (+64 more)
 
 ### Community 6 - "LoudnessMeterEffect"
 Cohesion: 0.04
-Nodes (53): Biquad, AnalyzerEffect, accumulate_, accumulated_, binCount, fft_, fftSize, generation_ (+45 more)
+Nodes (51): Biquad, AnalyzerEffect, accumulate_, accumulated_, binCount, fft_, fftSize, generation_ (+43 more)
 
-### Community 7 - "string"
-Cohesion: 0.16
-Nodes (6): string, RenamePatternCommand, execute, patternId_, previousName_, undo
+### Community 7 - "PatternCommands.cpp"
+Cohesion: 0.04
+Nodes (43): AddPatternCommand, execute, index_, minted_, pattern_, undo, DuplicatePatternCommand, execute (+35 more)
 
 ### Community 8 - "TestGainPlugin.cpp"
 Cohesion: 0.06
@@ -394,28 +408,28 @@ Cohesion: 0.05
 Nodes (58): NoteList, size_t, Tick, vector, Viewport, size_t, Tick, vector (+50 more)
 
 ### Community 10 - "AudioEngine"
-Cohesion: 0.07
-Nodes (51): RetiredGraph, AudioCaptureSink, AudioEngine, active_, anchor_, anchorVersion_, audioDeviceAboutToStart, audioDeviceStopped (+43 more)
+Cohesion: 0.06
+Nodes (45): RetiredGraph, AudioCaptureSink, AudioEngine, active_, anchor_, anchorVersion_, audioDeviceAboutToStart, audioDeviceStopped (+37 more)
 
-### Community 11 - "Command"
-Cohesion: 0.07
-Nodes (9): string, vector, Command, execute, id, name, undo, CommandRegistry (+1 more)
+### Community 11 - "string"
+Cohesion: 0.09
+Nodes (14): string, CommandRegistry, registerStandardActions(), unordered_map, mutex, string, firstAppleEffect(), path (+6 more)
 
 ### Community 12 - "PluginInstanceManager"
-Cohesion: 0.04
-Nodes (55): clap_plugin_entry_t, Held, Library, ClapLibrary, entry_, factory_, library_, clap_plugin_factory_t (+47 more)
+Cohesion: 0.11
+Nodes (27): Held, size_t, string, uint32_t, uint64_t, unique_ptr, vector, mutex (+19 more)
 
 ### Community 13 - "ProcessContext"
-Cohesion: 0.11
-Nodes (32): dbToGain(), sumInputsInto(), coefficientFor(), process, size_t, process, process, linkedPeakAt() (+24 more)
+Cohesion: 0.12
+Nodes (34): dbToGain(), sumInputsInto(), coefficientFor(), process, size_t, process, process, linkedPeakAt() (+26 more)
 
-### Community 14 - "EntityId"
-Cohesion: 0.07
+### Community 14 - "ConnectMixerCommand"
+Cohesion: 0.08
 Nodes (21): ConnectMixerCommand, connection_, destination_, execute, gain_, index_, isSend_, minted_ (+13 more)
 
 ### Community 15 - "Transport"
-Cohesion: 0.06
-Nodes (34): BlockSegment, length, offset, startFrame, startsAfterLoopWrap, FrameCount, FramePosition, size_t (+26 more)
+Cohesion: 0.09
+Nodes (25): FrameCount, FramePosition, size_t, atomic, FramePosition, size_t, Tick, uint32_t (+17 more)
 
 ### Community 16 - "AddInsertCommand"
 Cohesion: 0.06
@@ -434,16 +448,16 @@ Cohesion: 0.06
 Nodes (32): AddMarkerCommand, execute, index_, length_, marker_, minted_, tick_, undo (+24 more)
 
 ### Community 20 - "WavetableSynth.cpp"
-Cohesion: 0.11
-Nodes (28): Envelope, LfoShape, Settings, FrameCount, SampleRate, size_t, uint32_t, WavetableParam (+20 more)
+Cohesion: 0.15
+Nodes (19): Settings, size_t, uint32_t, WavetableParam, frequencyForKey(), id(), slotFor(), voiceSlot() (+11 more)
 
 ### Community 21 - "ArpeggiateNotesCommand"
 Cohesion: 0.06
 Nodes (46): Direction, map, ArpeggiateNotesCommand, channel_, direction_, execute, indices_, pattern_ (+38 more)
 
-### Community 22 - "UpdateCheck.cpp"
-Cohesion: 0.15
-Nodes (18): automaticCheckIsDue(), int64_t, optional, size_t, string, vector, evaluateFeed(), newestRelease() (+10 more)
+### Community 22 - "parseReleaseFeed"
+Cohesion: 0.09
+Nodes (34): automaticCheckIsDue(), int64_t, optional, size_t, string, vector, evaluateFeed(), string (+26 more)
 
 ### Community 23 - "AuditionPlayer"
 Cohesion: 0.05
@@ -453,21 +467,21 @@ Nodes (35): Retired, AuditionPlayer, collect, current_, gain_, generation_, play
 Cohesion: 0.10
 Nodes (24): AudioStream, fillSegment, lastRequested_, open, prefill, read, reader_, segmentFrames_ (+16 more)
 
-### Community 25 - "LookaheadLimiterEffect"
-Cohesion: 0.05
-Nodes (42): CompressorEffect, envelope_, noKeyInput, prepare, reduction_, sampleRate_, FrameCount, SampleRate (+34 more)
+### Community 25 - "DynamicsEffects.cpp"
+Cohesion: 0.07
+Nodes (28): CompressorEffect, envelope_, noKeyInput, prepare, reduction_, sampleRate_, FrameCount, SampleRate (+20 more)
 
-### Community 26 - "Sample"
-Cohesion: 0.19
-Nodes (9): anyNonZero(), ClipInsert, threshold_, FrameCount, Sample, GainInsert, factor_, SummingInsert (+1 more)
+### Community 26 - "PluginInsertTests.cpp"
+Cohesion: 0.08
+Nodes (27): anyNonZero(), ClipInsert, threshold_, FrameCount, function, InsertFactory, path, Sample (+19 more)
 
 ### Community 27 - "CompiledGraph"
 Cohesion: 0.06
-Nodes (45): Connection, CompiledGraph, hasMaster_, inputViews_, masterBuffer_, nodes_, order_, pool_ (+37 more)
+Nodes (42): Connection, CompiledGraph, hasMaster_, inputViews_, masterBuffer_, nodes_, order_, pool_ (+34 more)
 
 ### Community 28 - "StretchAssetCommand"
-Cohesion: 0.06
-Nodes (27): DeleteAudioRegionCommand, applied_, asset_, minted_, region_, removed_, FrameCount, Sample (+19 more)
+Cohesion: 0.05
+Nodes (34): DeleteAudioRegionCommand, applied_, asset_, minted_, region_, removed_, FrameCount, FramePosition (+26 more)
 
 ### Community 29 - "PresetBar.mm"
 Cohesion: 0.10
@@ -475,7 +489,7 @@ Nodes (22): NSMenuItem, NSString, NSView, INCDAWPresetBar, +attachToWindow, +bar
 
 ### Community 30 - "AudioRecorder"
 Cohesion: 0.07
-Nodes (29): AudioCaptureSink, AudioRecorder, captureAudioBlock, firstBlockHostTimeNanos_, framesOnDisk_, interleaveScratch_, options_, path_ (+21 more)
+Nodes (28): AudioCaptureSink, AudioRecorder, captureAudioBlock, firstBlockHostTimeNanos_, framesOnDisk_, interleaveScratch_, options_, path_ (+20 more)
 
 ### Community 31 - "CommandRegistry"
 Cohesion: 0.10
@@ -486,19 +500,19 @@ Cohesion: 0.09
 Nodes (26): vector, findEvents(), Scale, size_t, string, vector, InsertNotesCommand, channel_ (+18 more)
 
 ### Community 33 - "atomic"
-Cohesion: 0.08
-Nodes (14): array, unordered_map, atomic, MidiBuffer, mutex, MidiBuffer, Instrument, activeVoiceCount (+6 more)
+Cohesion: 0.10
+Nodes (10): OperatorOffset, array, atomic, MidiBuffer, forPad(), PadOffset, uint32_t, forOperator() (+2 more)
 
 ### Community 34 - "InstrumentNode"
-Cohesion: 0.12
-Nodes (15): FrameCount, SampleRate, atomic, FramePosition, MidiBuffer, ParameterSink, unique_ptr, InstrumentNode (+7 more)
+Cohesion: 0.11
+Nodes (16): FrameCount, SampleRate, atomic, FramePosition, MidiBuffer, ParameterSink, unique_ptr, InstrumentNode (+8 more)
 
 ### Community 35 - "TestLatencyPlugin.cpp"
 Cohesion: 0.10
 Nodes (31): clap_host_t, clap_istream_t, clap_ostream_t, clap_plugin_descriptor_t, clap_plugin_factory_t, clap_plugin_t, clap_process_status, clap_process_t (+23 more)
 
 ### Community 36 - "MixerTests.cpp"
-Cohesion: 0.08
+Cohesion: 0.09
 Nodes (21): FrameCount, FramePosition, Sample, SampleRate, size_t, vector, ImpulseNode, latency_ (+13 more)
 
 ### Community 37 - "INCDAW"
@@ -510,11 +524,11 @@ Cohesion: 0.13
 Nodes (32): Hit, centred(), ChannelRackModel, contentHeight, contentLeft, hitTest, knobDragTravel, knobForDrag (+24 more)
 
 ### Community 39 - "WavStreamReader"
-Cohesion: 0.08
+Cohesion: 0.07
 Nodes (29): ifstream, FrameCount, path, Result, Sample, size_t, FrameCount, path (+21 more)
 
 ### Community 40 - "TempoMap"
-Cohesion: 0.10
+Cohesion: 0.11
 Nodes (29): execute, execute, execute, clampTempo(), FramePosition, SampleRate, Tick, vector (+21 more)
 
 ### Community 41 - "FlangerEffect"
@@ -522,48 +536,48 @@ Cohesion: 0.07
 Nodes (30): ChorusEffect, centreMs, line_, mask_, maxChannels, maxDepthMs, phase_, sampleRate_ (+22 more)
 
 ### Community 42 - "AudioUnitInstance"
-Cohesion: 0.08
-Nodes (30): AudioUnitHandle, closeEditor, hasEditor, latencyFrames, open, openEditor, process, restoreState (+22 more)
+Cohesion: 0.15
+Nodes (20): AudioUnitInstance, closeEditor, create, hasEditor, latencyFrames, loadState, openEditor, parameters_ (+12 more)
 
-### Community 43 - "CompiledProjectGraph"
-Cohesion: 0.04
-Nodes (46): CompiledProjectGraph, automation, builtInserts, builtSlots, channels, channelStripFor, channelStrips, error (+38 more)
+### Community 43 - "Node"
+Cohesion: 0.05
+Nodes (42): Node, process, ParameterSink, StateIO, CompiledProjectGraph, automation, builtInserts, builtSlots (+34 more)
 
 ### Community 44 - "MusicTheory.cpp"
-Cohesion: 0.12
-Nodes (32): ChordDetection, bassKey, display, inverted, matched, rootPitchClass, type, ChordType (+24 more)
+Cohesion: 0.24
+Nodes (19): pitchClasses, Scale, size_t, string, vector, degreeOf(), detectChord(), diatonicChordPitchClasses() (+11 more)
 
 ### Community 45 - "EqEffect"
 Cohesion: 0.07
 Nodes (28): BiquadCoefficients, a1, a2, b0, b1, b2, FrameCount, SampleRate (+20 more)
 
 ### Community 46 - "INCDAWMixerView"
-Cohesion: 0.09
-Nodes (53): incdaw, NSDraggingDestination, NSArray, NSDictionary, NSView, INCDAWMixerView, -acceptsFirstResponder, -addStripRect (+45 more)
+Cohesion: 0.11
+Nodes (23): incdaw, NSDraggingDestination, NSArray, NSDictionary, NSView, INCDAWMixerView, -acceptsFirstResponder, -draggingEntered (+15 more)
 
 ### Community 47 - "BuiltinEffect"
-Cohesion: 0.12
-Nodes (27): appendF64(), appendU32(), BuiltinEffect, BuiltinEffect::BuiltinEffect(), decodeState, loadState, saveState, setParameter (+19 more)
+Cohesion: 0.19
+Nodes (20): appendF64(), appendU32(), BuiltinEffect, BuiltinEffect::BuiltinEffect(), decodeState, loadState, saveState, setParameter (+12 more)
 
 ### Community 48 - "ClapInstance"
 Cohesion: 0.07
-Nodes (26): clap_plugin_gui_t, clap_plugin_latency_t, clap_plugin_params_t, clap_plugin_state_t, ParamEvent, ClapInstance, editorOpen_, gui_ (+18 more)
+Nodes (27): clap_plugin_gui_t, clap_plugin_latency_t, clap_plugin_params_t, clap_plugin_state_t, ParamEvent, ClapInstance, closeEditor, editorOpen_ (+19 more)
 
 ### Community 49 - "MetronomeNode"
-Cohesion: 0.10
-Nodes (17): atomic, FrameCount, Sample, SampleRate, size_t, vector, MetronomeNode, amplitude_ (+9 more)
+Cohesion: 0.08
+Nodes (22): FrameCount, SampleRate, atomic, FrameCount, Sample, SampleRate, size_t, vector (+14 more)
 
 ### Community 50 - "AudioLogger"
 Cohesion: 0.09
 Nodes (22): AudioLogger, capacityFrames_, circle_, enabled_, grab, log, prepare, ready_ (+14 more)
 
 ### Community 51 - "read"
-Cohesion: 0.08
+Cohesion: 0.09
 Nodes (39): appendBigU16(), appendBigU32(), appendChunk(), appendVlq(), path, Result, size_t, Tick (+31 more)
 
-### Community 52 - "LoadSampleCommand"
-Cohesion: 0.09
-Nodes (19): AddSamplerZoneCommand, asset_, assetId_, assetIndex_, channelId_, created_, minted_, path_ (+11 more)
+### Community 52 - "AddSamplerZoneCommand"
+Cohesion: 0.13
+Nodes (10): AddSamplerZoneCommand, asset_, assetId_, assetIndex_, channelId_, created_, minted_, path_ (+2 more)
 
 ### Community 53 - "SetTempoCommand"
 Cohesion: 0.07
@@ -571,19 +585,19 @@ Nodes (28): string, vector, SetTempoCommand, canMergeWith, captured_, clampTempo
 
 ### Community 54 - "WavetableSynth"
 Cohesion: 0.09
-Nodes (23): parameterCount, array, atomic, FrameCount, maxVoices, ParameterSink, SampleRate, size_t (+15 more)
+Nodes (23): array, atomic, FrameCount, maxVoices, parameterCount, ParameterSink, SampleRate, size_t (+15 more)
 
 ### Community 55 - "DelayEffect"
 Cohesion: 0.08
 Nodes (24): Allpass, Comb, FrameCount, SampleRate, DelayEffect, capacity_, lines_, maxChannels (+16 more)
 
-### Community 56 - "PluginRegistry.cpp"
-Cohesion: 0.05
-Nodes (47): Located, AudioUnitDescription, isInstrument, manufacturer, name, uid, AudioUnitParameterDescription, defaultValue (+39 more)
+### Community 56 - "PluginRegistry"
+Cohesion: 0.15
+Nodes (21): Library, Located, int64_t, path, size_t, string, uint64_t, vector (+13 more)
 
 ### Community 57 - "ImportAudioClipCommand"
-Cohesion: 0.06
-Nodes (33): AudioAssetImport, asset, created, id, index, string, size_t, importAudioAsset() (+25 more)
+Cohesion: 0.09
+Nodes (17): size_t, string, Tick, ImportAudioClipCommand, clip_, clipIndex_, import_, minted_ (+9 more)
 
 ### Community 58 - "The work, in order"
 Cohesion: 0.11
@@ -593,9 +607,9 @@ Nodes (17): A10 — parametric EQ, more bands and a draggable curve, A11 — con
 Cohesion: 0.08
 Nodes (23): AudioDeviceConfig, bufferSize, defaultInput, inputChannels, inputDeviceIdentifier, outputChannels, outputDeviceIdentifier, sampleRate (+15 more)
 
-### Community 60 - "Json.cpp"
-Cohesion: 0.20
-Nodes (20): size_t, string, escapeInto(), formatDouble(), asString, contains, dump, dumpTo (+12 more)
+### Community 60 - "Json"
+Cohesion: 0.09
+Nodes (36): nullptr_t, int64_t, size_t, string, escapeInto(), formatDouble(), int64_t, pair (+28 more)
 
 ### Community 61 - "RecordingSession"
 Cohesion: 0.09
@@ -613,25 +627,25 @@ Nodes (24): AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyScope,
 Cohesion: 0.08
 Nodes (26): PlaybackSource, GraphCompileOptions, channelCount, diskStreamer, insertFactory, instrumentFactory, masterGain, maxBlockSize (+18 more)
 
-### Community 65 - "detectOnsets"
-Cohesion: 0.50
-Nodes (3): FrameCount, vector, detectOnsets()
+### Community 65 - "AudioFileData"
+Cohesion: 0.09
+Nodes (23): FramePosition, insertAudio(), FrameCount, vector, detectOnsets(), AudioFileData, channelCount, channels (+15 more)
 
-### Community 66 - "-initWithFramebrowser"
-Cohesion: 0.13
-Nodes (17): app, GroupKind, NSMutableArray, NSOutlineView, NSTableColumn, NSTableRowView, INCDAWBrowserNode, INCDAWBrowserRowView (+9 more)
+### Community 66 - "INCDAWBrowserView"
+Cohesion: 0.09
+Nodes (24): app, GroupKind, NSMenuDelegate, NSMutableArray, NSOutlineView, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTableColumn (+16 more)
 
 ### Community 67 - "Clip"
 Cohesion: 0.08
 Nodes (25): ClipType, Clip, colour, fadeInFrames, fadeOutFrames, gain, id, length (+17 more)
 
 ### Community 68 - "INCDAWAppDelegate"
-Cohesion: 0.08
-Nodes (21): NSApplicationDelegate, NSMenuDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSView, INCDAWBrowserView, -initWithFramebrowser, -reload (+13 more)
+Cohesion: 0.16
+Nodes (13): NSApplicationDelegate, NSInteger, NSTextFieldDelegate, NSString, NSView, INCDAWControlBarView, INCDAWStatusBarView, INCDAWAppDelegate (+5 more)
 
 ### Community 69 - "AppSettings"
-Cohesion: 0.11
-Nodes (26): AppSettings, appearance, audio, currentVersion, fromJson, load, midiInputIdentifiers, openInputAtLaunch (+18 more)
+Cohesion: 0.10
+Nodes (24): AppSettings, appearance, audio, currentVersion, fromJson, load, midiInputIdentifiers, openInputAtLaunch (+16 more)
 
 ### Community 70 - "read"
 Cohesion: 0.23
@@ -642,16 +656,16 @@ Cohesion: 0.10
 Nodes (17): AddMidiMappingCommand, controller_, execute, mapping_, midiChannel_, minted_, parameterKey_, target_ (+9 more)
 
 ### Community 72 - "MusicalPosition"
-Cohesion: 0.09
-Nodes (25): Tick, framesToSeconds(), FrameCount, friend, int64_t, SampleRate, Tick, MusicalPosition (+17 more)
+Cohesion: 0.12
+Nodes (20): Tick, framesToSeconds(), FrameCount, friend, int64_t, SampleRate, Tick, MusicalPosition (+12 more)
 
 ### Community 73 - "MidiMessage"
 Cohesion: 0.10
 Nodes (10): FrameCount, friend, uint8_t, MidiMessage, data1, data2, frameOffset, status (+2 more)
 
 ### Community 74 - "HostedPlugin"
-Cohesion: 0.09
-Nodes (14): ParameterSink, StateIO, uint32_t, HostedPlugin, closeEditor, hasEditor, latencyFrames, openEditor (+6 more)
+Cohesion: 0.07
+Nodes (17): ParameterSink, StateIO, uint32_t, HostedPlugin, closeEditor, hasEditor, latencyFrames, openEditor (+9 more)
 
 ### Community 75 - "INCDAWCommandPaletteView"
 Cohesion: 0.14
@@ -659,14 +673,14 @@ Nodes (22): NSPanel, NSObject, NSString, INCDAWCommandEntry, +entryWithTitlecate
 
 ### Community 76 - "ChannelSamplerZone"
 Cohesion: 0.09
-Nodes (21): size_t, RemoveSamplerZoneCommand, channelId_, execute, removed_, undo, zoneIndex_, ChannelSamplerZone (+13 more)
+Nodes (20): size_t, RemoveSamplerZoneCommand, channelId_, execute, removed_, zoneIndex_, ChannelSamplerZone, asset (+12 more)
 
 ### Community 77 - "CallbackProfiler"
 Cohesion: 0.12
 Nodes (14): CallbackProfiler, bucketCount, buckets_, bucketWidth, loadPercentile, overrunBucket, reset, underruns_ (+6 more)
 
 ### Community 78 - "Sampler.cpp"
-Cohesion: 0.16
+Cohesion: 0.15
 Nodes (22): FrameCount, Sample, SampleRate, vector, Voice, interpolate(), activeVoiceCount, allNotesOff (+14 more)
 
 ### Community 79 - "SimpleSynth"
@@ -674,12 +688,12 @@ Cohesion: 0.08
 Nodes (22): uint32_t, array, atomic, maxVoices, ParameterSink, Sample, SampleRate, uint64_t (+14 more)
 
 ### Community 80 - "SetSamplerZoneCommand"
-Cohesion: 0.11
-Nodes (21): execute, undo, size_t, string, ensureAssetForFile(), undo, MintedAsset, copy (+13 more)
+Cohesion: 0.15
+Nodes (15): execute, undo, string, ensureAssetForFile(), undo, undo, SetSamplerZoneCommand, canMergeWith (+7 more)
 
 ### Community 81 - "WaveformOverview"
-Cohesion: 0.08
-Nodes (26): bucketize(), Bucket, FrameCount, path, Result, Sample, vector, Bucket (+18 more)
+Cohesion: 0.11
+Nodes (17): Bucket, FrameCount, SampleRate, size_t, vector, WaveformOverview, channelCount, channels (+9 more)
 
 ### Community 82 - "RecordingSink"
 Cohesion: 0.40
@@ -697,12 +711,12 @@ Nodes (22): AudioDevice, actualBufferSize, actualInputChannels, actualOutputChan
 Cohesion: 0.11
 Nodes (21): NSTextField, -beginTypingTempo, -controlTextDidEndEditing, -controltextViewdoCommandBySelector, -drawDisplay, -drawRect, -endTypingTempoCommitting, -initWithFrame (+13 more)
 
-### Community 86 - "Json"
-Cohesion: 0.11
-Nodes (15): nullptr_t, int64_t, int64_t, pair, string, vector, Json, asBool (+7 more)
+### Community 86 - "DrumMachine"
+Cohesion: 0.05
+Nodes (55): Engine, FrameCount, SampleRate, Settings, size_t, uint32_t, Voice, decayAt() (+47 more)
 
 ### Community 87 - "AutomationWriteSession"
-Cohesion: 0.13
+Cohesion: 0.12
 Nodes (16): AutomationWriteSession, capture, closedSegments_, enabled_, finish, gestureEnded, streams_, AutomationPoint (+8 more)
 
 ### Community 88 - "InsertRecordedTakeCommand"
@@ -710,40 +724,40 @@ Cohesion: 0.10
 Nodes (16): Placement, size_t, string, vector, InsertRecordedTakeCommand, asset_, assetIndex_, clipIndices_ (+8 more)
 
 ### Community 89 - "ParameterRegistry"
-Cohesion: 0.18
-Nodes (19): Applier, convertParameters(), Entry, size_t, string, uint32_t, vector, Entry (+11 more)
+Cohesion: 0.14
+Nodes (22): Applier, convertParameters(), Entry, size_t, string, uint32_t, vector, Entry (+14 more)
 
 ### Community 90 - "RenderOptions"
-Cohesion: 0.10
-Nodes (21): BitDepth, FramePosition, function, SampleRate, uint64_t, RenderOptions, bitDepth, blockSize (+13 more)
+Cohesion: 0.06
+Nodes (39): BitDepth, clipLengthTicks(), clipStartTicks(), Tick, findChannel, arrangementEndFrames(), FrameCount, path (+31 more)
 
 ### Community 91 - "project::compileProjectGraph"
 Cohesion: 0.11
-Nodes (22): engine/audio/AudioClipNode, engine/audio/AudioStream + DiskStreamer (D-025), Export Audio options dialog, engine::InstrumentNode, EBU R128 loudness (incdaw.loudness), engine/dsp/MixerStripNode, MoveInsertCommand (insert reordering), project::renderProject / OfflineRender (+14 more)
+Nodes (21): engine/audio/AudioClipNode, engine/audio/AudioStream + DiskStreamer (D-025), Compiled graph owns its own tempo map, The hum at idle (block-rate retrigger defect), engine::InstrumentNode, EBU R128 loudness (incdaw.loudness), engine::dsp::MetronomeNode, engine/dsp/MixerStripNode (+13 more)
 
-### Community 92 - "TrackCommands.cpp"
-Cohesion: 0.13
-Nodes (13): SetTrackHeightCommand, canMergeWith, execute, height_, mergeWith, previousHeight_, trackId_, undo (+5 more)
+### Community 92 - "FmSynth"
+Cohesion: 0.07
+Nodes (41): FrameCount, SampleRate, Settings, size_t, uint32_t, fastSine(), fmParameterCount(), FmSynth (+33 more)
 
 ### Community 93 - "AudioBufferPool"
-Cohesion: 0.10
-Nodes (16): AudioBufferPool, channelPointers_, reset, samples_, FrameCount, Sample, size_t, unique_ptr (+8 more)
+Cohesion: 0.11
+Nodes (17): AudioBufferPool, channelPointers_, reset, samples_, FrameCount, Sample, size_t, unique_ptr (+9 more)
 
-### Community 94 - "AudioFileData"
-Cohesion: 0.12
-Nodes (34): applyGain(), applyRamp(), clampedRegion(), FramePosition, Sample, deleteRegion(), extractRegion(), fadeIn() (+26 more)
+### Community 94 - "Region"
+Cohesion: 0.26
+Nodes (17): applyGain(), applyRamp(), clampedRegion(), Sample, deleteRegion(), extractRegion(), fadeIn(), fadeOut() (+9 more)
 
-### Community 95 - "InputMonitorNode"
-Cohesion: 0.12
-Nodes (14): FrameCount, Sample, SampleRate, size_t, vector, InputMonitorNode, channelCount_, ring_ (+6 more)
+### Community 95 - "renderBlock"
+Cohesion: 0.47
+Nodes (5): FrameCount, Sample, vector, renderBlock(), tone()
 
 ### Community 96 - "PluginIdentifier"
-Cohesion: 0.10
-Nodes (18): builtinPiano(), builtinSampler(), builtinSimpleSynth(), Format, string, formatName(), Format, friend (+10 more)
+Cohesion: 0.16
+Nodes (14): builtinPiano(), builtinSampler(), builtinSimpleSynth(), Format, string, formatName(), Format, friend (+6 more)
 
 ### Community 97 - "ThemePalette.cpp"
 Cohesion: 0.06
-Nodes (66): members_, Entry, path, string, string_view, vector, path, ThemeLibrary (+58 more)
+Nodes (65): Entry, path, string, string_view, vector, path, ThemeLibrary, contains (+57 more)
 
 ### Community 98 - "RealtimeGuard.cpp"
 Cohesion: 0.15
@@ -766,20 +780,20 @@ Cohesion: 0.14
 Nodes (16): Slot, uint64_t, array, FrameCount, shared_ptr, size_t, SamplerZoneStream, claimSlot (+8 more)
 
 ### Community 103 - "INCDAWPluginPickerView"
-Cohesion: 0.12
-Nodes (24): NSDraggingSource, NSSearchFieldDelegate, NSArray, NSDictionary, NSView, INCDAWPluginPickerView, -acceptsFirstResponder, -chooseRow (+16 more)
+Cohesion: 0.10
+Nodes (28): NSDraggingItem, NSDraggingSource, NSImage, NSPasteboardItem, NSSearchFieldDelegate, NSArray, NSDictionary, NSView (+20 more)
 
 ### Community 104 - "PlaylistModel"
-Cohesion: 0.12
-Nodes (29): Rect, size_t, Tick, vector, size_t, vector, Viewport, PlaylistModel (+21 more)
+Cohesion: 0.10
+Nodes (30): Rect, size_t, Tick, vector, size_t, Tick, vector, Viewport (+22 more)
 
 ### Community 105 - "PianoRollHeaderModel"
 Cohesion: 0.07
 Nodes (31): Snap, Layout, Rect, Scale, size_t, Tick, PianoRollHeaderModel, layout_ (+23 more)
 
 ### Community 106 - "AudioBufferView"
-Cohesion: 0.09
-Nodes (21): AudioBufferView, channels_, frames_, offset_, FrameCount, Sample, size_t, processThrough() (+13 more)
+Cohesion: 0.20
+Nodes (7): AudioBufferView, channels_, frames_, offset_, FrameCount, Sample, size_t
 
 ### Community 107 - "ImpulseNode"
 Cohesion: 0.25
@@ -794,55 +808,55 @@ Cohesion: 0.13
 Nodes (14): FrameCount, SampleRate, DelayLineNode, capacity_, channelCount_, delayFrames_, history_, prepare (+6 more)
 
 ### Community 110 - "FactoryPresetTable"
-Cohesion: 0.16
-Nodes (13): FactoryPreset, name, valueCount, values, FactoryPresetTable, count, items, size_t (+5 more)
+Cohesion: 0.22
+Nodes (9): FactoryPresetTable, count, items, size_t, string_view, effectFactoryPresets(), Row, table (+1 more)
 
 ### Community 111 - "load"
-Cohesion: 0.21
-Nodes (20): automationPointFrom(), bindUnassignedContent(), AutomationPoint, path, Result, string, idFrom(), midiEventFrom() (+12 more)
+Cohesion: 0.15
+Nodes (25): toJson, save, append, asString, dump, automationPointFrom(), bindUnassignedContent(), AutomationPoint (+17 more)
 
 ### Community 112 - "FuzzTests.cpp"
 Cohesion: 0.16
 Nodes (13): corrupt(), path, size_t, string, uint64_t, uint8_t, vector, Random (+5 more)
 
 ### Community 113 - "incdaw_tests suite target"
-Cohesion: 0.18
-Nodes (14): plugins::AudioUnitInstance / platform::AudioUnitHost, plugins::HostedPlugin interface, plugins::PluginRegistry (catalogue + blacklist), plugins::scanOutOfProcess, incdaw-pluginscan out-of-process scanner, Plugin host architecture pipeline, Scanner rides inside INCDAW.app, CLAP header inclusion discipline (+6 more)
+Cohesion: 0.13
+Nodes (18): plugins::AudioUnitInstance / platform::AudioUnitHost, plugins::HostedPlugin interface, plugins::PluginRegistry (catalogue + blacklist), plugins::scanOutOfProcess, incdaw-pluginscan out-of-process scanner, Candidate architectural layer stack, Plugin host architecture pipeline, Resolved technology decisions D-001..D-010 (+10 more)
 
 ### Community 114 - "write"
 Cohesion: 0.19
 Nodes (16): int32_t, AiffFile, write, appendBigU16(), appendBigU32(), appendExtended(), appendId(), Format (+8 more)
 
 ### Community 115 - "CoreMidiDevice"
-Cohesion: 0.14
-Nodes (15): MIDIClientRef, MIDIPacketList, MIDIPortRef, CoreMidiDevice, callback_, client_, close, handlePackets (+7 more)
+Cohesion: 0.16
+Nodes (13): MIDIClientRef, MIDIPacketList, MIDIPortRef, CoreMidiDevice, callback_, client_, close, handlePackets (+5 more)
 
-### Community 116 - "SliceAssetCommand"
-Cohesion: 0.12
-Nodes (14): FrameCount, size_t, string, vector, SliceAssetCommand, asset_, channel_, channelIndex_ (+6 more)
+### Community 116 - "MidiEvent"
+Cohesion: 0.05
+Nodes (37): FrameCount, size_t, string, vector, SliceAssetCommand, asset_, channel_, channelIndex_ (+29 more)
 
-### Community 117 - "SetInstrumentParameterCommand"
-Cohesion: 0.17
-Nodes (11): uint32_t, SetInstrumentParameterCommand, canMergeWith, channelId_, execute, existedBefore_, mergeWith, parameterId_ (+3 more)
+### Community 117 - "AudioUnitHandle"
+Cohesion: 0.08
+Nodes (23): AudioUnitDescription, isInstrument, manufacturer, name, uid, AudioUnitHandle, closeEditor, hasEditor (+15 more)
 
 ### Community 118 - "SampleRingBuffer"
-Cohesion: 0.19
-Nodes (10): atomic, Sample, size_t, vector, SampleRingBuffer, cacheLineSize, mask_, readIndex_ (+2 more)
+Cohesion: 0.09
+Nodes (19): FrameCount, Sample, SampleRate, size_t, vector, InputMonitorNode, channelCount_, ring_ (+11 more)
 
 ### Community 119 - "MixerStripNode"
-Cohesion: 0.12
-Nodes (11): atomic, Sample, MixerStripNode, left_, meter_, muted_, polarityInverted_, right_ (+3 more)
+Cohesion: 0.10
+Nodes (23): FrameCount, Sample, SampleRate, atomic, Sample, MixerStripNode, left_, meter_ (+15 more)
 
-### Community 120 - "MixerStripNode.cpp"
-Cohesion: 0.24
-Nodes (12): FrameCount, Sample, SampleRate, panGains, prepare, process, refreshTargets, setGain (+4 more)
+### Community 120 - "AudioAssetImport"
+Cohesion: 0.14
+Nodes (16): AudioAssetImport, asset, created, id, index, string, size_t, importAudioAsset() (+8 more)
 
 ### Community 121 - "MidiMapNode"
-Cohesion: 0.12
-Nodes (10): Binding, size_t, vector, MidiMapNode, bindings_, controlChange(), path, string (+2 more)
+Cohesion: 0.25
+Nodes (5): Binding, size_t, vector, MidiMapNode, bindings_
 
 ### Community 122 - "SystemInfo"
-Cohesion: 0.14
+Cohesion: 0.13
 Nodes (15): size_t, string, size_t, string, sysctlString(), sysctlUInt(), SystemInfo, cpuBrand (+7 more)
 
 ### Community 123 - "BasicMidiBuffer"
@@ -854,35 +868,35 @@ Cohesion: 0.06
 Nodes (27): PianoModel, uint32_t, array, atomic, maxVoices, ParameterSink, SampleRate, uint64_t (+19 more)
 
 ### Community 125 - "Project"
-Cohesion: 0.05
-Nodes (67): clipLengthTicks(), clipStartTicks(), colourForIndex(), size_t, Tick, uint32_t, operator==(), totalEventCount (+59 more)
+Cohesion: 0.06
+Nodes (60): Tick, EntityId, invalidValue, friend, size_t, IdGenerator, std::hash<incdaw::project::EntityId>, colourForIndex() (+52 more)
 
 ### Community 126 - "allocate"
 Cohesion: 0.08
-Nodes (33): allocate, FrameCount, size_t, FramePosition, vector, renderArrangement(), vector, channel (+25 more)
+Nodes (28): allocate, FrameCount, size_t, FramePosition, size_t, renderNote(), FrameCount, pair (+20 more)
 
 ### Community 127 - "SplitFixture"
 Cohesion: 0.12
 Nodes (14): CommandRegistry, path, string, Tick, note(), ScratchDirectory, path, SplitFixture (+6 more)
 
-### Community 128 - "Node"
-Cohesion: 0.06
-Nodes (25): Node, process, ParameterSink, StateIO, function, InsertFactory, unique_ptr, ScriptedFactory (+17 more)
+### Community 128 - "ConstantNode"
+Cohesion: 0.10
+Nodes (14): ConstantNode, latency_, value_, FrameCount, Sample, size_t, vector, OrderRecordingNode (+6 more)
 
 ### Community 129 - "SamplerTests.cpp"
 Cohesion: 0.18
 Nodes (17): constantSample(), FrameCount, MidiBuffer, Sample, shared_ptr, vector, makeEnvelopeTransparent(), nyquistSample() (+9 more)
 
-### Community 130 - "Options"
-Cohesion: 0.12
-Nodes (17): int64_t, string, Options, amplitude, buffer, device, frequency, input (+9 more)
+### Community 130 - "main"
+Cohesion: 0.08
+Nodes (31): midiInput_, profiler_, sampleRate, transport_, MidiDevice, close, create, enumerateInputs (+23 more)
 
 ### Community 131 - "TimingProbeInstrument"
 Cohesion: 0.14
 Nodes (10): Applied, FrameCount, MidiBuffer, Sample, SampleRate, vector, renderSynth(), TimingProbeInstrument (+2 more)
 
 ### Community 132 - "ioProcTrampoline"
-Cohesion: 0.21
+Cohesion: 0.23
 Nodes (14): AudioBufferList, AudioTimeStamp, OSStatus, captureFrom, inputProcTrampoline, ioProcTrampoline, renderInto, uint64_t (+6 more)
 
 ### Community 133 - "MidiRecorder"
@@ -890,8 +904,8 @@ Cohesion: 0.14
 Nodes (14): CapturedMessage, FramePosition, MidiBuffer, atomic, queueCapacity, size_t, uint64_t, MidiRecorder (+6 more)
 
 ### Community 134 - "CoreMidiDevice.cpp"
-Cohesion: 0.35
-Nodes (11): CFStringRef, MIDIEndpointRef, MIDIObjectRef, enumerateInputs, enumerateOutputs, open, string, vector (+3 more)
+Cohesion: 0.27
+Nodes (13): CFStringRef, MIDIEndpointRef, MIDIObjectRef, enumerateInputs, enumerateOutputs, open, string, unique_ptr (+5 more)
 
 ### Community 135 - "app::CommandRegistry"
 Cohesion: 0.13
@@ -906,20 +920,20 @@ Cohesion: 0.13
 Nodes (13): AudioClipNode, addClip, clips_, fetchScratch_, prepare, process, FrameCount, PlacedClip (+5 more)
 
 ### Community 138 - "SampleCache"
-Cohesion: 0.15
-Nodes (16): int64_t, path, shared_ptr, size_t, string, uintmax_t, Entry, mutex (+8 more)
+Cohesion: 0.24
+Nodes (9): size_t, Entry, mutex, string, SampleCache, clear, entries_, entryCount (+1 more)
 
 ### Community 139 - "LevelMeter"
 Cohesion: 0.15
 Nodes (12): atomic, FrameCount, Sample, SampleRate, LevelMeter, heldPeak_, peakDecayDbPerSecond, rmsWindowSeconds (+4 more)
 
 ### Community 140 - "LockFreeQueue"
-Cohesion: 0.12
-Nodes (13): array, atomic, Capacity, size_t, T, LockFreeQueue, cacheLineSize, mask (+5 more)
+Cohesion: 0.15
+Nodes (11): array, atomic, Capacity, size_t, T, LockFreeQueue, cacheLineSize, mask (+3 more)
 
-### Community 141 - "friend"
-Cohesion: 0.11
-Nodes (9): friend, MidiMapping, controller, id, maxValue, midiChannel, minValue, parameterKey (+1 more)
+### Community 141 - "Model.h"
+Cohesion: 0.07
+Nodes (27): AutomationLane, id, parameterKey, points, targetEntity, string, MidiMapping, controller (+19 more)
 
 ### Community 142 - "CountingCommand"
 Cohesion: 0.12
@@ -933,16 +947,16 @@ Nodes (9): GainNode, current_, process, sampleRate_, target_, atomic, FrameCount
 Cohesion: 0.13
 Nodes (9): atomic, FrameCount, Sample, SampleRate, SineOscillatorNode, amplitude_, frequency_, process (+1 more)
 
-### Community 145 - "NoteSequence"
-Cohesion: 0.12
-Nodes (17): FrameCount, FramePosition, MidiBuffer, Tick, vector, Tick, uint32_t, vector (+9 more)
+### Community 145 - "collectForRange"
+Cohesion: 0.18
+Nodes (10): FrameCount, FramePosition, MidiBuffer, Tick, vector, clear, collectForRange, rebuildIndices (+2 more)
 
 ### Community 146 - "MixerNode"
-Cohesion: 0.11
-Nodes (19): MixerNodeType, string, MixerNode, colour, id, inserts, muted, name (+11 more)
+Cohesion: 0.15
+Nodes (13): MixerNodeType, MixerNode, colour, id, inserts, muted, name, pan (+5 more)
 
 ### Community 147 - "capturePluginState"
-Cohesion: 0.24
+Cohesion: 0.22
 Nodes (16): captureBuiltinInsertState(), capturePluginState(), CarriedInsertState, blob, slot, path, string, uint8_t (+8 more)
 
 ### Community 148 - "EditFixture"
@@ -955,19 +969,19 @@ Nodes (15): alignmentErrorFrames(), FrameCount, path, Sample, Take, uint64_t, Lo
 
 ### Community 150 - "BuiltinEffectTests.cpp"
 Cohesion: 0.19
-Nodes (14): FrameCount, Sample, size_t, vector, RefAllpass, index, line, RefComb (+6 more)
+Nodes (15): FrameCount, Sample, size_t, vector, processThrough(), RefAllpass, index, line (+7 more)
 
-### Community 151 - "MidiEvent"
-Cohesion: 0.04
-Nodes (64): AutomationCurve, Emit, execute, undo, size_t, Tick, vector, noteAtStep() (+56 more)
+### Community 151 - "Pattern"
+Cohesion: 0.07
+Nodes (22): AutomationCurve, AutomationPoint, curve, tension, tick, value, friend, Tick (+14 more)
 
 ### Community 152 - "BuiltinEffectInfo"
-Cohesion: 0.15
+Cohesion: 0.14
 Nodes (16): BuiltinEffectInfo, displayName, parameterCount, parameters, presets, uid, CatalogueEntry, info (+8 more)
 
 ### Community 153 - "PluginPickerModel"
-Cohesion: 0.13
-Nodes (26): categoryFor(), size_t, string, size_t, vector, lowered(), matches(), PluginPickerModel (+18 more)
+Cohesion: 0.15
+Nodes (13): size_t, vector, PluginPickerModel, clear, entries_, moveHighlight, noRow, rowHeight (+5 more)
 
 ### Community 154 - "AutomationPoint"
 Cohesion: 0.19
@@ -977,9 +991,9 @@ Nodes (10): AutomationShape, AutomationPoint, shape, tension, tick, value, Autom
 Cohesion: 0.22
 Nodes (15): engine::AutomationNode, app/AutomationWriteSession, engine::BuiltinEffect (Node + ParameterSink + StateIO), plugins::ClapInstance, Plugin delay compensation (PDC), ui/macos/InsertParameterPanel, Limiter (Lookahead) builtin effect, engine::MidiMapNode (+7 more)
 
-### Community 156 - "Plugin Misbehaviour Matrix"
-Cohesion: 0.15
-Nodes (17): Plugin Crash Policy, Prime Directive: Third-Party Plugins Are Hostile Input, Missing-Plugin Placeholder Retains State, Plugin Blacklist, Plugin State System, Plugin Validation Checks, PluginRegistry, PluginScanner (+9 more)
+### Community 156 - ".incdaw Package Directory"
+Cohesion: 0.16
+Nodes (15): Prime Directive: Third-Party Plugins Are Hostile Input, Missing-Plugin Placeholder Retains State, Plugin Blacklist, Plugin State System, Plugin Validation Checks, PluginRegistry, PluginScanner, project/PluginStateFiles (+7 more)
 
 ### Community 157 - "Permanent Version Fixtures (tests/fixtures)"
 Cohesion: 0.17
@@ -990,8 +1004,8 @@ Cohesion: 0.17
 Nodes (20): array, FrameCount, SampleRate, size_t, Voice, decayCoefficient(), frequencyForKey(), makeSineTable() (+12 more)
 
 ### Community 159 - "Fft"
-Cohesion: 0.13
-Nodes (17): size_t, Fft, forward, reversed_, setSize, twiddleCos_, twiddleSin_, size_t (+9 more)
+Cohesion: 0.10
+Nodes (21): size_t, Fft, forward, reversed_, setSize, twiddleCos_, twiddleSin_, size_t (+13 more)
 
 ### Community 160 - "ChannelRackView.mm"
 Cohesion: 0.29
@@ -1002,20 +1016,20 @@ Cohesion: 0.14
 Nodes (11): path, string, uint8_t, vector, gainBlob(), Harness, folder, registry (+3 more)
 
 ### Community 162 - "SidechainFixture"
-Cohesion: 0.14
-Nodes (10): ConstantSourceInsert, level_, CommandRegistry, SidechainFixture, bassStrip, compressorSlot, kickStrip, project (+2 more)
+Cohesion: 0.13
+Nodes (11): ConstantSourceInsert, level_, CommandRegistry, runKeyed(), SidechainFixture, bassStrip, compressorSlot, kickStrip (+3 more)
 
-### Community 163 - "UI Build-Out (post-phase increments)"
-Cohesion: 0.20
-Nodes (10): Audio Units (v2 + v3) Support, Out-of-Process Isolation Strategy, Shared-Memory Audio Ring Buffer (host boundary), Autosave, Backup and Crash Recovery (history/), Audio Logger (60 s master ring buffer), Increment 11 — Settings, MIDI In, Command Search, Increment 1 — Project Lifecycle Safety, Increment 3 — Export Options Dialog (+2 more)
+### Community 163 - "Plugin Misbehaviour Matrix"
+Cohesion: 0.18
+Nodes (14): Audio Units (v2 + v3) Support, Plugin Crash Policy, Out-of-Process Isolation Strategy, INCDAW Plugin Host, Shared-Memory Audio Ring Buffer (host boundary), VST2 Exclusion, VST3 Format Support, Audio Logger (60 s master ring buffer) (+6 more)
 
 ### Community 164 - "ChannelCommands.cpp"
 Cohesion: 0.03
-Nodes (62): RemovedContent, AddChannelCommand, channel_, execute, index_, minted_, undo, size_t (+54 more)
+Nodes (73): RemovedContent, AddChannelCommand, channel_, execute, index_, minted_, undo, size_t (+65 more)
 
 ### Community 165 - "ClapLibrary.cpp"
-Cohesion: 0.18
-Nodes (14): blobRead(), closeEditor, refreshLatencyIfChanged, close, open, clap_host_t, clap_istream_t, path (+6 more)
+Cohesion: 0.16
+Nodes (18): blobRead(), size, blobWrite(), hasEditor, openEditor, process, readParameter, refreshLatencyIfChanged (+10 more)
 
 ### Community 166 - "SamplerWiringTests.cpp"
 Cohesion: 0.19
@@ -1029,25 +1043,25 @@ Nodes (13): Headless Deterministic Framework-Free Core, Downward-Only Layer Mode
 Cohesion: 0.15
 Nodes (13): Offline/Realtime Render Equivalence, RenderGraph (compiled immutable graph), AudioClipNode, AutomationNode, Sample-Accurate Block Splitting at Event Boundaries, InstrumentNode, Offline Rendering Pipeline, ProcessContext::playing (+5 more)
 
-### Community 169 - "Phase 19 — QA"
-Cohesion: 0.33
-Nodes (6): Phase 15 — Built-in DSP, Phase 16 — MIDI Hardware and Controller Linking, Phase 17 — Rendering and Export, Phase 18 — Performance, Phase 19 — QA, Performance Regression Baselines
+### Community 169 - "INCDAW Testing Strategy"
+Cohesion: 0.15
+Nodes (13): Scriptable Command Surface Evidence, INCDAW Requirements, Testable Exit Criterion, Phase 15 — Built-in DSP, Phase 16 — MIDI Hardware and Controller Linking, Phase 17 — Rendering and Export, Phase 18 — Performance, Phase 19 — QA (+5 more)
 
 ### Community 170 - "ParsedHeader"
 Cohesion: 0.17
 Nodes (18): path, Result, size_t, uint16_t, uint32_t, uint8_t, vector, fillMetadata() (+10 more)
 
 ### Community 171 - "AddPatternClipCommand"
-Cohesion: 0.14
-Nodes (11): AddPatternClipCommand, clip_, execute, index_, length_, minted_, pattern_, start_ (+3 more)
+Cohesion: 0.17
+Nodes (9): AddPatternClipCommand, clip_, index_, length_, minted_, pattern_, start_, track_ (+1 more)
 
-### Community 172 - "AddTrackCommand"
-Cohesion: 0.11
-Nodes (13): AddTrackCommand, execute, index_, minted_, track_, undo, size_t, string (+5 more)
+### Community 172 - "RemoveTrackCommand"
+Cohesion: 0.05
+Nodes (40): AddTrackCommand, execute, index_, minted_, track_, undo, RemovedClip, size_t (+32 more)
 
 ### Community 173 - "PluginParameterInfo"
-Cohesion: 0.15
-Nodes (11): ParameterSink, StateIO, string, uint32_t, PluginParameterInfo, defaultValue, id, maxValue (+3 more)
+Cohesion: 0.11
+Nodes (15): FactoryPreset, name, valueCount, values, ParameterSink, StateIO, string, uint32_t (+7 more)
 
 ### Community 174 - "Smoother"
 Cohesion: 0.18
@@ -1077,13 +1091,13 @@ Nodes (12): Theme (single drawn design language for the shell), DelayLineNode, e
 Cohesion: 0.18
 Nodes (12): D-002 — Build system: CMake + Ninja, D-003 — Audio I/O: CoreAudio HAL directly, no wrapper framework, D-005 — Platform strategy: macOS first, Windows later, Linux not precluded, D-007 — Plugin format support: CLAP, AU, VST3 (VST2 excluded), D-008 — Licensing: INCDAW is closed-source, D-011 — Metal shaders are compiled at runtime, not built offline, D-027 — CLAP SDK vendored, pinned at 1.2.6, D-031 — Plugin instances live for their slot's lifetime, not the graph's (+4 more)
 
-### Community 181 - "INCDAW Plugin Host"
-Cohesion: 0.11
-Nodes (22): CLAP Format Support (first), INCDAW Plugin Host, VST2 Exclusion, VST3 Format Support, Ad-Hoc Signing Instead of Notarization (D-009), tools/make-dmg.sh, Release Notes 0.9.0, INCDAW Release Process (+14 more)
+### Community 181 - "Phase 1 — Foundation and Build System"
+Cohesion: 0.20
+Nodes (12): CLAP Format Support (first), Ad-Hoc Signing Instead of Notarization (D-009), tools/make-dmg.sh, Release Notes 0.9.0, INCDAW Release Process, Out-of-Scope Product Decisions, Deliberately Out of Scope, Phase 0 — Research and Architecture (+4 more)
 
-### Community 182 - "ClapInstance"
-Cohesion: 0.13
-Nodes (18): ClapInstance, Plugin Editor / UI Bridge, GraphCompileOptions::insertFactory, Plugin Latency Reporting and PDC Feed, Plugin Parameter System (D-029), ParameterRegistry (plugin registration), Event-Based Parameter Delivery (ParameterSink), params->flush() Recorded As Not Currently Applicable (+10 more)
+### Community 182 - "UI Build-Out (post-phase increments)"
+Cohesion: 0.17
+Nodes (12): Plugin Editor / UI Bridge, Plugin Parameter System (D-029), ParameterRegistry (plugin registration), Event-Based Parameter Delivery (ParameterSink), params->flush() Recorded As Not Currently Applicable, Autosave, Backup and Crash Recovery (history/), Increment 11 — Settings, MIDI In, Command Search, Increment 1 — Project Lifecycle Safety (+4 more)
 
 ### Community 183 - "Wavetable.cpp"
 Cohesion: 0.29
@@ -1093,40 +1107,40 @@ Nodes (15): basicRecipe(), combRecipe(), SampleRate, size_t, string, evenFadeRec
 Cohesion: 0.21
 Nodes (9): SampleRate, vector, KernelTable, phases, weights_, width, resample(), sinc() (+1 more)
 
-### Community 185 - "MidiDevice"
-Cohesion: 0.18
-Nodes (10): unique_ptr, MidiDevice::create(), MidiDevice, close, create, enumerateInputs, enumerateOutputs, isOpen (+2 more)
+### Community 185 - "ClapDescriptor"
+Cohesion: 0.12
+Nodes (17): ClapDescriptor, id, name, vendor, version, string, path, string (+9 more)
 
-### Community 186 - "Release"
-Cohesion: 0.15
-Nodes (14): string, Release, draft, name, notes, prerelease, tag, url (+6 more)
+### Community 186 - "compileArrangement"
+Cohesion: 0.26
+Nodes (16): Emit, content, arrangementLengthTicks(), compileArrangement(), compileArrangementInto(), compilePattern(), compilePatternInto(), Tick (+8 more)
 
 ### Community 187 - "incdaw_engine layer library"
-Cohesion: 0.13
-Nodes (15): engine/dsp/Fft (own radix-2), Compiled graph owns its own tempo map, engine::dsp::MetronomeNode, SetTempoCommand, SetTimeSignatureCommand, Spectrum analyzer (seqlock-published dBFS bins), INCDAW_REALTIME_GUARD option, incdaw_warnings interface target (+7 more)
+Cohesion: 0.10
+Nodes (21): engine/audio/AudioEdits (editor verbs), Export Audio options dialog, engine/dsp/Fft (own radix-2), project::renderProject / OfflineRender, .incdaw versioned project format, app/ProjectSession (lifecycle decisions), engine::dsp::resample (windowed-sinc), Spectrum analyzer (seqlock-published dBFS bins) (+13 more)
 
 ### Community 188 - "AutomationNode"
-Cohesion: 0.09
-Nodes (15): AutomationNode, bindings_, tempoMap_, Binding, size_t, vector, AutomationFixture, channel (+7 more)
+Cohesion: 0.11
+Nodes (11): AutomationNode, bindings_, tempoMap_, Binding, size_t, vector, controlChange(), path (+3 more)
 
 ### Community 189 - "Fixture"
 Cohesion: 0.18
 Nodes (9): CommandRegistry, Tick, vector, Fixture, channel, pattern, project, registry (+1 more)
 
-### Community 190 - "DiskStreamingTests.cpp"
-Cohesion: 0.24
-Nodes (8): FrameCount, path, Sample, size_t, makeAudio(), ScratchDir, path, tone()
+### Community 190 - "renderArrangement"
+Cohesion: 0.23
+Nodes (10): FrameCount, path, Sample, size_t, vector, makeAudio(), renderArrangement(), ScratchDir (+2 more)
 
 ### Community 191 - "Fixture"
 Cohesion: 0.20
 Nodes (10): Tick, vector, Fixture, channel, pattern, project, trackA, trackB (+2 more)
 
 ### Community 192 - "Wavetable"
-Cohesion: 0.18
+Cohesion: 0.17
 Nodes (11): size_t, string, vector, Wavetable, frameSize, levelCount, maxHarmonics, name_ (+3 more)
 
 ### Community 193 - "ChildResult"
-Cohesion: 0.18
+Cohesion: 0.17
 Nodes (10): End, ChildResult, code, end, output, path, string, vector (+2 more)
 
 ### Community 194 - "SettingsWindow.mm"
@@ -1137,17 +1151,17 @@ Nodes (32): NSAlert, NSButton, NSTabView, NSTabViewItem, -addRowtoContentatYwidt
 Cohesion: 0.17
 Nodes (12): findTrack, Track, colour, height, id, muted, name, outputMixerNode (+4 more)
 
-### Community 196 - "PatternCommands.cpp"
-Cohesion: 0.24
-Nodes (8): SetPatternSwingCommand, canMergeWith, execute, mergeWith, patternId_, previousSwing_, swing_, undo
+### Community 196 - "LookaheadLimiterEffect"
+Cohesion: 0.12
+Nodes (15): FrameCount, vector, LookaheadLimiterEffect, delay_, dequeFrames_, dequeHead_, dequeTail_, dequeValues_ (+7 more)
 
 ### Community 197 - "TimelineAnchor"
 Cohesion: 0.22
 Nodes (7): FramePosition, uint64_t, TimelineAnchor, hostTimeNanos, playing, sampleRate, timelineFrame
 
-### Community 198 - "SetPatternLengthCommand"
-Cohesion: 0.20
-Nodes (9): Tick, SetPatternLengthCommand, canMergeWith, execute, length_, mergeWith, patternId_, previousLength_ (+1 more)
+### Community 198 - "-mouseDown"
+Cohesion: 0.25
+Nodes (16): -addStripRect, -drawInsertRacknode, -drawRect, -drawStripnode, -faderRectAt, -handleInsertClickAtindexnode, -insertRackRectAt, -insertSlotRectAtslot (+8 more)
 
 ### Community 199 - "timeStretch"
 Cohesion: 0.29
@@ -1161,41 +1175,41 @@ Nodes (7): path, string, SharedLibrary, close, handle_, open, symbol
 Cohesion: 0.29
 Nodes (10): appendRecordedEvents(), Kind, MidiEventType, Tick, uint64_t, vector, humanizeNoteStarts(), nextRandom() (+2 more)
 
-### Community 202 - "RemoveTrackCommand"
-Cohesion: 0.18
-Nodes (9): RemovedClip, vector, RemoveTrackCommand, clips_, execute, index_, track_, trackId_ (+1 more)
+### Community 202 - "BrowserItem"
+Cohesion: 0.15
+Nodes (14): BrowserItem, exists, favourite, kind, name, path, sizeBytes, BrowserRoot (+6 more)
 
 ### Community 203 - "PatternListView.mm"
 Cohesion: 0.22
 Nodes (10): -acceptsFirstResponder, -drawRect, -initWithFrameprojectregistry, -isFlipped, -keyDown, -mouseDown, NSMenu, -renameFromMenu (+2 more)
 
 ### Community 204 - "AudioAsset"
-Cohesion: 0.18
+Cohesion: 0.17
 Nodes (11): AudioAsset, absolutePath, channelCount, contentHash, embedded, frameCount, id, relativePath (+3 more)
 
 ### Community 205 - "TonePanel.mm"
 Cohesion: 0.27
 Nodes (15): INCDAWToneView, -advancedSliderRectAt, -advancedToggleRect, -curveRect, -drawAdvanced, -drawBands, -drawCurve, -drawRect (+7 more)
 
-### Community 206 - "RemovePatternCommand"
-Cohesion: 0.20
-Nodes (7): size_t, RemovePatternCommand, execute, index_, pattern_, patternId_, undo
+### Community 206 - "AddAutomationLaneCommand"
+Cohesion: 0.15
+Nodes (8): AddAutomationLaneCommand, index_, key_, lane_, minted_, target_, size_t, string
 
-### Community 207 - "PianoInstrumentTests.cpp"
-Cohesion: 0.24
-Nodes (8): MidiBuffer, makeReady(), noteOn(), render(), Rendered, finite, peak, rms
+### Community 207 - "ChordDetection"
+Cohesion: 0.15
+Nodes (13): ChordDetection, bassKey, display, inverted, matched, rootPitchClass, type, ChordType (+5 more)
 
 ### Community 208 - "RecordedEvent"
 Cohesion: 0.20
 Nodes (10): Kind, Tick, RecordedEvent, channel, duration, key, kind, releaseValue (+2 more)
 
-### Community 209 - "ModulationEffectTests.cpp"
-Cohesion: 0.39
-Nodes (8): FrameCount, Sample, size_t, vector, requireBitExact(), requireFiniteAndBounded(), rmsOf(), testSignal()
+### Community 209 - "processThrough"
+Cohesion: 0.38
+Nodes (9): FrameCount, Sample, size_t, vector, processThrough(), requireBitExact(), requireFiniteAndBounded(), rmsOf() (+1 more)
 
 ### Community 210 - "DiskStreamer"
-Cohesion: 0.22
-Nodes (9): DiskStreamer, mutex_, running_, serviceOnce, streams_, atomic, mutex, vector (+1 more)
+Cohesion: 0.20
+Nodes (10): DiskStreamer, mutex_, running_, serviceOnce, streams_, thread_, atomic, mutex (+2 more)
 
 ### Community 211 - "PluginFolder"
 Cohesion: 0.24
@@ -1217,61 +1231,61 @@ Nodes (9): Atomic Graph Pointer Swap, Lock-Free SPSC Command Queue (UI to Audio,
 Cohesion: 0.22
 Nodes (9): Insert Chain Compilation (inserts -> fader -> pan -> mute -> outputs), MixerStripNode and the compiled mixer, D-028 — Hosted plugins reach the graph through an injected factory, D-029 — Plugin parameters automate through a sink target and an event queue, D-030 — Plugin state travels as blob files inside the package, D-033 — Builtin effects are inserts with the plugin identity, built by the compiler, P4 — Functional Sidechain Routing (compressor external key input), P5 — LUFS Meter (EBU R128), Stereo Separation, True Pre-Fader Sends (+1 more)
 
-### Community 216 - ".incdaw versioned project format"
-Cohesion: 0.22
-Nodes (9): engine/audio/AudioEdits (editor verbs), The hum at idle (block-rate retrigger defect), .incdaw versioned project format, app/ProjectSession (lifecycle decisions), Core data model (no collapsed entities), Definition of success (three signal chains), Format 1.5/1.6 renumbering on merge, Project format requirements (+1 more)
+### Community 216 - "Instrument"
+Cohesion: 0.15
+Nodes (10): MidiBuffer, ParameterSink, Instrument, activeVoiceCount, allNotesOff, handleMessage, name, prepare (+2 more)
 
 ### Community 217 - "PianoModelSpec"
 Cohesion: 0.15
 Nodes (13): PianoModelSpec, decayScale, fm, fmIndex, fmIndexTime, fmRatio, hammerLevel, hfDecay (+5 more)
 
 ### Community 218 - "MidiDeviceInfo"
-Cohesion: 0.40
-Nodes (5): string, MidiDeviceInfo, identifier, isInput, name
+Cohesion: 0.22
+Nodes (7): string, MidiDeviceInfo, identifier, isInput, name, MidiInputCallback, midiMessageReceived
 
 ### Community 219 - "ToggleStepCommand"
-Cohesion: 0.17
-Nodes (8): size_t, Step, string, ToggleStepCommand, createdContent_, index_, note_, step_
+Cohesion: 0.11
+Nodes (15): size_t, Tick, vector, size_t, Step, string, noteAtStep(), ToggleStepCommand (+7 more)
 
-### Community 220 - "AddPatternCommand"
-Cohesion: 0.22
-Nodes (6): AddPatternCommand, execute, index_, minted_, pattern_, undo
+### Community 220 - "renderClickFrames"
+Cohesion: 0.15
+Nodes (12): BlockSegment, length, offset, startFrame, startsAfterLoopWrap, FrameCount, FrameCount, FramePosition (+4 more)
 
 ### Community 221 - "SplitClipCommand"
-Cohesion: 0.11
-Nodes (8): string, SplitClipCommand, clip_, minted_, previous_, right_, splitTick_, undo
+Cohesion: 0.20
+Nodes (6): SplitClipCommand, clip_, minted_, previous_, right_, splitTick_
 
-### Community 222 - "DuplicatePatternCommand"
-Cohesion: 0.22
-Nodes (7): DuplicatePatternCommand, execute, index_, minted_, pattern_, source_, undo
+### Community 222 - "-dockRect"
+Cohesion: 0.25
+Nodes (14): -chainIndexForRow, -clampRack, -dockNode, -dockRackRect, -dockRect, -dockSlotAtPoint, -dockSlotRect, -drawDock (+6 more)
 
 ### Community 223 - "ScratchDirectory"
 Cohesion: 0.29
 Nodes (4): path, string, ScratchDirectory, path
 
-### Community 224 - "BuiltinInstrumentInfo"
-Cohesion: 0.20
-Nodes (9): BuiltinInstrumentInfo, displayName, parameterCount, parameters, presets, uid, string, findBuiltinInstrument() (+1 more)
+### Community 224 - "EffectParameter"
+Cohesion: 0.11
+Nodes (17): EffectParameter, defaultValue, id, maxValue, minValue, name, stepped, BuiltinInstrumentInfo (+9 more)
 
 ### Community 225 - "exportArrangement"
 Cohesion: 0.25
 Nodes (7): size_t, notes_, path, Result, uint64_t, exportArrangement(), importAsPattern()
 
-### Community 226 - "SetTrackSoloedCommand"
-Cohesion: 0.25
-Nodes (5): SetTrackSoloedCommand, execute, soloed_, trackId_, undo
+### Community 226 - "AutomationCommands.cpp"
+Cohesion: 0.19
+Nodes (12): execute, undo, AutomationPoint, vector, findLane(), canMergeWith, execute, mergeWith (+4 more)
 
-### Community 227 - "HttpResponse"
-Cohesion: 0.25
-Nodes (5): string, HttpResponse, body, error, statusCode
+### Community 227 - "main.mm"
+Cohesion: 0.20
+Nodes (6): string, HttpResponse, body, error, statusCode, -applicationDidFinishLaunching
 
-### Community 228 - "BlobWriter"
-Cohesion: 0.25
-Nodes (7): BlobWriter, out, overflowed, saveState, descriptors, vector, main()
+### Community 228 - "ClapLibrary"
+Cohesion: 0.16
+Nodes (12): clap_plugin_entry_t, ClapLibrary, close, descriptors, entry_, factory_, library_, open (+4 more)
 
-### Community 229 - "Denormals.h"
-Cohesion: 0.39
-Nodes (5): ControlRegister, readControlRegister(), ScopedNoDenormals, previous_, writeControlRegister()
+### Community 229 - "RealtimeSafetyTests.cpp"
+Cohesion: 0.25
+Nodes (7): ControlRegister, readControlRegister(), ScopedNoDenormals, previous_, writeControlRegister(), allocationSize(), size_t
 
 ### Community 230 - "AudioDevice (platform device interface)"
 Cohesion: 0.29
@@ -1281,33 +1295,37 @@ Nodes (8): app::AppSettings::audio (device configuration), AudioDevice (platform
 Cohesion: 0.25
 Nodes (7): NSWindowDelegate, NSObject, NSString, INCDAWSettingsWindow, -initWithSettingsthemesDirectory, -refreshStatus, -show
 
-### Community 232 - "ProjectMetadata"
-Cohesion: 0.25
-Nodes (8): ProjectMetadata, artist, comment, created, createdWith, lastSavedWith, modified, title
+### Community 232 - "PluginPickerModel.cpp"
+Cohesion: 0.35
+Nodes (11): categoryFor(), size_t, string, lowered(), matches(), addBuiltinEffects, addHosted, rebuild (+3 more)
 
-### Community 233 - "ClipCommands.cpp"
-Cohesion: 0.06
-Nodes (37): MovedAudioClip, Snapshot, string, execute, RemovedClip, vector, MoveClipsCommand, appliedTickDelta_ (+29 more)
+### Community 233 - "MoveClipsCommand"
+Cohesion: 0.20
+Nodes (9): MovedAudioClip, MoveClipsCommand, appliedTickDelta_, appliedTrackDelta_, canMergeWith, clips_, movedAudio_, tickDelta_ (+1 more)
+
+### Community 234 - "SendFixture"
+Cohesion: 0.18
+Nodes (8): ConstantSourceInsert, level_, CommandRegistry, SendFixture, project, registry, strip, tempo
 
 ### Community 235 - "PluginPickerEntry"
-Cohesion: 0.29
-Nodes (6): friend, string, PluginPickerEntry, category, name, plugin
+Cohesion: 0.22
+Nodes (8): friend, string, PluginPickerEntry, category, name, plugin, entryAtRow, highlightedEntry
 
 ### Community 236 - "Version"
-Cohesion: 0.25
-Nodes (7): updateUserAgent(), Version, major, minor, patch, phase, string
+Cohesion: 0.29
+Nodes (6): Version, major, minor, patch, phase, string
 
 ### Community 237 - "TimestampedMidiMessage"
 Cohesion: 0.22
 Nodes (9): midiMessageReceived, sendMessage, uint64_t, uint8_t, TimestampedMidiMessage, data1, data2, hostTimeNanos (+1 more)
 
-### Community 238 - "InsertAudioCommand"
-Cohesion: 0.25
-Nodes (7): FramePosition, InsertAudioCommand, asset_, at_, insertedAt_, minted_, piece_
+### Community 238 - "LoadSampleCommand"
+Cohesion: 0.18
+Nodes (9): vector, LoadSampleCommand, channelId_, import_, minted_, path_, previousInstrument_, previousStateFile_ (+1 more)
 
-### Community 239 - "INCDAWSpectrumView"
-Cohesion: 0.25
-Nodes (6): NSView, INCDAWSpectrumView, -drawRect, -initWithFrame, -isOpaque, -updateWithBinssampleRate
+### Community 239 - "vector"
+Cohesion: 0.09
+Nodes (14): vector, StateIO, loadState, saveState, NSView, INCDAWSpectrumView, -drawRect, -initWithFrame (+6 more)
 
 ### Community 240 - "Fixture"
 Cohesion: 0.25
@@ -1331,7 +1349,11 @@ Nodes (7): project::compileProjectGraph, InstrumentFactory (injected), Pattern M
 
 ### Community 245 - "BlobReader"
 Cohesion: 0.22
-Nodes (10): BlobReader, cursor, data, size, blobWrite(), loadState, process, clap_ostream_t (+2 more)
+Nodes (11): BlobReader, cursor, data, BlobWriter, out, overflowed, loadState, saveState (+3 more)
+
+### Community 246 - "ClipCommands.cpp"
+Cohesion: 0.31
+Nodes (8): execute, undo, execute, execute, mergeWith, undo, undo, trackAtOffset()
 
 ### Community 247 - "INCDAWPianoRollView"
 Cohesion: 0.29
@@ -1341,13 +1363,17 @@ Nodes (6): NSString, NSView, INCDAWPianoRollView, -initWithFrameprojectregistry,
 Cohesion: 0.33
 Nodes (5): FrameCount, path, ScratchDir, path, writeWav()
 
+### Community 249 - "RemoveClipsCommand"
+Cohesion: 0.20
+Nodes (8): string, RemovedClip, RemoveClipsCommand, clips_, execute, name, removed_, undo
+
 ### Community 250 - "ScratchDirectory"
 Cohesion: 0.29
 Nodes (4): path, string, ScratchDirectory, path
 
 ### Community 251 - "StoppedTransportTests.cpp"
-Cohesion: 0.29
-Nodes (4): path, string, ScratchDirectory, path
+Cohesion: 0.22
+Nodes (6): path, Sample, string, peakOver(), ScratchDirectory, path
 
 ### Community 252 - "StressTests.cpp"
 Cohesion: 0.29
@@ -1357,13 +1383,21 @@ Nodes (4): path, string, ScratchDirectory, path
 Cohesion: 0.33
 Nodes (6): engine/audio/AudioLogger (last 60 s of master), engine/audio/AudioRecorder, project/RecordingSession, engine::TimelineAnchor (D-024), Capture is a second clock domain (D-023), Unfinalized take probes as zero frames
 
-### Community 254 - "RenderResult"
+### Community 254 - "ResizeClipsCommand"
 Cohesion: 0.20
-Nodes (9): FrameCount, string, vector, RenderResult, arrangementFrames, audio, error, succeeded (+1 more)
+Nodes (9): FrameCount, ResizeClipsCommand, canMergeWith, clips_, lengthDelta_, mergeWith, previousFrameLengths_, previousLengths_ (+1 more)
 
 ### Community 255 - "DuplicateClipsCommand"
-Cohesion: 0.10
-Nodes (19): ClipIds, DuplicateClipsCommand, clips_, created_, createdIds_, minted_, tickDelta_, trackDelta_ (+11 more)
+Cohesion: 0.18
+Nodes (10): ClipIds, DuplicateClipsCommand, clips_, created_, createdIds_, minted_, tickDelta_, trackDelta_ (+2 more)
+
+### Community 256 - "build"
+Cohesion: 0.27
+Nodes (9): bucketize(), Bucket, FrameCount, path, Result, Sample, vector, sizeBuckets() (+1 more)
+
+### Community 257 - "NoteSequence"
+Cohesion: 0.22
+Nodes (7): Tick, uint32_t, vector, NoteSequence, byEnd_, length_, loopLength_
 
 ### Community 258 - "v1.0/Fixture.incdaw/manifest.json"
 Cohesion: 0.33
@@ -1393,9 +1427,13 @@ Nodes (5): created, created_with, incdaw_project_version, last_saved_with, modif
 Cohesion: 0.33
 Nodes (5): created, created_with, incdaw_project_version, last_saved_with, modified
 
-### Community 266 - "Fixture"
+### Community 265 - "BrowserTests.cpp"
+Cohesion: 0.27
+Nodes (8): buildLibrary(), path, string, vector, namesOf(), ScratchDir, path, writeFile()
+
+### Community 266 - "renderRange"
 Cohesion: 0.22
-Nodes (8): CommandRegistry, Tick, Fixture, channel, pattern, project, registry, note()
+Nodes (9): Envelope, LfoShape, FrameCount, SampleRate, lfoValue(), advanceEnvelope, prepare, renderRange (+1 more)
 
 ### Community 267 - "setParameter"
 Cohesion: 0.22
@@ -1409,21 +1447,25 @@ Nodes (7): activeVoiceCount, activeVoiceCount, time_point, vector, main(), media
 Cohesion: 0.33
 Nodes (4): path, string, SessionFixture, root
 
-### Community 270 - "BuiltinInsertTests.cpp"
-Cohesion: 0.50
-Nodes (3): StateIO, uint32_t, decodedValue()
+### Community 270 - "StretchClipsCommand"
+Cohesion: 0.22
+Nodes (8): Snapshot, StretchClipsCommand, canMergeWith, clips_, lengthDelta_, mergeWith, previous_, undo
 
 ### Community 271 - "ScratchDirectory"
 Cohesion: 0.33
 Nodes (4): path, string, ScratchDirectory, path
 
+### Community 272 - "SetAutomationPointsCommand"
+Cohesion: 0.31
+Nodes (6): AutomationPoint, vector, SetAutomationPointsCommand, laneId_, points_, previous_
+
 ### Community 273 - "collectForBlock"
 Cohesion: 0.29
 Nodes (6): FrameCount, MidiBuffer, SampleRate, uint64_t, collectForBlock, resetCounters
 
-### Community 274 - "AppSettingsTests.cpp"
-Cohesion: 0.50
-Nodes (4): path, string, scratchFile(), writeText()
+### Community 274 - "RemoveAutomationLaneCommand"
+Cohesion: 0.22
+Nodes (6): RemoveAutomationLaneCommand, execute, index_, lane_, laneId_, undo
 
 ### Community 275 - "MidiTests.cpp"
 Cohesion: 0.29
@@ -1437,6 +1479,10 @@ Nodes (4): check(), layer_of(), main(), Path
 Cohesion: 0.33
 Nodes (8): autosaveIsNewer(), autosavePathFor(), path, size_t, string, vector, exportFileName(), updatedRecents()
 
+### Community 281 - "SetClipMutedCommand"
+Cohesion: 0.22
+Nodes (7): vector, SetClipMutedCommand, clips_, execute, muted_, previous_, undo
+
 ### Community 282 - "Performance Targets (audio, UI, project)"
 Cohesion: 0.67
 Nodes (3): Audio Callback Performance Budget (2.67 ms at 48 kHz / 128 frames), Reference Machine (Apple M5, 10 cores, 16 GB, macOS 26.2), Performance Targets (audio, UI, project)
@@ -1445,17 +1491,41 @@ Nodes (3): Audio Callback Performance Budget (2.67 ms at 48 kHz / 128 frames), R
 Cohesion: 0.25
 Nodes (8): clap_event_param_value_t, create, array, string, unique_ptr, PendingParamEvents, count, events
 
-### Community 285 - "INCDAWControlBarView"
+### Community 299 - "PluginStateTests.cpp"
+Cohesion: 0.29
+Nodes (6): compileLoaded(), InsertFactory, path, factoryFor(), ScratchDir, path
+
+### Community 300 - "ClapInstance"
 Cohesion: 0.38
-Nodes (6): NSInteger, NSTextFieldDelegate, NSString, NSView, INCDAWControlBarView, INCDAWStatusBarView
+Nodes (7): ClapInstance, GraphCompileOptions::insertFactory, Plugin Latency Reporting and PDC Feed, PluginInstance (format-agnostic interface), PluginInstanceManager, PluginNode, plugins::PluginParameterInfo
+
+### Community 301 - "MintedAsset"
+Cohesion: 0.29
+Nodes (7): size_t, MintedAsset, copy, created, id, index, ok
 
 ### Community 302 - "MidiImportResult"
 Cohesion: 0.25
 Nodes (7): string, vector, MidiImportResult, error, newChannels, pattern, succeeded
 
+### Community 303 - "load"
+Cohesion: 0.33
+Nodes (7): int64_t, path, shared_ptr, string, uintmax_t, load, statFile()
+
+### Community 304 - "AutomationFixture"
+Cohesion: 0.29
+Nodes (5): AutomationFixture, channel, pattern, project, tempo
+
 ### Community 305 - "SequencedNote"
-Cohesion: 0.21
-Nodes (11): SequencedNote, channel, key, lengthTicks, startTick, velocity, Tick, vector (+3 more)
+Cohesion: 0.29
+Nodes (6): SequencedNote, channel, key, lengthTicks, startTick, velocity
+
+### Community 306 - "Fixture"
+Cohesion: 0.40
+Nodes (4): CommandRegistry, Fixture, project, registry
+
+### Community 307 - "InstrumentParameterTests.cpp"
+Cohesion: 0.33
+Nodes (5): Sample, size_t, vector, drive(), synthProject()
 
 ### Community 308 - "INCDAWAudioEditorView"
 Cohesion: 0.40
@@ -1465,13 +1535,21 @@ Nodes (4): NSView, INCDAWAudioEditorView, -initWithFrameprojectregistry, -reload
 Cohesion: 0.40
 Nodes (4): NSObject, INCDAWTonePanel, +makePanelWithTitlerowssampleRateonWrite, +refreshWindowvalues
 
-### Community 310 - "ThemePaletteTests.cpp"
-Cohesion: 0.50
-Nodes (4): path, string, scratchFile(), writeText()
+### Community 310 - "PatternTests.cpp"
+Cohesion: 0.53
+Nodes (5): Tick, vector, note(), shapeOf(), startsOf()
+
+### Community 311 - "render"
+Cohesion: 0.40
+Nodes (6): anyNonZero(), Sample, uint8_t, vector, gainBlob(), render()
+
+### Community 312 - "INCDAWPlaylistView"
+Cohesion: 0.40
+Nodes (4): NSView, INCDAWPlaylistView, -initWithFrameprojectregistry, -invalidateWaveformCache
 
 ### Community 313 - "ModulationEffects.cpp"
-Cohesion: 0.20
-Nodes (12): prepare, process, FrameCount, Sample, SampleRate, size_t, vector, prepare (+4 more)
+Cohesion: 0.22
+Nodes (10): prepare, FrameCount, Sample, SampleRate, size_t, vector, prepare, prepare (+2 more)
 
 ### Community 315 - "emptyOutTryPush"
 Cohesion: 0.33
@@ -1481,49 +1559,37 @@ Nodes (6): clap_event_header_t, clap_input_events_t, clap_output_events_t, empty
 Cohesion: 0.47
 Nodes (3): uint64_t, DitherSource, state_
 
-### Community 317 - "StateIO"
-Cohesion: 0.40
-Nodes (3): StateIO, loadState, saveState
-
-### Community 318 - "uint32_t"
-Cohesion: 0.40
-Nodes (5): hasEditor, openEditor, readParameter, setParameter, uint32_t
-
-### Community 319 - "-mouseDragged"
+### Community 317 - "INCDAWChannelRackView"
 Cohesion: 0.50
-Nodes (4): NSDraggingItem, NSImage, NSPasteboardItem, -mouseDragged
+Nodes (3): NSView, INCDAWChannelRackView, -initWithFrameprojectregistry
 
-### Community 320 - "loopWithHits"
+### Community 318 - "ScratchDir"
 Cohesion: 0.50
-Nodes (3): size_t, vector, loopWithHits()
-
-### Community 321 - "UpdateCheckTests.cpp"
-Cohesion: 0.67
-Nodes (3): string, entry(), feed()
+Nodes (3): path, ScratchDir, path
 
 ## Ambiguous Edges - Review These
 - `Clip / Project Data Model` → `Undo / Redo`  [AMBIGUOUS]
   CLAUDE.md · relation: shares_data_with
 
 ## Knowledge Gaps
-- **1737 isolated node(s):** `currentVersion`, `audio`, `openInputAtLaunch`, `midiInputIdentifiers`, `workspace` (+1732 more)
+- **1755 isolated node(s):** `currentVersion`, `audio`, `openInputAtLaunch`, `midiInputIdentifiers`, `workspace` (+1750 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **What is the exact relationship between `Clip / Project Data Model` and `Undo / Redo`?**
   _Edge tagged AMBIGUOUS (relation: shares_data_with) - confidence is low._
-- **Why does `Project` connect `Project` to `MixerCommands.cpp`, `NoteCommands.cpp`, `WriteAutomationCommand`, `PresetLibrary.cpp`, `string`, `Channel`, `Fixture`, `PluginInstanceManager`, `friend`, `EntityId`, `CountingCommand`, `AddInsertCommand`, `MixerNode`, `AddMarkerCommand`, `capturePluginState`, `ArpeggiateNotesCommand`, `EditFixture`, `MidiEvent`, `CommandRegistry`, `NudgeChordCommand`, `SidechainFixture`, `ChannelCommands.cpp`, `MixerTests.cpp`, `SamplerWiringTests.cpp`, `TempoMap`, `AddPatternClipCommand`, `AddTrackCommand`, `CompiledProjectGraph`, `SetTempoCommand`, `ImportAudioClipCommand`, `AutomationNode`, `Fixture`, `Fixture`, `Clip`, `PatternCommands.cpp`, `Track`, `read`, `AddMidiMappingCommand`, `SetPatternLengthCommand`, `RemoveTrackCommand`, `ChannelSamplerZone`, `AudioAsset`, `RemovePatternCommand`, `SetSamplerZoneCommand`, `InsertRecordedTakeCommand`, `AddPatternCommand`, `SplitClipCommand`, `DuplicatePatternCommand`, `TrackCommands.cpp`, `PluginIdentifier`, `exportArrangement`, `SetTrackSoloedCommand`, `AudioBufferPool`, `PlaylistModel`, `ClipCommands.cpp`, `ProjectMetadata`, `AudioBufferView`, `load`, `Fixture`, `AutomationProbe`, `RenderTests.cpp`, `SetInstrumentParameterCommand`, `SplitFixture`, `allocate`, `DuplicateClipsCommand`?**
-  _High betweenness centrality (0.117) - this node is a cross-community bridge._
-- **Why does `EntityId` connect `EntityId` to `MixerCommands.cpp`, `NoteCommands.cpp`, `WriteAutomationCommand`, `PresetLibrary.cpp`, `string`, `Channel`, `PianoRollModel`, `Fixture`, `friend`, `CountingCommand`, `AddInsertCommand`, `MixerNode`, `AddMarkerCommand`, `capturePluginState`, `ArpeggiateNotesCommand`, `EditFixture`, `MidiEvent`, `StretchAssetCommand`, `NudgeChordCommand`, `SidechainFixture`, `ChannelCommands.cpp`, `MixerTests.cpp`, `SamplerWiringTests.cpp`, `AddPatternClipCommand`, `AddTrackCommand`, `CompiledProjectGraph`, `MidiImportResult`, `EditAssetRegionCommand`, `LoadSampleCommand`, `ImportAudioClipCommand`, `AutomationNode`, `Fixture`, `Fixture`, `GraphCompileOptions`, `Clip`, `PatternCommands.cpp`, `Track`, `read`, `AddMidiMappingCommand`, `SetPatternLengthCommand`, `RemoveTrackCommand`, `ChannelSamplerZone`, `AudioAsset`, `RemovePatternCommand`, `SetSamplerZoneCommand`, `AutomationWriteSession`, `InsertRecordedTakeCommand`, `RenderOptions`, `AddPatternCommand`, `SplitClipCommand`, `DuplicatePatternCommand`, `TrackCommands.cpp`, `AudioBufferPool`, `SetTrackSoloedCommand`, `PlaylistModel`, `ClipCommands.cpp`, `AudioBufferView`, `InsertAudioCommand`, `load`, `Fixture`, `SliceAssetCommand`, `SetInstrumentParameterCommand`, `Project`, `SplitFixture`?**
-  _High betweenness centrality (0.102) - this node is a cross-community bridge._
-- **Why does `Node` connect `Node` to `AudioClipNode`, `Command`, `PluginInstanceManager`, `ProcessContext`, `GainNode`, `SineOscillatorNode`, `NoteSequence`, `MidiEvent`, `BuiltinEffectInfo`, `Sample`, `CompiledGraph`, `atomic`, `InstrumentNode`, `SidechainFixture`, `MixerTests.cpp`, `TempoMap`, `CompiledProjectGraph`, `PluginParameterInfo`, `Smoother`, `BuiltinEffect`, `MetronomeNode`, `renderNode`, `AutomationNode`, `HostedPlugin`, `InputMonitorNode`, `AudioBufferView`, `ImpulseNode`, `DelayLineNode`, `MixerStripNode`, `MidiMapNode`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+- **Why does `Project` connect `Project` to `Command`, `NoteCommands.cpp`, `PresetLibrary.cpp`, `PatternCommands.cpp`, `Channel`, `Model.h`, `StretchClipsCommand`, `ConnectMixerCommand`, `AddInsertCommand`, `CountingCommand`, `RemoveAutomationLaneCommand`, `AddMarkerCommand`, `MixerNode`, `ArpeggiateNotesCommand`, `capturePluginState`, `Pattern`, `EditFixture`, `SetClipMutedCommand`, `PluginInsertTests.cpp`, `CommandRegistry`, `NudgeChordCommand`, `SidechainFixture`, `ChannelCommands.cpp`, `MixerTests.cpp`, `SamplerWiringTests.cpp`, `TempoMap`, `Node`, `RemoveTrackCommand`, `PluginStateTests.cpp`, `AutomationFixture`, `Fixture`, `InstrumentParameterTests.cpp`, `SetTempoCommand`, `compileArrangement`, `Fixture`, `renderArrangement`, `Fixture`, `Clip`, `Track`, `read`, `AddMidiMappingCommand`, `ChannelSamplerZone`, `AudioAsset`, `SetSamplerZoneCommand`, `InsertRecordedTakeCommand`, `RenderOptions`, `ToggleStepCommand`, `exportArrangement`, `AutomationCommands.cpp`, `PlaylistModel`, `SendFixture`, `load`, `Fixture`, `AutomationProbe`, `RenderTests.cpp`, `MidiEvent`, `ClipCommands.cpp`, `AudioAssetImport`, `RemoveClipsCommand`, `allocate`, `SplitFixture`, `ResizeClipsCommand`, `DuplicateClipsCommand`?**
+  _High betweenness centrality (0.128) - this node is a cross-community bridge._
+- **Why does `EntityId` connect `Project` to `Command`, `NoteCommands.cpp`, `WriteAutomationCommand`, `PresetLibrary.cpp`, `PatternCommands.cpp`, `Channel`, `PianoRollModel`, `Model.h`, `ConnectMixerCommand`, `CountingCommand`, `SetAutomationPointsCommand`, `AddInsertCommand`, `RemoveAutomationLaneCommand`, `AddMarkerCommand`, `MixerNode`, `ArpeggiateNotesCommand`, `capturePluginState`, `Pattern`, `EditFixture`, `PluginInsertTests.cpp`, `StretchAssetCommand`, `NudgeChordCommand`, `InstrumentNode`, `SidechainFixture`, `ChannelCommands.cpp`, `MixerTests.cpp`, `SamplerWiringTests.cpp`, `AddPatternClipCommand`, `RemoveTrackCommand`, `MintedAsset`, `MidiImportResult`, `Node`, `AutomationFixture`, `EditAssetRegionCommand`, `InstrumentParameterTests.cpp`, `AddSamplerZoneCommand`, `ImportAudioClipCommand`, `compileArrangement`, `Fixture`, `Fixture`, `GraphCompileOptions`, `Clip`, `Track`, `read`, `AddMidiMappingCommand`, `ChannelSamplerZone`, `AudioAsset`, `AddAutomationLaneCommand`, `SetSamplerZoneCommand`, `AutomationWriteSession`, `InsertRecordedTakeCommand`, `RenderOptions`, `ToggleStepCommand`, `SplitClipCommand`, `AutomationCommands.cpp`, `PlaylistModel`, `SendFixture`, `LoadSampleCommand`, `load`, `Fixture`, `MidiEvent`, `ClipCommands.cpp`, `AudioAssetImport`, `allocate`, `SplitFixture`?**
+  _High betweenness centrality (0.098) - this node is a cross-community bridge._
+- **Why does `Node` connect `Node` to `ConstantNode`, `NoteSequence`, `AudioClipNode`, `string`, `PluginInstanceManager`, `ProcessContext`, `GainNode`, `SineOscillatorNode`, `BuiltinEffectTests.cpp`, `BuiltinEffectInfo`, `PluginInsertTests.cpp`, `CompiledGraph`, `InstrumentNode`, `SidechainFixture`, `MixerTests.cpp`, `PluginParameterInfo`, `Smoother`, `BuiltinEffect`, `MetronomeNode`, `renderNode`, `AutomationNode`, `HostedPlugin`, `processThrough`, `SendFixture`, `ImpulseNode`, `DelayLineNode`, `vector`, `SampleRingBuffer`, `MixerStripNode`, `MidiMapNode`?**
+  _High betweenness centrality (0.058) - this node is a cross-community bridge._
 - **What connects `currentVersion`, `audio`, `openInputAtLaunch` to the rest of the system?**
-  _1737 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `MixerCommands.cpp` be split into smaller, more focused modules?**
-  _Cohesion score 0.02154179650453868 - nodes in this community are weakly interconnected._
+  _1755 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `Command` be split into smaller, more focused modules?**
+  _Cohesion score 0.023132084200786492 - nodes in this community are weakly interconnected._
 - **Should `Browser` be split into smaller, more focused modules?**
-  _Cohesion score 0.07211538461538461 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.1378048780487805 - nodes in this community are weakly interconnected._
