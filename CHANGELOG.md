@@ -8,6 +8,28 @@ public version yet.
 
 ## [Unreleased]
 
+### Effects — Parametric EQ — 2026-08-23
+
+- **Eight bands, seven types each** — off, low shelf, peak, high shelf, low
+  pass, high pass, notch — with frequency, gain and Q per band and an output
+  trim. RBJ cookbook designs, held to a hand-written reference biquad loop.
+- **The curve is the control.** Eight bands is thirty-two sliders, and
+  nobody has ever equalised anything by dragging thirty-two sliders. A
+  handle per band on a log-frequency plot: drag for frequency and gain,
+  scroll for Q, right-click to walk the band through its types and off
+  again. Clicking empty space switches the next spare band on where the
+  pointer is.
+- **The picture cannot disagree with the filter.** The plot is drawn from
+  `parametricMagnitudeDb` and the audio thread designs from
+  `designParametricBand`; the test renders sines through the real node and
+  holds the measured response to the drawn one within 0.1 dB.
+- **`incdaw.eq` and `incdaw.tone` are untouched.** Those two are one
+  three-band tone stack wearing two faces, and a tone stack is a different
+  instrument from a parametric: it is what you reach for when you want a bit
+  more bottom, not when a resonance at 340 Hz has to go. Widening it would
+  also have taken the Tone panel's face away and rewritten every EQ preset
+  already on disk. Four factory presets for the new one.
+
 ### Effects — Waveshaper — 2026-08-23
 
 - **The curve is the parameter, so the curve is the control.** Nine handles

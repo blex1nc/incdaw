@@ -3,6 +3,7 @@
 #include "engine/dsp/effects/DynamicsEffects.h"
 #include "engine/dsp/effects/ModulationEffects.h"
 #include "engine/dsp/effects/MultibandEffects.h"
+#include "engine/dsp/effects/ParametricEq.h"
 #include "engine/dsp/effects/ShaperEffects.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/StereoEffects.h"
@@ -491,6 +492,65 @@ constexpr FactoryPreset shaperPresets[] = {
     {"Asymmetric", shaperAsymmetric, std::size(shaperAsymmetric)},
 };
 
+// ── Parametric EQ ────────────────────────────────────────────────────────────
+
+using Eqp = ParametricEqEffect;
+
+constexpr double peakType     = static_cast<double>(ParametricBandType::peak);
+constexpr double highPassType = static_cast<double>(ParametricBandType::highPass);
+constexpr double lowShelfType = static_cast<double>(ParametricBandType::lowShelf);
+constexpr double highShelfType = static_cast<double>(ParametricBandType::highShelf);
+
+constexpr PresetValue eqpVocal[] = {
+    {Eqp::bandParameter(0, Eqp::bandType), highPassType},
+    {Eqp::bandParameter(0, Eqp::bandFrequency), 90.0},
+    {Eqp::bandParameter(2, Eqp::bandType), peakType},
+    {Eqp::bandParameter(2, Eqp::bandFrequency), 320.0},
+    {Eqp::bandParameter(2, Eqp::bandGainDb), -3.0},
+    {Eqp::bandParameter(2, Eqp::bandQ), 1.4},
+    {Eqp::bandParameter(5, Eqp::bandType), peakType},
+    {Eqp::bandParameter(5, Eqp::bandFrequency), 4000.0},
+    {Eqp::bandParameter(5, Eqp::bandGainDb), 2.5},
+    {Eqp::bandParameter(7, Eqp::bandType), highShelfType},
+    {Eqp::bandParameter(7, Eqp::bandFrequency), 11000.0},
+    {Eqp::bandParameter(7, Eqp::bandGainDb), 2.0},
+};
+constexpr PresetValue eqpBass[] = {
+    {Eqp::bandParameter(0, Eqp::bandType), highPassType},
+    {Eqp::bandParameter(0, Eqp::bandFrequency), 30.0},
+    {Eqp::bandParameter(1, Eqp::bandType), peakType},
+    {Eqp::bandParameter(1, Eqp::bandFrequency), 90.0},
+    {Eqp::bandParameter(1, Eqp::bandGainDb), 3.0},
+    {Eqp::bandParameter(1, Eqp::bandQ), 1.0},
+    {Eqp::bandParameter(4, Eqp::bandType), peakType},
+    {Eqp::bandParameter(4, Eqp::bandFrequency), 1200.0},
+    {Eqp::bandParameter(4, Eqp::bandGainDb), 2.0},
+};
+constexpr PresetValue eqpMastering[] = {
+    {Eqp::bandParameter(0, Eqp::bandType), lowShelfType},
+    {Eqp::bandParameter(0, Eqp::bandFrequency), 80.0},
+    {Eqp::bandParameter(0, Eqp::bandGainDb), 1.0},
+    {Eqp::bandParameter(4, Eqp::bandType), peakType},
+    {Eqp::bandParameter(4, Eqp::bandFrequency), 2200.0},
+    {Eqp::bandParameter(4, Eqp::bandGainDb), -1.0},
+    {Eqp::bandParameter(4, Eqp::bandQ), 0.8},
+    {Eqp::bandParameter(7, Eqp::bandType), highShelfType},
+    {Eqp::bandParameter(7, Eqp::bandFrequency), 12000.0},
+    {Eqp::bandParameter(7, Eqp::bandGainDb), 1.5},
+};
+constexpr PresetValue eqpRumble[] = {
+    {Eqp::bandParameter(0, Eqp::bandType), highPassType},
+    {Eqp::bandParameter(0, Eqp::bandFrequency), 120.0},
+    {Eqp::bandParameter(0, Eqp::bandQ), 0.707},
+};
+
+constexpr FactoryPreset eqpPresets[] = {
+    {"Vocal",     eqpVocal,     std::size(eqpVocal)},
+    {"Bass",      eqpBass,      std::size(eqpBass)},
+    {"Mastering", eqpMastering, std::size(eqpMastering)},
+    {"Rumble Cut", eqpRumble,   std::size(eqpRumble)},
+};
+
 struct Row {
     std::string_view   uid;
     FactoryPresetTable table;
@@ -519,6 +579,7 @@ constexpr Row rows[] = {
     {"incdaw.deesser",        {deEsserPresets,    std::size(deEsserPresets)}},
     {"incdaw.imager",         {imagerPresets,     std::size(imagerPresets)}},
     {"incdaw.shaper",         {shaperPresets,     std::size(shaperPresets)}},
+    {"incdaw.eqp",            {eqpPresets,        std::size(eqpPresets)}},
 };
 
 } // namespace

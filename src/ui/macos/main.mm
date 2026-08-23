@@ -57,6 +57,7 @@
 #include "ui/macos/ControlBarView.h"
 #include "ui/macos/InsertParameterPanel.h"
 #include "ui/macos/PresetBar.h"
+#include "ui/macos/EqCurvePanel.h"
 #include "ui/macos/ShaperPanel.h"
 #include "ui/macos/SpectrumView.h"
 #include "ui/macos/TonePanel.h"
@@ -2059,6 +2060,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
         [INCDAWInsertParameterPanel refreshAppearance:window];
         [INCDAWShaperPanel refreshAppearance:window];
+        [INCDAWEqCurvePanel refreshAppearance:window];
         [INCDAWPresetBar refreshAppearanceInWindow:window];
         ui::theme::refreshViewTree(window.contentView);
     }
@@ -2852,6 +2854,16 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
                                                          ? _audio->sampleRate() : 48000.0
                                              onWrite:write];
 
+    // Eight bands is thirty-two sliders, and nobody equalises by dragging
+    // thirty-two sliders. The parametric EQ gets its curve instead.
+    if (window == nil && slot->plugin.format == plugins::Format::builtin
+        && slot->plugin.uid == "incdaw.eqp")
+        window = [INCDAWEqCurvePanel makePanelWithTitle:[self displayNameForSlotKey:slotKey]
+                                                   rows:rows
+                                             sampleRate:_audio != nullptr
+                                                            ? _audio->sampleRate() : 48000.0
+                                                onWrite:write];
+
     // The waveshaper's curve IS its parameter set, so it gets a plot with
     // draggable handles rather than nine numbered sliders.
     if (window == nil && slot->plugin.format == plugins::Format::builtin
@@ -3008,6 +3020,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
             [INCDAWInsertParameterPanel refreshWindow:_panelWindows[key] values:values];
             [INCDAWTonePanel refreshWindow:_panelWindows[key] values:values];
             [INCDAWShaperPanel refreshWindow:_panelWindows[key] values:values];
+            [INCDAWEqCurvePanel refreshWindow:_panelWindows[key] values:values];
         }
     }
 }
