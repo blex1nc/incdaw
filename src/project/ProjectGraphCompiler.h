@@ -11,6 +11,7 @@
 #include "engine/dsp/MixerStripNode.h"
 #include "engine/instrument/InstrumentNode.h"
 #include "engine/transport/TempoMap.h"
+#include "engine/midi/MidiFeedback.h"
 #include "project/Model.h"
 #include "project/ParameterRegistry.h"
 
@@ -132,6 +133,14 @@ struct GraphCompileOptions {
     /// The parameter system automation resolves keys against. Null uses the
     /// built-ins ("volume", "pan"); tests and later phases register more.
     const ParameterRegistry* parameters = nullptr;
+
+    /// The mapping system's return path (engine/midi/MidiFeedback.h). When
+    /// set, every applier resolved for a mapped parameter is wrapped in a tap
+    /// so a control surface follows the parameter whoever moved it — an
+    /// automation lane, a panel control, or the surface itself. Owned by the
+    /// engine and outliving every graph, like the monitor ring. Null leaves
+    /// mappings one-way, which is what a test that does not care wants.
+    engine::MidiFeedback* midiFeedback = nullptr;
 };
 
 /// A compiled graph plus the handles needed to drive it.

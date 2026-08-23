@@ -8,6 +8,7 @@
 #include "engine/midi/MidiBuffer.h"
 #include "engine/midi/MidiInput.h"
 #include "engine/midi/MidiClock.h"
+#include "engine/midi/MidiFeedback.h"
 #include "engine/midi/MidiOutput.h"
 #include "engine/transport/Transport.h"
 #include "platform/AudioDevice.h"
@@ -169,6 +170,12 @@ public:
     [[nodiscard]] MidiClockGenerator&       midiClock()       noexcept { return midiClock_; }
     [[nodiscard]] const MidiClockGenerator& midiClock() const noexcept { return midiClock_; }
 
+    /// The mapping system's return path. Lives here rather than in a graph
+    /// because a control surface's positions must survive a rebuild — and
+    /// every parameter edit causes one.
+    [[nodiscard]] MidiFeedback&       midiFeedback()       noexcept { return midiFeedback_; }
+    [[nodiscard]] const MidiFeedback& midiFeedback() const noexcept { return midiFeedback_; }
+
     /// The receiving half. Reads the incoming stream and drives the transport.
     [[nodiscard]] MidiClockReceiver&       midiClockInput()       noexcept { return midiClockInput_; }
     [[nodiscard]] const MidiClockReceiver& midiClockInput() const noexcept { return midiClockInput_; }
@@ -236,6 +243,7 @@ private:
     MidiOutput                             midiOutput_;
     MidiClockGenerator                     midiClock_;
     MidiClockReceiver                      midiClockInput_;
+    MidiFeedback                           midiFeedback_;
     MidiBuffer                             blockMidi_;
     MidiBuffer                             outputMidi_;   ///< what this block sends out
     MidiBuffer                             segmentMidi_;

@@ -8,6 +8,39 @@ public version yet.
 
 ## [Unreleased]
 
+### MIDI — the mapping system learns to answer — 2026-08-23
+
+- **A mapped control now follows the parameter, whoever moved it.** A
+  motorised fader assigned to a channel's volume used to sit wherever it
+  was last pushed while an automation lane moved the volume underneath
+  it; the two disagreed until somebody touched the fader. It is the same
+  map read backwards — the binding that says "CC 7 writes this parameter"
+  also says "this parameter reads back as CC 7" — and an inverted mapping
+  reads back inverted.
+- **The tap is on the applier, not on the MIDI node.** Every applier the
+  compiler resolves for a mapped parameter records its value in the slot
+  the mapping owns, so an automation lane, a panel control and the
+  surface itself all feed the same mirror. A feedback path built around
+  one particular writer follows only that writer, which is precisely the
+  bug being fixed.
+- **It does not answer itself.** A value that arrived *from* the hardware
+  is recorded as already sent. Without that, moving a fader produces a CC
+  back to the fader, which the fader answers, and a motorised one hunts
+  around the position forever. The suppression is recorded by the node
+  that applied the incoming message rather than guessed at from timing.
+- **Only movement is sent, at 30 Hz.** A 7-bit CC has 128 positions;
+  sending one per audio block would be thousands of messages a second
+  saying the same thing. A rebuild — a project load, a mapping edit —
+  writes the whole surface again, because "nothing changed" is the wrong
+  answer to a surface still holding the last project's positions.
+
+**Not included** — pads lighting to show a programmed step. A pad is a
+note, and `project::MidiMapping` describes control changes only; giving
+it a note form is a project-format change and belongs to whoever owns
+that file. The fader half of C3 is complete and the note half is
+reported, not faked.
+
+
 ### MIDI — following someone else's clock — 2026-08-23
 
 - **Start, stop, continue and locate are followed exactly.** The external

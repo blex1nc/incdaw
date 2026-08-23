@@ -20,6 +20,7 @@
 #include <cmath>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <unordered_map>
 #include <variant>
 
@@ -814,6 +815,48 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
 
     auto automation = std::make_unique<engine::AutomationNode>(tempoMap);
 
+    // ── The feedback slot table ──────────────────────────────────────────────
+    //
+    // One slot per mapping, in the project's own mapping order, so the same
+    // mappings resolve to the same slots across rebuilds and a surface's
+    // positions survive one. Built before anything is resolved, because the
+    // tap below has to know whether a parameter is mapped at the moment it
+    // binds the applier — including the appliers automation lanes use, which
+    // is what makes a motorised fader follow a lane rather than only follow
+    // itself.
+    std::vector<engine::MidiFeedback::Binding> feedbackBindings;
+    std::map<std::pair<std::string, EntityId>, std::size_t> feedbackSlots;
+
+    if (options.midiFeedback != nullptr) {
+        for (const MidiMapping& mapping : project.midiMappings()) {
+            if (feedbackBindings.size() >= engine::MidiFeedback::maxBindings)
+                break;
+
+            const auto key = std::make_pair(mapping.parameterKey, mapping.targetEntity);
+
+            // Two mappings on one parameter share a slot: the parameter has
+            // one value, and both controls should show it.
+            if (feedbackSlots.find(key) != feedbackSlots.end())
+                continue;
+
+            engine::MidiFeedback::Binding binding;
+            binding.midiChannel = mapping.midiChannel >= 0 ? mapping.midiChannel : 0;
+            binding.controller  = mapping.controller;
+            binding.minValue    = static_cast<float>(mapping.minValue);
+            binding.maxValue    = static_cast<float>(mapping.maxValue);
+            binding.active      = true;
+
+            feedbackSlots.emplace(key, feedbackBindings.size());
+            feedbackBindings.push_back(binding);
+        }
+    }
+
+    /// The slot a parameter reads back through, or -1.
+    const auto feedbackSlotFor = [&](const std::string& parameterKey, EntityId target) -> int {
+        const auto found = feedbackSlots.find(std::make_pair(parameterKey, target));
+        return found != feedbackSlots.end() ? static_cast<int>(found->second) : -1;
+    };
+
     /// Resolves a registry key plus target entity to a bound applier, or an
     /// empty one when either half cannot resolve. Shared by automation lanes
     /// and MIDI mappings — which is what makes a mapped hardware knob and an
@@ -849,7 +892,15 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             if (strip == nullptr)
                 return {};   // silent channel, or a target that no longer exists
 
-            return [strip, applier = *stripApply](float value) { applier(*strip, value); };
+            const int slot = feedbackSlotFor(parameterKey, target);
+            if (slot < 0)
+                return [strip, applier = *stripApply](float value) { applier(*strip, value); };
+
+            engine::MidiFeedback* feedback = options.midiFeedback;
+            return [strip, applier = *stripApply, feedback, slot](float value) {
+                applier(*strip, value);
+                feedback->observe(static_cast<std::size_t>(slot), value);
+            };
         }
 
         if (const auto* sinkApply =
@@ -872,7 +923,15 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             if (sink == nullptr)
                 return {};   // bypassed, unbuildable, or gone
 
-            return [sink, applier = *sinkApply](float value) { applier(*sink, value); };
+            const int slot = feedbackSlotFor(parameterKey, target);
+            if (slot < 0)
+                return [sink, applier = *sinkApply](float value) { applier(*sink, value); };
+
+            engine::MidiFeedback* feedback = options.midiFeedback;
+            return [sink, applier = *sinkApply, feedback, slot](float value) {
+                applier(*sink, value);
+                feedback->observe(static_cast<std::size_t>(slot), value);
+            };
         }
 
         return {};
@@ -990,8 +1049,14 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
         binding.controller  = mapping.controller;
         binding.minValue    = static_cast<float>(mapping.minValue);
         binding.maxValue    = static_cast<float>(mapping.maxValue);
+        binding.feedbackSlot = feedbackSlotFor(mapping.parameterKey, mapping.targetEntity);
         binding.apply       = std::move(apply);
         midiMap->addBinding(std::move(binding));
+    }
+
+    if (options.midiFeedback != nullptr) {
+        midiMap->setFeedback(options.midiFeedback);
+        options.midiFeedback->setBindings(std::move(feedbackBindings));
     }
 
     if (midiMap->bindingCount() > 0)

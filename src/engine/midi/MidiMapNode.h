@@ -2,6 +2,7 @@
 
 #include "engine/automation/AutomationNode.h"
 #include "engine/graph/Node.h"
+#include "engine/midi/MidiFeedback.h"
 
 #include <vector>
 
@@ -27,8 +28,17 @@ public:
         float minValue = 0.0f;
         float maxValue = 1.0f;
 
+        /// Which feedback slot this mapping owns, or -1 for none. Set by the
+        /// compiler from the same mapping list the binding came from
+        /// (engine/midi/MidiFeedback.h).
+        int feedbackSlot = -1;
+
         AutomationApplier apply;
     };
+
+    /// The return path, or nullptr. Outlives every graph — it belongs to the
+    /// engine, not to the node.
+    void setFeedback(MidiFeedback* feedback) noexcept { feedback_ = feedback; }
 
     void addBinding(Binding binding) { bindings_.push_back(std::move(binding)); }
 
@@ -54,6 +64,14 @@ public:
                 const float normalised = static_cast<float>(message.data2) / 127.0f;
                 binding.apply(binding.minValue
                               + normalised * (binding.maxValue - binding.minValue));
+
+                // Recorded as already sent. The applier above has just written
+                // the value into the same slot the feedback path reads, and
+                // sending it straight back is how a motorised fader ends up
+                // answering itself.
+                if (feedback_ != nullptr && binding.feedbackSlot >= 0)
+                    feedback_->suppress(static_cast<std::size_t>(binding.feedbackSlot),
+                                        message.data2);
             }
         }
     }
@@ -62,6 +80,7 @@ public:
 
 private:
     std::vector<Binding> bindings_;
+    MidiFeedback*        feedback_ = nullptr;
 };
 
 } // namespace incdaw::engine

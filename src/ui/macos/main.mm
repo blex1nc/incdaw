@@ -2177,6 +2177,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
     const auto maxFrames = static_cast<std::uint32_t>(_audio->maxServiceableBlockSize());
 
     options.parameters    = parameters;
+    options.midiFeedback  = &_audio->midiFeedback();
     options.insertFactory = [instances, parameters, sampleRate, maxFrames](
                                 const project::PluginSlot& slot,
                                 std::string& error) -> std::unique_ptr<engine::Node> {
@@ -4392,6 +4393,11 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         return;
 
     _audio->collectRetiredGraphs();
+
+    // The mapping system's return path. 30 Hz is the resolution a 7-bit CC
+    // deserves: sending one per audio block would be thousands of messages a
+    // second saying the same thing (engine/midi/MidiFeedback.h).
+    (void)_audio->midiFeedback().flush(_audio->midiOutput());
 
     // The preview's decoded audio, released on the same terms as a retired
     // graph: the audio thread held a raw pointer into it.
