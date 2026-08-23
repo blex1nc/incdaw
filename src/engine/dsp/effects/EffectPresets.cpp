@@ -10,6 +10,7 @@
 #include "engine/dsp/effects/StereoEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
+#include "engine/dsp/effects/Vocoder.h"
 
 #include <iterator>
 
@@ -593,6 +594,46 @@ constexpr FactoryPreset convolverPresets[] = {
     {"Reverse",     convolverReverse, std::size(convolverReverse)},
 };
 
+// ── Vocoder ──────────────────────────────────────────────────────────────────
+
+using Voc = VocoderEffect;
+
+constexpr PresetValue vocoderClassic[] = {
+    {Voc::mix, 1.0},
+    {Voc::bandCount, 20.0},
+    {Voc::attackMs, 4.0},
+    {Voc::releaseMs, 35.0},
+    {Voc::sibilance, 0.35},
+};
+constexpr PresetValue vocoderRobot[] = {
+    {Voc::mix, 1.0},
+    {Voc::bandCount, 10.0},
+    {Voc::resonance, 8.0},
+    {Voc::attackMs, 1.0},
+    {Voc::releaseMs, 12.0},
+    {Voc::sibilance, 0.1},
+};
+constexpr PresetValue vocoderChoir[] = {
+    {Voc::mix, 0.8},
+    {Voc::bandCount, 32.0},
+    {Voc::attackMs, 25.0},
+    {Voc::releaseMs, 150.0},
+    {Voc::sibilance, 0.25},
+};
+constexpr PresetValue vocoderBright[] = {
+    {Voc::mix, 1.0},
+    {Voc::bandCount, 24.0},
+    {Voc::formant, 5.0},
+    {Voc::sibilance, 0.6},
+};
+
+constexpr FactoryPreset vocoderPresets[] = {
+    {"Classic",     vocoderClassic, std::size(vocoderClassic)},
+    {"Robot",       vocoderRobot,   std::size(vocoderRobot)},
+    {"Slow Choir",  vocoderChoir,   std::size(vocoderChoir)},
+    {"Bright Talk", vocoderBright,  std::size(vocoderBright)},
+};
+
 struct Row {
     std::string_view   uid;
     FactoryPresetTable table;
@@ -623,6 +664,7 @@ constexpr Row rows[] = {
     {"incdaw.shaper",         {shaperPresets,     std::size(shaperPresets)}},
     {"incdaw.eqp",            {eqpPresets,        std::size(eqpPresets)}},
     {"incdaw.convolver",      {convolverPresets,  std::size(convolverPresets)}},
+    {"incdaw.vocoder",        {vocoderPresets,    std::size(vocoderPresets)}},
 };
 
 } // namespace

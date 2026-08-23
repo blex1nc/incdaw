@@ -85,7 +85,8 @@ add_executable(incdaw_tests
     unit/StereoImagerTests.cpp
     unit/WaveshaperTests.cpp
     unit/ParametricEqTests.cpp
-    unit/ConvolutionTests.cpp)
+    unit/ConvolutionTests.cpp
+    unit/VocoderTests.cpp)
 
 # incdaw_project pulls in engine -> platform transitively; listing them again
 # here puts the same archive on the link line twice and ld warns about it.

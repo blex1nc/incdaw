@@ -8,6 +8,25 @@ public version yet.
 
 ## [Unreleased]
 
+### Effects — Vocoder — 2026-08-23
+
+- **The modulator arrives on a sidechain**, and the wiring that carries it is
+  no longer the compressor's alone: a sidechain edge now resolves against a
+  `KeyedEffect` interface, so an effect gets a key by implementing it rather
+  than by being named in the graph compiler. The compressor and the vocoder
+  both do; nothing else changed.
+- **Up to 32 bands, spread logarithmically** across the range a voice lives
+  in. Each band of the modulator drives an envelope, and that envelope is the
+  gain on the matching band of the carrier.
+- **The two details that separate a vocoder from a novelty.** Consonants have
+  no pitch for the bands to grab, so the modulator's top end passes straight
+  through — without it a vocoder cannot say an "s" at all. And the carrier's
+  bands can be shifted against the modulator's, which is what the formant
+  control is.
+- With no modulator wired in, or at mix zero, the carrier passes through
+  bit-exact; the modulator never reaches the audio path. Four factory
+  presets.
+
 ### Effects — Convolution Reverb — 2026-08-23
 
 - **Uniform partitioned convolution.** The impulse is cut into 256-sample

@@ -172,7 +172,7 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
     /// key's input index is the connection count at the moment it lands.
     struct KeyReceiver {
         engine::NodeIndex              node = engine::invalidNode;
-        engine::dsp::CompressorEffect* compressor = nullptr;
+        engine::dsp::KeyedEffect* keyed = nullptr;
         std::size_t                    inputsSoFar = 0;
     };
     std::unordered_map<EntityId, std::vector<KeyReceiver>> keyReceivers;
@@ -251,15 +251,17 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
             builtInsertSlotIds.push_back(slot.id);
             builtInsertNodes.push_back(insertNode.get());
 
-            engine::dsp::CompressorEffect* compressor =
+            // Which builtins accept a key is asked of the NODE, not of a list
+            // of uids: an effect that wants a sidechain says so by
+            // implementing KeyedEffect, and nothing here has to be told.
+            engine::dsp::KeyedEffect* keyed =
                 slot.plugin.format == plugins::Format::builtin
-                        && slot.plugin.uid == "incdaw.compressor"
-                    ? static_cast<engine::dsp::CompressorEffect*>(insertNode.get())
+                    ? dynamic_cast<engine::dsp::KeyedEffect*>(insertNode.get())
                     : nullptr;
 
             const engine::NodeIndex inserted = builder.addNode(std::move(insertNode));
-            if (compressor != nullptr)
-                keyReceivers[node.id].push_back({ inserted, compressor, 0 });
+            if (keyed != nullptr)
+                keyReceivers[node.id].push_back({ inserted, keyed, 0 });
 
             chain.push_back(inserted);
         }
@@ -360,20 +362,19 @@ CompiledProjectGraph compileProjectGraph(const Project& project, const engine::T
                 const MixerNode* named = project.findMixerNode(connection.destination);
                 compiled.warnings.push_back(
                     "sidechain into \"" + (named != nullptr ? named->name : std::string{"?"})
-                    + "\" is silent: no compressor insert to key");
+                    + "\" is silent: nothing on it takes a sidechain");
                 continue;
             }
 
             for (auto& receiver : receivers->second) {
-                if (receiver.compressor->keyInput()
-                    != engine::dsp::CompressorEffect::noKeyInput) {
+                if (receiver.keyed->keyInput() != engine::dsp::KeyedEffect::noKeyInput) {
                     compiled.warnings.push_back(
-                        "second sidechain into the same compressor ignored");
+                        "second sidechain into the same insert ignored");
                     continue;
                 }
 
                 builder.connect(source->second, receiver.node);
-                receiver.compressor->setKeyInput(receiver.inputsSoFar);
+                receiver.keyed->setKeyInput(receiver.inputsSoFar);
                 ++receiver.inputsSoFar;
             }
             continue;

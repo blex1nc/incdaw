@@ -61,6 +61,26 @@ struct FactoryPresetTable {
     std::size_t          count = 0;
 };
 
+/// An effect that listens to a second input rather than only to its own.
+///
+/// A compressor keyed from another track and a vocoder driven by a voice are
+/// the same wiring: one graph edge marked as a key, landing on an input the
+/// effect reads but never passes through. The graph compiler resolves a
+/// sidechain edge against THIS interface rather than against a concrete
+/// class, so an effect that wants a key gets one by implementing it — the
+/// same "no special-casing" rule the parameter registry follows.
+class KeyedEffect {
+public:
+    static constexpr std::size_t noKeyInput = static_cast<std::size_t>(-1);
+
+    virtual ~KeyedEffect() = default;
+
+    /// Which graph input feeds the detector instead of the audio path. Set by
+    /// the compiler at build time, before the node ever renders.
+    virtual void setKeyInput(std::size_t index) noexcept = 0;
+    [[nodiscard]] virtual std::size_t keyInput() const noexcept = 0;
+};
+
 /// The shared base of every builtin effect.
 ///
 /// A builtin effect is an engine Node that also carries the two capability

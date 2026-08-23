@@ -11,6 +11,7 @@
 #include "engine/dsp/effects/StereoEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
 #include "engine/dsp/effects/UtilityEffects.h"
+#include "engine/dsp/effects/Vocoder.h"
 
 #include <functional>
 #include <type_traits>
@@ -82,6 +83,8 @@ const std::vector<CatalogueEntry>& catalogue()
             [](SampleRate) { return std::make_unique<ParametricEqEffect>(); });
         add("incdaw.convolver", "Convolution Reverb",
             [](SampleRate) { return std::make_unique<ConvolutionReverbEffect>(); });
+        add("incdaw.vocoder",   "Vocoder",
+            [](SampleRate) { return std::make_unique<VocoderEffect>(); });
 
         return rows;
     }();

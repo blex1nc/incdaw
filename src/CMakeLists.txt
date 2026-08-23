@@ -71,6 +71,7 @@ add_library(incdaw_engine STATIC
     engine/dsp/effects/StereoEffects.cpp
     engine/dsp/effects/ToneEffects.cpp
     engine/dsp/effects/UtilityEffects.cpp
+    engine/dsp/effects/Vocoder.cpp
     engine/dsp/MetronomeNode.cpp
     engine/midi/MidiInput.cpp
     engine/midi/SmfFile.cpp

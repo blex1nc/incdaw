@@ -10,7 +10,7 @@ namespace incdaw::engine::dsp {
 /// Feed-forward compressor: linked peak detector, one-pole attack/release
 /// smoothing on the gain, log-domain gain computer, makeup. Ratio 1 with no
 /// makeup is exactly unity — the null test.
-class CompressorEffect final : public BuiltinEffect {
+class CompressorEffect final : public BuiltinEffect, public KeyedEffect {
 public:
     enum Param : std::uint32_t {
         thresholdDb = 0,
@@ -33,18 +33,16 @@ public:
         return reduction_.load(std::memory_order_relaxed);
     }
 
-    static constexpr std::size_t noKeyInput = static_cast<std::size_t>(-1);
-
     /// Marks which graph input feeds the detector instead of the audio path —
     /// external sidechain. Set by the graph compiler when a sidechain edge
     /// lands on this insert; build time only, before the node ever renders.
-    void setKeyInput(std::size_t index) noexcept { keyInput_ = index; }
-    [[nodiscard]] std::size_t keyInput() const noexcept { return keyInput_; }
+    void setKeyInput(std::size_t index) noexcept override { keyInput_ = index; }
+    [[nodiscard]] std::size_t keyInput() const noexcept override { return keyInput_; }
 
 private:
     double              envelope_ = 1.0;   ///< smoothed gain, linear
     SampleRate          sampleRate_ = 48000.0;
-    std::size_t         keyInput_   = noKeyInput;
+    std::size_t         keyInput_   = KeyedEffect::noKeyInput;
     std::atomic<double> reduction_{0.0};
 };
 

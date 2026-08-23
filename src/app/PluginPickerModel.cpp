@@ -34,6 +34,9 @@ const char* categoryFor(const std::string& uid)
         || uid == "incdaw.imager")
         return "Utility";
 
+    if (uid == "incdaw.vocoder")
+        return "Modulation";
+
     // A builtin added later is still findable; it simply has no home yet.
     return "Effects";
 }
