@@ -414,3 +414,152 @@ TEST_CASE("the grid rounds to the nearest division, and off means free")
     editor.setSnap(0);
     CHECK(editor.snapTick(7) == 7);
 }
+
+// ── TRACK B (B10) — the automation clip workflow ─────────────────────────────
+//
+// "Automate this parameter" was reachable only by recording a pass in write
+// mode: there was no way to ask for a lane. These are the verbs that make one
+// on purpose, and the one that unshares a lane two clips are riding.
+
+TEST_CASE("creating an automation clip makes the lane, the track and the clip together")
+{
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    const project::EntityId master = project.masterMixerNode();
+
+    app::CommandRegistry registry{project};
+
+    auto command = std::make_unique<app::CreateAutomationClipCommand>(
+        master, "volume", ticksPerQuarterNote * 8, ticksPerQuarterNote * 16, 0.75);
+    app::CreateAutomationClipCommand* raw = command.get();
+
+    REQUIRE(registry.execute(std::move(command)));
+
+    REQUIRE(project.automation().size() == 1);
+    const project::AutomationLane& lane = project.automation()[0];
+    CHECK(lane.targetEntity == master);
+    CHECK(lane.parameterKey == "volume");
+
+    // Seeded flat at the control's current value: an empty lane would read as
+    // zero the moment it played.
+    REQUIRE(lane.points.size() == 2);
+    CHECK(lane.points[0].value == doctest::Approx(0.75));
+    CHECK(lane.points[1].value == doctest::Approx(0.75));
+    CHECK(lane.points[0].tick == ticksPerQuarterNote * 8);
+    CHECK(lane.points[1].tick == ticksPerQuarterNote * 24);
+
+    // An automation track was made to hold it.
+    REQUIRE(project.tracks().size() == 1);
+    CHECK(project.tracks()[0].type == project::TrackType::automation);
+
+    const project::Clip* clip = project.findClip(raw->clipId());
+    REQUIRE(clip != nullptr);
+    CHECK(clip->type == project::ClipType::automation);
+    CHECK(clip->source == lane.id);
+    CHECK(clip->startTick == ticksPerQuarterNote * 8);
+
+    // One undo takes all three back, and redo restores the same ids.
+    REQUIRE(registry.undo());
+    CHECK(project.automation().empty());
+    CHECK(project.clips().empty());
+    CHECK(project.tracks().empty());
+
+    REQUIRE(registry.redo());
+    REQUIRE(project.automation().size() == 1);
+    CHECK(project.automation()[0].id == lane.id);
+    CHECK(project.findClip(raw->clipId()) != nullptr);
+}
+
+TEST_CASE("a second clip for the same parameter reuses the lane rather than forking it")
+{
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    const project::EntityId master = project.masterMixerNode();
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::CreateAutomationClipCommand>(
+        master, "pan", 0, ticksPerQuarterNote * 4)));
+    REQUIRE(registry.execute(std::make_unique<app::CreateAutomationClipCommand>(
+        master, "pan", ticksPerQuarterNote * 16, ticksPerQuarterNote * 4)));
+
+    CHECK(project.automation().size() == 1);   // one ride, placed twice
+    REQUIRE(project.clips().size() == 2);
+    CHECK(project.clips()[0].source == project.clips()[1].source);
+    CHECK(project.tracks().size() == 1);       // and one track, not two
+}
+
+TEST_CASE("making a shared lane unique gives the clip a ride of its own")
+{
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    const project::EntityId master = project.masterMixerNode();
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::CreateAutomationClipCommand>(
+        master, "volume", 0, ticksPerQuarterNote * 4)));
+    REQUIRE(registry.execute(std::make_unique<app::CreateAutomationClipCommand>(
+        master, "volume", ticksPerQuarterNote * 8, ticksPerQuarterNote * 4)));
+
+    const project::EntityId shared = project.clips()[0].source;
+    const project::EntityId second = project.clips()[1].id;
+
+    REQUIRE(registry.execute(std::make_unique<app::MakeAutomationClipUniqueCommand>(second)));
+
+    REQUIRE(project.automation().size() == 2);
+    CHECK(project.findClip(second)->source != shared);
+    CHECK(project.clips()[0].source == shared);
+
+    // The copy starts as a copy: same points, its own identity.
+    const project::AutomationLane& copy = project.automation()[1];
+    CHECK(copy.points.size() == 2);
+    CHECK(copy.parameterKey == "volume");
+
+    // Editing the copy leaves the original alone — which is the whole point.
+    REQUIRE(registry.execute(std::make_unique<app::SetAutomationPointsCommand>(
+        copy.id, std::vector<AutomationPoint>{at(0, 1.0)})));
+
+    CHECK(project.automation()[0].points.size() == 2);
+
+    REQUIRE(registry.undo());
+    REQUIRE(registry.undo());
+    CHECK(project.automation().size() == 1);
+    CHECK(project.findClip(second)->source == shared);
+}
+
+TEST_CASE("a clip that is already alone on its lane is already unique")
+{
+    project::Project project;
+    project.tempoMap().setSampleRate(48000.0);
+
+    app::CommandRegistry registry{project};
+
+    auto command = std::make_unique<app::CreateAutomationClipCommand>(
+        project.masterMixerNode(), "volume", 0, ticksPerQuarterNote * 4);
+    app::CreateAutomationClipCommand* raw = command.get();
+    REQUIRE(registry.execute(std::move(command)));
+
+    CHECK_FALSE(registry.execute(
+        std::make_unique<app::MakeAutomationClipUniqueCommand>(raw->clipId())));
+    CHECK(project.automation().size() == 1);
+}
+
+TEST_CASE("clearing a lane is the same command with an empty vector")
+{
+    project::Project project;
+    project::AutomationLane& lane = project.addAutomationLane(project::EntityId{1}, "gain");
+    lane.points = ramp();
+
+    const project::EntityId laneId = lane.id;
+    app::CommandRegistry registry{project};
+
+    REQUIRE(registry.execute(std::make_unique<app::SetAutomationPointsCommand>(
+        laneId, std::vector<AutomationPoint>{}, "Clear Automation")));
+
+    CHECK(project.automation()[0].points.empty());
+
+    REQUIRE(registry.undo());
+    CHECK(project.automation()[0].points.size() == 3);
+}

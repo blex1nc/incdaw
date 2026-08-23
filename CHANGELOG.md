@@ -8,6 +8,33 @@ public version yet.
 
 ## [Unreleased]
 
+### Automation — clips you can ask for — 2026-08-23
+
+- **New Automation Clip** on a track's context menu: pick a mixer strip or
+  a channel, pick volume, pan or stereo width, and the lane, the automation
+  track and a four-bar clip arrive together in one undo entry, with the
+  editor open on it. Previously the only way to get a lane was to record a
+  pass in write mode.
+- **Seeded at the control's own value**, so the clip opens on the line the
+  parameter is already sitting at rather than snapping it to zero the
+  moment it plays.
+- **A second clip for the same parameter shares the lane**, exactly as two
+  clips of one pattern share the pattern. **Make Automation Unique** is the
+  verb for when that is not what was wanted, and **Clear Automation** empties
+  a lane without deleting it.
+- **A lane says what it rides, on the clip.** Automation clips are labelled
+  "Master · volume" rather than by an id, which is the first time the
+  arrangement could be asked which parameter a lane belongs to.
+- **Fixed: the playlist drew automation as straight lines** between points,
+  ignoring hold, smooth, exponential and tension. It now evaluates through
+  the engine's own class, like the editor does — a picture of a curve
+  nobody was playing was tolerable while nothing could set one, and stopped
+  being so the moment the editor arrived.
+- The entry point the brief asks for is a control's own context menu in the
+  mixer. `MixerView` is not this track's file, so the verb is offered from
+  the arrangement side instead; the command itself is target-agnostic and
+  the mixer can call it unchanged.
+
 ### Automation — the editor — 2026-08-23
 
 - **A surface for editing lanes at last.** Double-clicking an automation

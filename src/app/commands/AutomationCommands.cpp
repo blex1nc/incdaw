@@ -5,6 +5,29 @@
 namespace incdaw::app {
 namespace {
 
+/// Puts a lane back where it was, keeping its id — the clips that name it
+/// would otherwise point at nothing after an undo.
+void insertLane(Project& project, std::size_t index, const AutomationLane& lane)
+{
+    const std::size_t position = std::min(index, project.automation().size());
+    project.automation().insert(
+        project.automation().begin() + static_cast<std::ptrdiff_t>(position), lane);
+}
+
+bool eraseLane(Project& project, EntityId id) noexcept
+{
+    for (std::size_t index = 0; index < project.automation().size(); ++index) {
+        if (project.automation()[index].id != id)
+            continue;
+
+        project.automation().erase(project.automation().begin()
+                                   + static_cast<std::ptrdiff_t>(index));
+        return true;
+    }
+
+    return false;
+}
+
 AutomationLane* findLane(Project& project, EntityId id) noexcept
 {
     for (AutomationLane& lane : project.automation())
@@ -121,6 +144,143 @@ void SetAutomationPointsCommand::mergeWith(const Command& next)
 }
 
 // ── WriteAutomationCommand ────────────────────────────────────────────────────
+
+// ── CreateAutomationClipCommand ───────────────────────────────────────────────
+
+bool CreateAutomationClipCommand::execute(Project& project)
+{
+    if (minted_) {
+        if (laneCreated_)
+            insertLane(project, laneIndex_, lane_);
+
+        if (trackCreated_)
+            project.insertTrack(trackIndex_, track_);
+
+        project.insertClip(clipIndex_, clip_);
+        return true;
+    }
+
+    if (key_.empty() || !target_.isValid() || length_ <= 0)
+        return false;
+
+    project::AutomationLane* lane = nullptr;
+    for (std::size_t index = 0; index < project.automation().size(); ++index) {
+        project::AutomationLane& candidate = project.automation()[index];
+        if (candidate.targetEntity == target_ && candidate.parameterKey == key_) {
+            lane       = &candidate;
+            laneIndex_ = index;
+            break;
+        }
+    }
+
+    if (lane == nullptr) {
+        lane         = &project.addAutomationLane(target_, key_);
+        laneIndex_   = project.automation().size() - 1;
+        laneCreated_ = true;
+
+        // A flat pair at the control's current value: an empty lane would
+        // read as zero the moment it played, which is a jump nobody asked for.
+        AutomationPoint start;
+        start.tick  = std::max<Tick>(0, start_);
+        start.value = std::clamp(value_, 0.0, 1.0);
+
+        AutomationPoint end = start;
+        end.tick = start.tick + length_;
+
+        lane->points = {start, end};
+    }
+
+    laneId_ = lane->id;
+    lane_   = *lane;
+
+    project::Track* track = nullptr;
+    for (project::Track& entry : project.tracks())
+        if (entry.type == project::TrackType::automation && track == nullptr)
+            track = &entry;
+
+    if (track == nullptr) {
+        project::Track& created =
+            project.addTrack(project::TrackType::automation, "Automation 1");
+        trackIndex_   = project.tracks().size() - 1;
+        track_        = created;
+        trackCreated_ = true;
+        track         = &created;
+    }
+
+    project::Clip& clip = project.addClip(project::ClipType::automation, track->id, laneId_);
+    clip.startTick      = std::max<Tick>(0, start_);
+    clip.lengthTicks    = length_;
+    clip.name           = key_;
+
+    clip_      = clip;
+    clipIndex_ = project.clips().size() - 1;
+    minted_    = true;
+    return true;
+}
+
+void CreateAutomationClipCommand::undo(Project& project)
+{
+    (void)project.removeClip(clip_.id);
+
+    if (laneCreated_)
+        (void)eraseLane(project, laneId_);
+
+    if (trackCreated_)
+        (void)project.removeTrack(track_.id);
+}
+
+// ── MakeAutomationClipUniqueCommand ───────────────────────────────────────────
+
+bool MakeAutomationClipUniqueCommand::execute(Project& project)
+{
+    project::Clip* clip = project.findClip(clipId_);
+    if (clip == nullptr || clip->type != project::ClipType::automation)
+        return false;
+
+    if (!minted_) {
+        const project::AutomationLane* source = findLane(project, clip->source);
+        if (source == nullptr)
+            return false;
+
+        // Only worth doing when the lane is actually shared: a clip that is
+        // already the only one on its lane is already unique.
+        std::size_t placements = 0;
+        for (const project::Clip& entry : project.clips())
+            if (entry.type == project::ClipType::automation && entry.source == source->id)
+                ++placements;
+
+        if (placements < 2)
+            return false;
+
+        // Read out before adding: addAutomationLane can reallocate the vector
+        // `source` points into, and a copy taken afterwards would be of a
+        // lane that no longer exists.
+        const EntityId    targetEntity = source->targetEntity;
+        const std::string parameterKey = source->parameterKey;
+        auto              points       = source->points;
+
+        project::AutomationLane& copy = project.addAutomationLane(targetEntity, parameterKey);
+        copy.points                   = std::move(points);
+
+        lane_   = copy;
+        index_  = project.automation().size() - 1;
+        minted_ = true;
+    } else {
+        insertLane(project, index_, lane_);
+    }
+
+    previousLane_ = clip->source;
+    clip->source  = lane_.id;
+    return true;
+}
+
+void MakeAutomationClipUniqueCommand::undo(Project& project)
+{
+    if (project::Clip* clip = project.findClip(clipId_))
+        clip->source = previousLane_;
+
+    (void)eraseLane(project, lane_.id);
+}
 
 bool WriteAutomationCommand::execute(Project& project)
 {

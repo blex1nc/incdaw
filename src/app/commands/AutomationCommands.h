@@ -85,6 +85,80 @@ private:
     std::string                  name_;
 };
 
+/// Creates an automation clip for a parameter that has none.
+///
+/// The workflow verb behind "automate this control": the lane is made if the
+/// project has none for (target, key), an automation track is made if there is
+/// none, and a clip lands on it spanning the requested bars — seeded with a
+/// flat pair of points at the parameter's current value, so the clip opens on
+/// the line the control is already sitting at rather than on an empty lane
+/// that would snap it to zero the moment it played.
+///
+/// Deliberately the same landing pattern as a recorded pass: one undo entry
+/// takes the clip, the lane and the track back together, and redo restores the
+/// same ids.
+class CreateAutomationClipCommand final : public Command {
+public:
+    CreateAutomationClipCommand(EntityId target, std::string parameterKey,
+                                Tick startTick, Tick lengthTicks, double value = 0.5)
+        : target_(target), key_(std::move(parameterKey)), start_(startTick),
+          length_(lengthTicks), value_(value) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "automation.createClip"; }
+    [[nodiscard]] std::string name() const override { return "Create Automation Clip"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    /// Valid only after the first execute.
+    [[nodiscard]] EntityId laneId() const noexcept { return laneId_; }
+    [[nodiscard]] EntityId clipId() const noexcept { return clip_.id; }
+
+private:
+    EntityId    target_;
+    std::string key_;
+    Tick        start_  = 0;
+    Tick        length_ = 0;
+    double      value_  = 0.5;
+
+    EntityId                laneId_;
+    project::AutomationLane lane_;
+    project::Clip           clip_;
+    project::Track          track_;
+    std::size_t             laneIndex_  = 0;
+    std::size_t             clipIndex_  = 0;
+    std::size_t             trackIndex_ = 0;
+    bool laneCreated_  = false;
+    bool trackCreated_ = false;
+    bool minted_       = false;
+};
+
+/// Gives a clip a lane of its own, copied from the one it shares.
+///
+/// Automation clips reference a lane by id, exactly as pattern clips reference
+/// a pattern: two clips of one lane are the same ride, and editing either
+/// changes both. That is usually what is wanted; this is the verb for when it
+/// is not.
+class MakeAutomationClipUniqueCommand final : public Command {
+public:
+    explicit MakeAutomationClipUniqueCommand(EntityId clip) : clipId_(clip) {}
+
+    [[nodiscard]] const char* id() const noexcept override { return "automation.makeUnique"; }
+    [[nodiscard]] std::string name() const override { return "Make Automation Unique"; }
+
+    [[nodiscard]] bool execute(Project& project) override;
+    void undo(Project& project) override;
+
+    [[nodiscard]] EntityId laneId() const noexcept { return lane_.id; }
+
+private:
+    EntityId                clipId_;
+    project::AutomationLane lane_;
+    EntityId                previousLane_;
+    std::size_t             index_  = 0;
+    bool                    minted_ = false;
+};
+
 /// Lands one recorded automation pass (write mode).
 ///
 /// Existing lane for (target, key): the written range replaces that range's

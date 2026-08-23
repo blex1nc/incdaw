@@ -2,8 +2,10 @@
 
 #include "app/Browser.h"
 #include "app/CommandRegistry.h"
+#include "app/AutomationEditorModel.h"
 #include "app/PlaylistModel.h"
 #include "app/commands/ClipCommands.h"
+#include "app/commands/AutomationCommands.h"
 #include "app/commands/ConsolidateCommands.h"
 #include "app/commands/ImportCommands.h"
 #include "app/commands/MarkerCommands.h"
@@ -393,10 +395,16 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
         const project::Clip& model = _project->clips()[clip.index];
 
+        // An automation clip is named for what it rides, so a lane can be told
+        // apart in the arrangement without opening it.
+        const std::string label = model.type == project::ClipType::automation
+                                      ? [self automationLabelFor:model]
+                                      : model.name;
+
         // One region shape for every kind of clip; what is drawn inside it is
         // what says whether it holds notes, audio or an automation ride.
         const NSRect body = theme::drawRegion(rect, theme::fromArgb(clip.colour),
-                                              @(model.name.c_str()), clip.selected, clip.muted,
+                                              @(label.c_str()), clip.selected, clip.muted,
                                               true);
 
         if (model.type == project::ClipType::audio)
@@ -642,6 +650,27 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 /// The lane's envelope across the clip's window, as a thumbnail polyline.
 /// Linear between points — curve shapes are an editing-surface concern; the
 /// clip body only has to say "this is the shape of the ride".
+/// "Master · volume" rather than a lane id: the answer to "which parameter is
+/// this?" belongs on the clip, not behind a double-click.
+- (std::string)automationLabelFor:(const project::Clip&)model
+{
+    const project::AutomationLane* lane = nullptr;
+    for (const project::AutomationLane& candidate : _project->automation())
+        if (candidate.id == model.source)
+            lane = &candidate;
+
+    if (lane == nullptr)
+        return model.name;
+
+    std::string target;
+    if (const project::MixerNode* node = _project->findMixerNode(lane->targetEntity))
+        target = node->name;
+    else if (const project::Channel* channel = _project->findChannel(lane->targetEntity))
+        target = channel->name;
+
+    return target.empty() ? lane->parameterKey : target + " \u00b7 " + lane->parameterKey;
+}
+
 - (void)drawAutomationCurveFor:(const project::Clip&)model inBody:(NSRect)body
 {
     const project::AutomationLane* lane = nullptr;
@@ -656,25 +685,13 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         return;
 
     // Lane ticks are absolute; the clip shows [sourceOffsetTicks, +length).
+    //
+    // Evaluated by the engine's own class rather than by a straight line
+    // between points: a held or shaped segment drawn as a ramp would be a
+    // picture of a curve nobody is playing, and since the automation editor
+    // arrived those segments are something the user actually sets.
     const auto valueAtTick = [lane](Tick tick) -> double {
-        if (tick <= lane->points.front().tick)
-            return lane->points.front().value;
-        if (tick >= lane->points.back().tick)
-            return lane->points.back().value;
-
-        for (std::size_t index = 1; index < lane->points.size(); ++index) {
-            const auto& before = lane->points[index - 1];
-            const auto& after  = lane->points[index];
-
-            if (tick < after.tick) {
-                const double span = static_cast<double>(after.tick - before.tick);
-                const double mix  = span > 0.0 ? static_cast<double>(tick - before.tick) / span
-                                               : 1.0;
-                return before.value + (after.value - before.value) * mix;
-            }
-        }
-
-        return lane->points.back().value;
+        return app::AutomationEditorModel::valueAt(lane->points, tick);
     };
 
     NSBezierPath* path = [NSBezierPath bezierPath];
@@ -1374,6 +1391,23 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
     [menu addItem:[NSMenuItem separatorItem]];
 
+    NSMenuItem* editLane = [menu addItemWithTitle:@"Edit Automation Lane"
+                                           action:@selector(editLaneFromMenu:)
+                                    keyEquivalent:@""];
+    editLane.target = self;
+
+    NSMenuItem* unique = [menu addItemWithTitle:@"Make Automation Unique"
+                                         action:@selector(makeLaneUniqueFromMenu:)
+                                  keyEquivalent:@""];
+    unique.target = self;
+
+    NSMenuItem* clear = [menu addItemWithTitle:@"Clear Automation"
+                                        action:@selector(clearLaneFromMenu:)
+                                 keyEquivalent:@""];
+    clear.target = self;
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     NSMenuItem* consolidate = [menu addItemWithTitle:@"Consolidate"
                                               action:@selector(consolidateFromMenu:)
                                        keyEquivalent:@""];
@@ -1466,6 +1500,11 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
                                   keyEquivalent:@""];
     folder.target = self;
 
+    NSMenuItem* automate = [menu addItemWithTitle:@"New Automation Clip"
+                                           action:nil
+                                    keyEquivalent:@""];
+    automate.submenu = [self automationTargetMenu];
+
     if (track->type == project::TrackType::folder) {
         NSMenuItem* toggle =
             [menu addItemWithTitle:track->collapsed ? @"Expand" : @"Collapse"
@@ -1556,6 +1595,92 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     return menu;
 }
 
+/// Every mixer strip and channel, each offering the parameters a strip has.
+///
+/// The entry point the brief asks for is a control's own context menu in the
+/// mixer; that lives in MixerView, which this track does not own, so the same
+/// verb is offered from the arrangement side instead — which is where an
+/// automation clip ends up anyway.
+- (NSMenu*)automationTargetMenu
+{
+    static const struct { const char* title; const char* key; } parameters[] = {
+        {"Volume", "volume"}, {"Pan", "pan"}, {"Stereo Width", "stereoSeparation"},
+    };
+
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    const auto addTarget = [&](project::EntityId target, const std::string& name) {
+        NSMenuItem* entry = [menu addItemWithTitle:@(name.c_str()) action:nil keyEquivalent:@""];
+
+        NSMenu* keys = [[NSMenu alloc] init];
+
+        for (const auto& parameter : parameters) {
+            NSMenuItem* item = [keys addItemWithTitle:@(parameter.title)
+                                               action:@selector(createAutomationFromMenu:)
+                                        keyEquivalent:@""];
+            item.target = self;
+            item.representedObject =
+                @[@(target.value()), @(parameter.key)];
+        }
+
+        entry.submenu = keys;
+    };
+
+    for (const project::MixerNode& node : _project->mixerNodes())
+        addTarget(node.id, node.name);
+
+    for (const project::Channel& channel : _project->channels())
+        addTarget(channel.id, channel.name);
+
+    return menu;
+}
+
+- (void)createAutomationFromMenu:(NSMenuItem*)item
+{
+    NSArray* pair = item.representedObject;
+    if (pair.count != 2)
+        return;
+
+    const project::EntityId target{[pair[0] unsignedLongLongValue]};
+    const std::string       key = [pair[1] UTF8String];
+
+    // Four bars from the playhead, or from the left edge of the viewport when
+    // the transport has never rolled.
+    const Tick start = _playheadTick >= 0 ? static_cast<Tick>(_playheadTick)
+                                          : _model->viewport().firstTick;
+
+    // Seeded at the control's own value, so the clip opens on the line the
+    // parameter is already sitting at.
+    double value = 0.5;
+    if (const project::MixerNode* node = _project->findMixerNode(target)) {
+        if (key == "volume")
+            value = std::clamp(node->volume, 0.0, 1.0);
+        else if (key == "pan")
+            value = std::clamp((node->pan + 1.0) * 0.5, 0.0, 1.0);
+        else if (key == "stereoSeparation")
+            value = std::clamp((node->stereoSeparation + 1.0) * 0.5, 0.0, 1.0);
+    } else if (const project::Channel* channel = _project->findChannel(target)) {
+        if (key == "volume")
+            value = std::clamp(channel->volume, 0.0, 1.0);
+        else if (key == "pan")
+            value = std::clamp((channel->pan + 1.0) * 0.5, 0.0, 1.0);
+    }
+
+    auto command = std::make_unique<app::CreateAutomationClipCommand>(
+        target, key, _model->snapTick(start), ticksPerQuarterNote * 4 * 4, value);
+
+    app::CreateAutomationClipCommand* raw = command.get();
+
+    if (!_registry->execute(std::move(command))) {
+        [self refuse:@"That parameter already has a clip here."];
+        return;
+    }
+
+    _model->setSelection({raw->clipId()});
+    [self changed];
+    [self openAutomationLane:raw->laneId()];
+}
+
 - (void)addFolderFromMenu:(id)sender
 {
     (void)sender;
@@ -1613,6 +1738,63 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 {
     (void)sender;
     [self commit:std::make_unique<app::SetClipMutedCommand>(_model->selection(), false)];
+}
+
+/// The first automation clip in the selection, or an invalid id.
+- (project::EntityId)selectedAutomationClip
+{
+    for (const project::EntityId id : _model->selection())
+        if (const project::Clip* clip = _project->findClip(id);
+            clip != nullptr && clip->type == project::ClipType::automation)
+            return clip->id;
+
+    return {};
+}
+
+- (void)editLaneFromMenu:(id)sender
+{
+    (void)sender;
+
+    const project::EntityId id = [self selectedAutomationClip];
+    if (const project::Clip* clip = _project->findClip(id))
+        [self openAutomationLane:clip->source];
+    else
+        [self refuse:@"Select an automation clip."];
+}
+
+- (void)makeLaneUniqueFromMenu:(id)sender
+{
+    (void)sender;
+
+    const project::EntityId id = [self selectedAutomationClip];
+    if (!id.isValid()) {
+        [self refuse:@"Select an automation clip."];
+        return;
+    }
+
+    if (!_registry->execute(std::make_unique<app::MakeAutomationClipUniqueCommand>(id))) {
+        [self refuse:@"This clip is already the only one on its lane."];
+        return;
+    }
+
+    [self changed];
+}
+
+- (void)clearLaneFromMenu:(id)sender
+{
+    (void)sender;
+
+    const project::EntityId id = [self selectedAutomationClip];
+    const project::Clip* clip  = _project->findClip(id);
+
+    if (clip == nullptr) {
+        [self refuse:@"Select an automation clip."];
+        return;
+    }
+
+    [self commit:std::make_unique<app::SetAutomationPointsCommand>(
+                     clip->source, std::vector<project::AutomationPoint>{},
+                     "Clear Automation")];
 }
 
 - (void)consolidateFromMenu:(id)sender
