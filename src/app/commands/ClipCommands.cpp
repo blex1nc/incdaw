@@ -28,7 +28,10 @@ void dropLocked(const Project& project, ClipIds& clips)
 }
 
 /// The track a row offset lands on, or an invalid id when it falls off either
-/// end of the list.
+/// end of the list — or onto a folder, which holds other tracks and never
+/// clips. An invalid answer clamps the whole drag, exactly as running off the
+/// end of the list does, so a group keeps its shape rather than half of it
+/// landing somewhere a clip cannot live.
 EntityId trackAtOffset(const Project& project, EntityId from, int delta)
 {
     const std::size_t index = project.indexOfTrack(from);
@@ -39,7 +42,11 @@ EntityId trackAtOffset(const Project& project, EntityId from, int delta)
     if (target < 0 || target >= static_cast<long long>(project.tracks().size()))
         return {};
 
-    return project.tracks()[static_cast<std::size_t>(target)].id;
+    const Track& track = project.tracks()[static_cast<std::size_t>(target)];
+    if (track.type == project::TrackType::folder)
+        return {};
+
+    return track.id;
 }
 
 } // namespace
@@ -50,7 +57,13 @@ bool AddPatternClipCommand::execute(Project& project)
 {
     if (!minted_) {
         const project::Pattern* pattern = project.findPattern(pattern_);
-        if (pattern == nullptr || project.findTrack(track_) == nullptr)
+        const Track*            track   = project.findTrack(track_);
+
+        // A folder groups tracks; it is not one. Clips live on the rows under
+        // it, and one placed on the folder itself would play with no row to
+        // draw it on.
+        if (pattern == nullptr || track == nullptr
+            || track->type == project::TrackType::folder)
             return false;
 
         Clip& created = project.addClip(project::ClipType::pattern, track_, pattern_);

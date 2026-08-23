@@ -88,6 +88,16 @@ public:
     /// with the project, so the playlist has to ask rather than assume.
     [[nodiscard]] static double trackHeight(const Track& track) noexcept;
 
+    /// Row height in the layout, which is zero for a track a collapsed folder
+    /// is hiding.
+    ///
+    /// Every piece of geometry below goes through this rather than through
+    /// `trackHeight`, so a hidden row takes no space, catches no click and
+    /// draws no clip — one rule, applied once, instead of a `hidden` test
+    /// scattered through drawing and hit testing separately.
+    [[nodiscard]] static double rowHeight(const std::vector<Track>& tracks,
+                                          std::size_t index) noexcept;
+
     [[nodiscard]] double trackY(const std::vector<Track>& tracks, std::size_t index) const noexcept;
     [[nodiscard]] static double tracksHeight(const std::vector<Track>& tracks) noexcept;
 

@@ -16,6 +16,7 @@
 
 #include "app/CommandRegistry.h"
 #include "app/commands/ClipCommands.h"
+#include "app/PlaylistModel.h"
 #include "app/commands/TrackCommands.h"
 #include "project/Model.h"
 #include "project/PatternCompiler.h"
@@ -489,4 +490,107 @@ TEST_CASE("the v1.7 fixture still loads")
     CHECK(project::trackHidden(project, project.tracks()[1]));
     CHECK(project::trackHidden(project, project.tracks()[2]));
     CHECK_FALSE(project.tracks()[1].collapsed);
+}
+
+
+// ── The playlist's geometry ──────────────────────────────────────────────────
+
+TEST_CASE("a collapsed folder's rows take no height, catch no click and draw no clip")
+{
+    FolderFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    app::PlaylistModel playlist;
+
+    app::PlaylistModel::Viewport viewport;
+    viewport.firstTick    = 0;
+    viewport.visibleTicks = ticksPerQuarterNote * 4 * 16;
+    viewport.width        = 800.0;
+    viewport.height       = 600.0;
+    playlist.setViewport(viewport);
+
+    const auto& tracks = fixture.project.tracks();
+
+    const double open = app::PlaylistModel::tracksHeight(tracks);
+    REQUIRE(open > 0.0);
+
+    // The row the third track sits at while the folder is open, and a clip on
+    // one of the hidden tracks.
+    const double outsideYWhenOpen = playlist.trackY(tracks, 3);
+
+    const project::Clip& inner = *std::find_if(
+        fixture.project.clips().begin(), fixture.project.clips().end(),
+        [&fixture](const project::Clip& clip) { return clip.track == fixture.inside; });
+
+    REQUIRE(playlist.clipRect(fixture.project, inner).width > 0.0);
+
+    REQUIRE(registry.execute(
+        std::make_unique<app::SetTrackCollapsedCommand>(fixture.folder, true)));
+
+    // Two rows of the four have gone from the layout.
+    CHECK(app::PlaylistModel::tracksHeight(tracks) < open);
+    CHECK(app::PlaylistModel::rowHeight(tracks, 1) == 0.0);
+    CHECK(app::PlaylistModel::rowHeight(tracks, 2) == 0.0);
+    CHECK(app::PlaylistModel::rowHeight(tracks, 0) > 0.0);   // the folder itself stays
+
+    // The track below them moves up by exactly what they occupied.
+    CHECK(playlist.trackY(tracks, 3) < outsideYWhenOpen);
+
+    // A hidden row is nowhere: no rectangle, no hit, no visible clip.
+    CHECK(playlist.clipRect(fixture.project, inner).width == 0.0);
+
+    std::vector<app::PlaylistModel::VisibleClip> visible;
+    playlist.collectVisibleClips(fixture.project, visible);
+    CHECK(visible.size() == 1);   // only the clip on the track outside the folder
+
+    const double insideY = playlist.trackY(tracks, 1);
+    CHECK(playlist.trackAtY(tracks, insideY) != 1);
+
+    REQUIRE(registry.undo());
+    CHECK(app::PlaylistModel::tracksHeight(tracks) == open);
+    CHECK(playlist.clipRect(fixture.project, inner).width > 0.0);
+}
+
+TEST_CASE("indentation counts the folders a track is inside")
+{
+    FolderFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    CHECK(project::trackDepth(fixture.project.tracks(),
+                              fixture.track(fixture.folder)) == 0);
+    CHECK(project::trackDepth(fixture.project.tracks(),
+                              fixture.track(fixture.inside)) == 1);
+
+    const project::EntityId outer =
+        fixture.project.addTrack(project::TrackType::folder, "Outer").id;
+    REQUIRE(registry.execute(
+        std::make_unique<app::SetTrackParentCommand>(fixture.folder, outer)));
+
+    CHECK(project::trackDepth(fixture.project.tracks(),
+                              fixture.track(fixture.inside)) == 2);
+}
+
+// ── Clips never land on a folder ─────────────────────────────────────────────
+
+TEST_CASE("a folder holds tracks, not clips")
+{
+    FolderFixture fixture;
+    app::CommandRegistry registry{fixture.project};
+
+    CHECK_FALSE(registry.execute(std::make_unique<app::AddPatternClipCommand>(
+        fixture.folder, fixture.pattern, 0)));
+
+    // Dragging a clip up onto the folder row is refused the same way running
+    // off the end of the list is: the whole drag keeps its rows.
+    const project::Clip& inner = *std::find_if(
+        fixture.project.clips().begin(), fixture.project.clips().end(),
+        [&fixture](const project::Clip& clip) { return clip.track == fixture.inside; });
+
+    const project::EntityId clipId = inner.id;
+
+    REQUIRE(registry.execute(std::make_unique<app::MoveClipsCommand>(
+        app::ClipIds{clipId}, ticksPerQuarterNote, -1)));
+
+    CHECK(fixture.project.findClip(clipId)->track == fixture.inside);   // row refused
+    CHECK(fixture.project.findClip(clipId)->startTick == ticksPerQuarterNote);
 }

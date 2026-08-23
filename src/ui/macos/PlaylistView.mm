@@ -40,6 +40,11 @@ constexpr CGFloat addRowHeight = 28.0;
 constexpr CGFloat buttonWidth = 20.0;
 constexpr CGFloat padding     = 7.0;
 
+/// How far one folder level moves a header in. Capped at four levels in the
+/// drawing: past that the indent costs more width than the nesting is worth
+/// showing, and the header would have no room left for a name.
+constexpr CGFloat folderIndent = 10.0;
+
 using theme::fillRect;
 
 enum class PlaylistDrag { none, move, resize, boxSelect };
@@ -79,6 +84,10 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
     /// not" and "it does not work".
     NSString* _refusal;
     NSTimer*  _refusalTimer;
+
+    /// The row the open track menu belongs to. Set when the menu is built, so
+    /// its verbs act on what was right-clicked rather than on the selection.
+    project::EntityId _menuTrack;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -156,12 +165,11 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 
     // Where a dragged sample would land: the lane, and the exact tick.
     if (_dropTrack != app::PlaylistModel::noTrack && _dropTrack < _project->tracks().size()) {
-        const project::Track& track = _project->tracks()[_dropTrack];
-
         const NSRect lane = NSMakeRect(headerWidth,
                                        _model->trackY(_project->tracks(), _dropTrack) + rulerHeight,
                                        self.bounds.size.width - headerWidth,
-                                       app::PlaylistModel::trackHeight(track));
+                                       app::PlaylistModel::rowHeight(_project->tracks(),
+                                                                     _dropTrack));
 
         [theme::withAlpha(theme::ink(Ink::accent), 0.12) setFill];
         NSRectFillUsingOperation(lane, NSCompositingOperationSourceOver);
@@ -252,12 +260,20 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         const project::Track& track = tracks[row];
 
         const CGFloat y      = rulerHeight + _model->trackY(tracks, row);
-        const CGFloat height = app::PlaylistModel::trackHeight(track);
+        const CGFloat height = app::PlaylistModel::rowHeight(tracks, row);
+
+        if (height <= 0.0)
+            continue;   // a collapsed folder above it
 
         if (y + height < rulerHeight || y > self.bounds.size.height)
             continue;
 
         NSColor* colour = theme::fromArgb(track.colour);
+
+        // One step of indent per folder above, so the tree is legible from
+        // the shape of the column rather than from reading every name.
+        const CGFloat indent = static_cast<CGFloat>(
+            std::min<std::size_t>(project::trackDepth(tracks, track), 4)) * folderIndent;
 
         // The lane behind the clips, so an empty track is still a place rather
         // than a gap.
@@ -267,7 +283,8 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
         [self drawBarLinesInLaneAt:y height:height - 1.0];
 
         // ── The track's header ───────────────────────────────────────────────
-        const NSRect header = NSMakeRect(2.0, y + 1.0, headerWidth - 5.0, height - 4.0);
+        const NSRect header = NSMakeRect(2.0 + indent, y + 1.0, headerWidth - 5.0 - indent,
+                                         height - 4.0);
         theme::drawPanel(header, theme::metrics::radiusControl, false, true);
 
         theme::fillGradient(NSMakeRect(NSMinX(header) + 5.0, NSMinY(header) + 5.0, 8.0,
@@ -275,11 +292,21 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
                             2.5, theme::lighten(colour, 0.25),
                             theme::darken(colour, track.muted ? 0.65 : 0.15), true);
 
+        // A folder gets a disclosure triangle where a track has nothing, and
+        // its name starts after it.
+        const CGFloat nameLeft = track.type == project::TrackType::folder ? 32.0 : 20.0;
+
+        if (track.type == project::TrackType::folder)
+            [self drawDisclosure:[self disclosureRectForRow:row] open:!track.collapsed];
+
         theme::drawText(@(track.name.c_str()),
-                        NSMakeRect(NSMinX(header) + 20.0, NSMinY(header) + 6.0,
+                        NSMakeRect(NSMinX(header) + nameLeft, NSMinY(header) + 6.0,
                                    header.size.width - 2.0 * buttonWidth - 3.0 * padding, 16.0),
                         track.muted ? theme::ink(Ink::textDim) : theme::ink(Ink::textPrimary),
-                        theme::labelFont(12.0, NSFontWeightMedium));
+                        theme::labelFont(12.0,
+                                         track.type == project::TrackType::folder
+                                             ? NSFontWeightBold
+                                             : NSFontWeightMedium));
 
         theme::drawToggle([self muteRectForRow:row], @"M", track.muted, theme::ink(Ink::mute), true);
         theme::drawToggle([self soloRectForRow:row], @"S", track.soloed, theme::ink(Ink::solo), true);
@@ -640,6 +667,44 @@ enum class PlaylistDrag { none, move, resize, boxSelect };
 }
 
 // ── Header geometry ──────────────────────────────────────────────────────────
+
+/// The triangle that opens and closes a folder. Sized for the pointer rather
+/// than for the glyph, which is small.
+- (NSRect)disclosureRectForRow:(std::size_t)row
+{
+    const std::vector<project::Track>& tracks = _project->tracks();
+    if (row >= tracks.size())
+        return NSZeroRect;
+
+    const CGFloat y = rulerHeight + _model->trackY(tracks, row);
+    const CGFloat indent = static_cast<CGFloat>(
+        std::min<std::size_t>(project::trackDepth(tracks, tracks[row]), 4)) * folderIndent;
+
+    return NSMakeRect(2.0 + indent + 16.0, y + 5.0, 16.0, 16.0);
+}
+
+- (void)drawDisclosure:(NSRect)rect open:(BOOL)open
+{
+    const CGFloat size = 5.0;
+    const NSPoint centre = NSMakePoint(NSMidX(rect), NSMidY(rect));
+
+    NSBezierPath* arrow = [NSBezierPath bezierPath];
+
+    if (open) {
+        // Pointing down: the folder's contents are below it.
+        [arrow moveToPoint:NSMakePoint(centre.x - size, centre.y + size * 0.6)];
+        [arrow lineToPoint:NSMakePoint(centre.x + size, centre.y + size * 0.6)];
+        [arrow lineToPoint:NSMakePoint(centre.x, centre.y - size * 0.7)];
+    } else {
+        [arrow moveToPoint:NSMakePoint(centre.x - size * 0.6, centre.y - size)];
+        [arrow lineToPoint:NSMakePoint(centre.x - size * 0.6, centre.y + size)];
+        [arrow lineToPoint:NSMakePoint(centre.x + size * 0.7, centre.y)];
+    }
+
+    [arrow closePath];
+    [theme::withAlpha(theme::ink(Ink::textSecondary), 0.9) setFill];
+    [arrow fill];
+}
 
 - (NSRect)muteRectForRow:(std::size_t)row
 {
@@ -1055,6 +1120,13 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     const project::Track& track = _project->tracks()[row];
     const project::EntityId trackId = track.id;
 
+    if (track.type == project::TrackType::folder
+        && NSPointInRect(view, [self disclosureRectForRow:row])) {
+        [self commit:std::make_unique<app::SetTrackCollapsedCommand>(trackId, !track.collapsed)];
+        _model->pruneSelection(*_project);
+        return;
+    }
+
     if (NSPointInRect(view, [self muteRectForRow:row])) {
         [self commit:std::make_unique<app::SetTrackMutedCommand>(trackId, !track.muted)];
         return;
@@ -1076,6 +1148,11 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     const std::size_t row = _model->trackAtY(_project->tracks(), grid.y);
     if (row == app::PlaylistModel::noTrack)
         return;
+
+    if (_project->tracks()[row].type == project::TrackType::folder) {
+        [self refuse:@"A folder groups tracks \u2014 clips go on the rows inside it."];
+        return;
+    }
 
     const project::EntityId pattern{_patternIdValue};
     if (_project->findPattern(pattern) == nullptr)
@@ -1173,6 +1250,14 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
 
 - (void)showTrackMenuFor:(project::EntityId)trackId event:(NSEvent*)event
 {
+    const project::Track* track = _project->findTrack(trackId);
+    if (track == nullptr)
+        return;
+
+    // The menu's verbs all act on this row; the id rides on the item so a
+    // right-click never depends on what happens to be selected.
+    _menuTrack = trackId;
+
     NSMenu* menu = [[NSMenu alloc] init];
 
     NSMenuItem* rename = [menu addItemWithTitle:@"Rename Track…"
@@ -1181,13 +1266,149 @@ static NSString* droppedAudioPath(id<NSDraggingInfo> info)
     rename.target = self;
     rename.representedObject = @(trackId.value());
 
-    NSMenuItem* remove = [menu addItemWithTitle:@"Remove Track"
-                                         action:@selector(removeTrackFromMenu:)
+    NSMenuItem* colour = [menu addItemWithTitle:@"Colour" action:nil keyEquivalent:@""];
+    colour.submenu = [self colourMenu];
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* folder = [menu addItemWithTitle:@"New Folder"
+                                         action:@selector(addFolderFromMenu:)
                                   keyEquivalent:@""];
+    folder.target = self;
+
+    if (track->type == project::TrackType::folder) {
+        NSMenuItem* toggle =
+            [menu addItemWithTitle:track->collapsed ? @"Expand" : @"Collapse"
+                            action:@selector(toggleCollapseFromMenu:)
+                     keyEquivalent:@""];
+        toggle.target = self;
+        toggle.representedObject = @(trackId.value());
+    }
+
+    NSMenu* into = [self folderMenuExcluding:trackId];
+    if (into != nil) {
+        NSMenuItem* move = [menu addItemWithTitle:@"Move Into Folder" action:nil keyEquivalent:@""];
+        move.submenu = into;
+    }
+
+    if (track->parent.isValid()) {
+        NSMenuItem* out = [menu addItemWithTitle:@"Move Out Of Folder"
+                                          action:@selector(moveOutOfFolderFromMenu:)
+                                   keyEquivalent:@""];
+        out.target = self;
+        out.representedObject = @(trackId.value());
+    }
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* remove =
+        [menu addItemWithTitle:track->type == project::TrackType::folder ? @"Remove Folder"
+                                                                         : @"Remove Track"
+                        action:@selector(removeTrackFromMenu:)
+                 keyEquivalent:@""];
     remove.target = self;
     remove.representedObject = @(trackId.value());
 
     [NSMenu popUpContextMenu:menu withEvent:event forView:self];
+}
+
+/// Every folder the row could be filed under, minus the ones that would close
+/// a loop. Nil when the project has no folder to offer.
+- (NSMenu*)folderMenuExcluding:(project::EntityId)trackId
+{
+    NSMenu* menu   = [[NSMenu alloc] init];
+    bool    anyRow = false;
+
+    for (const project::Track& candidate : _project->tracks()) {
+        if (candidate.type != project::TrackType::folder)
+            continue;
+        if (candidate.id == trackId)
+            continue;
+        if (project::trackWouldCycle(*_project, trackId, candidate.id))
+            continue;
+
+        const project::Track* track = _project->findTrack(trackId);
+        if (track != nullptr && track->parent == candidate.id)
+            continue;   // already there
+
+        NSMenuItem* item = [menu addItemWithTitle:@(candidate.name.c_str())
+                                           action:@selector(moveIntoFolderFromMenu:)
+                                    keyEquivalent:@""];
+        item.target           = self;
+        item.representedObject = @(candidate.id.value());
+        anyRow                = true;
+    }
+
+    return anyRow ? menu : nil;
+}
+
+/// INCDAW's own track hues, the same set `Project::addTrack` rotates through.
+/// A named list rather than the system colour panel: picking a track colour is
+/// a one-click decision, and a modal panel makes it three.
+- (NSMenu*)colourMenu
+{
+    static const struct { const char* name; unsigned int argb; } swatches[] = {
+        {"Blue",   0xFF4A78C8u}, {"Teal",   0xFF3E9E96u}, {"Green",  0xFF5C9E4Au},
+        {"Amber",  0xFFC8963Cu}, {"Orange", 0xFFC86E3Cu}, {"Red",    0xFFBE4A4Au},
+        {"Pink",   0xFFB4569Eu}, {"Violet", 0xFF7E5CBEu}, {"Grey",   0xFF6E6E78u},
+    };
+
+    NSMenu* menu = [[NSMenu alloc] init];
+
+    for (const auto& swatch : swatches) {
+        NSMenuItem* item = [menu addItemWithTitle:@(swatch.name)
+                                           action:@selector(setColourFromMenu:)
+                                    keyEquivalent:@""];
+        item.target            = self;
+        item.representedObject = @(swatch.argb);
+    }
+
+    return menu;
+}
+
+- (void)addFolderFromMenu:(id)sender
+{
+    (void)sender;
+
+    [self commit:std::make_unique<app::AddTrackCommand>(
+                     "Folder " + std::to_string(_project->tracks().size() + 1),
+                     project::TrackType::folder)];
+}
+
+- (void)toggleCollapseFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId trackId{[item.representedObject unsignedLongLongValue]};
+
+    const project::Track* track = _project->findTrack(trackId);
+    if (track == nullptr)
+        return;
+
+    [self commit:std::make_unique<app::SetTrackCollapsedCommand>(trackId, !track->collapsed)];
+    _model->pruneSelection(*_project);
+}
+
+- (void)moveIntoFolderFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId folder{[item.representedObject unsignedLongLongValue]};
+
+    if (!_registry->execute(std::make_unique<app::SetTrackParentCommand>(_menuTrack, folder))) {
+        [self refuse:@"That folder cannot hold this track."];
+        return;
+    }
+
+    [self changed];
+}
+
+- (void)moveOutOfFolderFromMenu:(NSMenuItem*)item
+{
+    const project::EntityId trackId{[item.representedObject unsignedLongLongValue]};
+    [self commit:std::make_unique<app::SetTrackParentCommand>(trackId, project::EntityId{})];
+}
+
+- (void)setColourFromMenu:(NSMenuItem*)item
+{
+    const auto argb = static_cast<std::uint32_t>([item.representedObject unsignedIntValue]);
+    [self commit:std::make_unique<app::SetTrackColourCommand>(_menuTrack, argb)];
 }
 
 - (void)duplicateFromMenu:(id)sender { (void)sender; [self duplicateSelection]; }

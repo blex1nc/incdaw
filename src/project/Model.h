@@ -587,7 +587,14 @@ private:
 ///
 /// Presentation only. A hidden track's clips still compile and still play —
 /// collapsing a folder tidies a view, it does not mute a group.
+///
+/// The list overload is what the playlist's geometry uses: it lays rows out
+/// from `tracks()` and has no Project to hand at that point.
+[[nodiscard]] bool trackHidden(const std::vector<Track>& tracks, const Track& track) noexcept;
 [[nodiscard]] bool trackHidden(const Project& project, const Track& track) noexcept;
+
+/// How many folders `track` sits inside. 0 is the top level.
+[[nodiscard]] std::size_t trackDepth(const std::vector<Track>& tracks, const Track& track) noexcept;
 
 /// True when making `track` a child of `parent` would close a loop.
 ///

@@ -633,21 +633,38 @@ namespace {
 /// a track, which means a cycle, and the walk gives up rather than spinning.
 /// The commands refuse to build one — this is the belt to that pair of braces,
 /// because a project file can be edited by hand.
+const Track* findIn(const std::vector<Track>& tracks, EntityId id) noexcept
+{
+    if (!id.isValid())
+        return nullptr;
+
+    const auto found = std::find_if(tracks.begin(), tracks.end(),
+                                    [id](const Track& track) { return track.id == id; });
+
+    return found == tracks.end() ? nullptr : &*found;
+}
+
 template <typename Predicate>
-bool anyAncestor(const Project& project, const Track& track, Predicate predicate)
+bool anyAncestor(const std::vector<Track>& tracks, const Track& track, Predicate predicate)
 {
     const Track* current = &track;
 
-    for (std::size_t step = 0; step <= project.tracks().size(); ++step) {
+    for (std::size_t step = 0; step <= tracks.size(); ++step) {
         if (predicate(*current))
             return true;
 
-        current = project.findTrack(current->parent);
+        current = findIn(tracks, current->parent);
         if (current == nullptr)
             return false;
     }
 
     return false;
+}
+
+template <typename Predicate>
+bool anyAncestor(const Project& project, const Track& track, Predicate predicate)
+{
+    return anyAncestor(project.tracks(), track, predicate);
 }
 
 } // namespace
@@ -662,15 +679,35 @@ bool trackEffectivelySoloed(const Project& project, const Track& track) noexcept
     return anyAncestor(project, track, [](const Track& node) { return node.soloed; });
 }
 
-bool trackHidden(const Project& project, const Track& track) noexcept
+bool trackHidden(const std::vector<Track>& tracks, const Track& track) noexcept
 {
-    const Track* parent = project.findTrack(track.parent);
+    const Track* parent = findIn(tracks, track.parent);
     if (parent == nullptr)
         return false;
 
     // The track's own collapsed flag hides its children, not itself, so the
     // walk starts one level up.
-    return anyAncestor(project, *parent, [](const Track& node) { return node.collapsed; });
+    return anyAncestor(tracks, *parent, [](const Track& node) { return node.collapsed; });
+}
+
+bool trackHidden(const Project& project, const Track& track) noexcept
+{
+    return trackHidden(project.tracks(), track);
+}
+
+std::size_t trackDepth(const std::vector<Track>& tracks, const Track& track) noexcept
+{
+    std::size_t depth   = 0;
+    const Track* parent = findIn(tracks, track.parent);
+
+    // Bounded by the list, like every other walk here: a cycle stops at the
+    // count rather than running away with the drawing code.
+    while (parent != nullptr && depth <= tracks.size()) {
+        ++depth;
+        parent = findIn(tracks, parent->parent);
+    }
+
+    return depth;
 }
 
 bool trackWouldCycle(const Project& project, EntityId track, EntityId parent) noexcept

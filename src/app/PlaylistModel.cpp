@@ -9,12 +9,20 @@ double PlaylistModel::trackHeight(const Track& track) noexcept
     return static_cast<double>(track.height > 0 ? track.height : 64);
 }
 
+double PlaylistModel::rowHeight(const std::vector<Track>& tracks, std::size_t index) noexcept
+{
+    if (index >= tracks.size())
+        return 0.0;
+
+    return project::trackHidden(tracks, tracks[index]) ? 0.0 : trackHeight(tracks[index]);
+}
+
 double PlaylistModel::trackY(const std::vector<Track>& tracks, std::size_t index) const noexcept
 {
     double y = -viewport_.firstTrackY;
 
     for (std::size_t row = 0; row < index && row < tracks.size(); ++row)
-        y += trackHeight(tracks[row]);
+        y += rowHeight(tracks, row);
 
     return y;
 }
@@ -22,8 +30,8 @@ double PlaylistModel::trackY(const std::vector<Track>& tracks, std::size_t index
 double PlaylistModel::tracksHeight(const std::vector<Track>& tracks) noexcept
 {
     double height = 0.0;
-    for (const Track& track : tracks)
-        height += trackHeight(track);
+    for (std::size_t row = 0; row < tracks.size(); ++row)
+        height += rowHeight(tracks, row);
 
     return height;
 }
@@ -33,7 +41,10 @@ std::size_t PlaylistModel::trackAtY(const std::vector<Track>& tracks, double y) 
     double top = -viewport_.firstTrackY;
 
     for (std::size_t row = 0; row < tracks.size(); ++row) {
-        const double height = trackHeight(tracks[row]);
+        const double height = rowHeight(tracks, row);
+
+        // A hidden row occupies no range, so `y >= top && y < top` is false
+        // for it and the search walks straight past.
         if (y >= top && y < top + height)
             return row;
 
@@ -62,7 +73,11 @@ PlaylistModel::Rect PlaylistModel::clipRect(const Project& project, const Clip& 
 
     // One point of inset top and bottom, so adjacent tracks' clips do not touch
     // and a row boundary stays visible where the timeline is dense.
-    return {x, y + 1.0, width, trackHeight(project.tracks()[row]) - 2.0};
+    const double height = rowHeight(project.tracks(), row);
+    if (height <= 0.0)
+        return {};   // a collapsed folder is hiding this clip's track
+
+    return {x, y + 1.0, width, height - 2.0};
 }
 
 void PlaylistModel::collectVisibleClips(const Project& project, std::vector<VisibleClip>& out) const

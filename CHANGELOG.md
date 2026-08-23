@@ -34,6 +34,14 @@ public version yet.
 - **Project format 1.7.** Tracks gained `collapsed`. A 1.6 file reads back
   with every folder open, and the grouping it already described starts
   propagating with no conversion at all.
+- **The playlist draws the tree.** Folder rows carry a disclosure triangle
+  and a bold name, headers step in one level per folder above them, and a
+  collapsed folder's rows take no height at all — so they catch no click,
+  draw no clip and cost nothing to skip. New Folder, Colour, Move Into
+  Folder, Move Out Of Folder and Collapse are on the track's context menu.
+- **A folder holds tracks, not clips.** Placing one on a folder row is
+  refused with a sentence, and dragging a clip onto one clamps the whole
+  drag's rows the way running off the end of the track list already did.
 
 ### Playlist — a clip can be pinned in place — 2026-08-23
 

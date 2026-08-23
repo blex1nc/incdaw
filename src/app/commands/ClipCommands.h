@@ -11,6 +11,7 @@
 namespace incdaw::app {
 
 using project::Clip;
+using project::Track;
 using project::EntityId;
 using project::Tick;
 
