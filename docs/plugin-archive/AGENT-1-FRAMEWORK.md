@@ -89,6 +89,36 @@ there is a one-line change then.
 
 ## Wave 2 — Drawn and interactive widgets
 
+**Increment 1 — the draggable curve — DONE 2026-08-24.** `drawable-curve` is
+now a control, not a picture. What landed:
+
+- Vocabulary extension (published in `00-CONTRACTS.md` §4): `DeviceUiPoint`
+  with `x`/`y`/`z` parameter ids, `DeviceUiWidget::xAxis`/`yAxis`/`points`,
+  and the `withAxes` / `withPoints` modifiers. Additive; nothing renamed.
+- `app/devices/DeviceUiPlot.{h,cpp}` — the AppKit-free half: `plotAxes`
+  resolves the widget's axes over the renderer's defaults, `axisPositionX/Y`
+  and `axisValueX/Y` are the two directions of one arithmetic, `handleRect`
+  places a handle, `handleAt` grabs the nearest inside `plot::grabRadius`,
+  `handleDrag` returns one constrained `DeviceUiWrite` per axis, and
+  `handleScroll` moves `z` by `plot::scrollTravel` of its own range per tick.
+- `ui/macos/DevicePanel.mm` — the grid, the curve and the handles are drawn
+  from the SAME resolved axes; drag moves a band, ⌥-free vertical is its
+  gain, the wheel over a handle is its Q, double-click resets the axes the
+  point moves, and a scroll that grabs nothing is passed to the scroll view.
+  The panel's validation walk now covers `points` as well as `parameters`,
+  so a spec naming an id the device lacks falls back rather than shipping a
+  dead handle.
+- `incdaw.tone` states ±18 dB and three handles; the mid band carries `midQ`.
+- Tests: four cases in `tests/unit/DeviceUiTests.cpp` (axes resolution and
+  handle placement, a drag writing both axes inside the table and pinning at
+  the ends, the wheel's tick, nearest-wins hit testing). 763 cases green,
+  zero warnings, layering clean.
+
+**Still to come in this wave:** `xy-pad`, `envelope`, `step-grid`,
+`pad-grid`, `keyboard`, `zone-map`, `scope`, `spectrum`, `goniometer`,
+`matrix`, `waveform` — and the lock-free snapshot the displays need.
+
+
 `drawable-curve` (EQ curve, transfer curve, gate curves — draggable points,
 tension) · `xy-pad` (with recordable path) · `envelope` (ADSR + multipoint) ·
 `step-grid` · `pad-grid` · `keyboard` · `zone-map` · `scope` · `spectrum` ·

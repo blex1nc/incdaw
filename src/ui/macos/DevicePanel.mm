@@ -1,6 +1,7 @@
 #import "ui/macos/DevicePanel.h"
 
 #include "app/devices/DeviceUiLayout.h"
+#include "app/devices/DeviceUiPlot.h"
 #include "app/devices/DeviceUiValue.h"
 #include "engine/dsp/effects/ToneEffects.h"
 #include "ui/ThemePalette.h"
@@ -36,7 +37,7 @@ constexpr double maxPlotHz = 20000.0;
 
 const void* panelOwnerKey = &panelOwnerKey;
 
-enum class Drag { none, knob, slider, fader };
+enum class Drag { none, knob, slider, fader, handle };
 
 NSColor* inkForToken(const std::string& token, Ink fallback)
 {
@@ -72,6 +73,7 @@ NSString* text(const std::string& value)
     Drag          _drag;
     std::size_t   _dragItem;
     std::size_t   _dragFader;
+    std::size_t   _dragHandle;   ///< which of the widget's points is held
     std::uint32_t _dragParameter;
     double        _dragStartValue;
     NSPoint       _dragStartPoint;
@@ -128,6 +130,63 @@ NSString* text(const std::string& value)
 - (const app::DeviceUiParameter*)firstParameterOf:(const app::DeviceUiWidget&)widget
 {
     return widget.parameters.empty() ? nullptr : [self parameterFor:widget.parameters.front()];
+}
+
+/// A layout y as a view y: the flip `rectFor:` makes, for one coordinate.
+- (CGFloat)viewYFor:(double)y
+{
+    return self.bounds.size.height - static_cast<CGFloat>(y);
+}
+
+/// The drawing area inside a drawn widget's cell — the well's own padding
+/// taken off. Everything about a plot (its grid, its curve, its handles and
+/// the mouse) is measured in here.
+- (app::DeviceUiRect)plotRectOf:(const app::DeviceUiPlacement&)item
+{
+    app::DeviceUiRect rect = item.control;
+    rect.x += 6.0;
+    rect.y += 6.0;
+    rect.width  = std::max(0.0, rect.width - 12.0);
+    rect.height = std::max(0.0, rect.height - 12.0);
+    return rect;
+}
+
+/// The axes a drawn widget is plotted against: its own where it states them,
+/// else the renderer's response-curve defaults.
+- (app::DeviceUiAxes)axesOf:(const app::DeviceUiWidget&)widget
+{
+    app::DeviceUiAxes fallback;
+    fallback.x = {minPlotHz, maxPlotHz, app::DeviceSkew::logarithmic, 0.0};
+    fallback.y = {-displayDb, displayDb, app::DeviceSkew::linear, 0.0};
+
+    return app::plotAxes(widget, fallback);
+}
+
+/// The live value of a parameter, for the placing arithmetic. An id the
+/// device does not carry reads as zero; the panel refuses such a spec at
+/// build time, so this is a floor, not a policy.
+- (std::function<double(std::uint32_t)>)valueLookup
+{
+    return [self](std::uint32_t id) -> double {
+        const app::DeviceUiParameter* parameter = [self parameterFor:id];
+        return parameter != nullptr ? parameter->value : 0.0;
+    };
+}
+
+- (std::function<const app::DeviceUiParameter*(std::uint32_t)>)parameterLookup
+{
+    return [self](std::uint32_t id) -> const app::DeviceUiParameter* {
+        return [self parameterFor:id];
+    };
+}
+
+/// Applies what a gesture produced. One write per axis, each already
+/// constrained by app/devices/DeviceUiPlot.cpp.
+- (void)apply:(const std::vector<app::DeviceUiWrite>&)writes
+       widget:(const app::DeviceUiWidget&)widget
+{
+    for (const app::DeviceUiWrite& write : writes)
+        [self write:write.id value:write.value widget:widget];
 }
 
 // ── Drawing ──────────────────────────────────────────────────────────────────
@@ -340,6 +399,10 @@ NSString* text(const std::string& value)
 /// The response curve, plotted from the engine's own band design when the
 /// widget carries the EQ's seven parameters; any other plot is a well with
 /// its name until the renderer learns it.
+///
+/// The grid, the curve and the handles are all placed on the SAME resolved
+/// axes (app::plotAxes), so a handle cannot float off the line it belongs to
+/// when a spec states axes of its own.
 - (void)drawCurve:(const app::DeviceUiPlacement&)item
 {
     const app::DeviceUiWidget& widget = *item.widget;
@@ -365,50 +428,53 @@ NSString* text(const std::string& value)
         return;
     }
 
-    const NSRect  plot  = NSInsetRect(well, 6.0, 6.0);
-    const CGFloat midY  = NSMidY(plot);
-    const CGFloat scale = plot.size.height / 2.0 / displayDb;
-
-    const auto xForHz = [&](double hz) {
-        const double t = std::log(hz / minPlotHz) / std::log(maxPlotHz / minPlotHz);
-        return NSMinX(plot) + plot.size.width * static_cast<CGFloat>(t);
-    };
+    const app::DeviceUiRect plot = [self plotRectOf:item];
+    const app::DeviceUiAxes axes = [self axesOf:widget];
 
     static const double decades[] = {50, 100, 200, 500, 1000, 2000, 5000, 10000};
 
     for (double hz : decades) {
-        const bool    labelled = hz == 100.0 || hz == 1000.0 || hz == 10000.0;
-        const CGFloat x        = xForHz(hz);
+        if (hz < axes.x.min || hz > axes.x.max)
+            continue;
 
-        theme::fillRect(NSMakeRect(x, NSMinY(plot), 1.0, plot.size.height),
+        const bool    labelled = hz == 100.0 || hz == 1000.0 || hz == 10000.0;
+        const CGFloat x        = static_cast<CGFloat>(app::axisPositionX(hz, axes.x, plot));
+
+        theme::fillRect(NSMakeRect(x, [self viewYFor:plot.bottom()], 1.0, plot.height),
                         theme::ink(labelled ? Ink::gridLineStrong : Ink::gridLine));
 
         if (labelled)
             theme::drawTextCentred(hz >= 1000.0 ? [NSString stringWithFormat:@"%.0fk", hz / 1000.0]
                                                 : [NSString stringWithFormat:@"%.0f", hz],
-                                   NSMakeRect(x - 24.0, NSMinY(plot), 48.0, 12.0),
+                                   NSMakeRect(x - 24.0, [self viewYFor:plot.bottom()], 48.0, 12.0),
                                    theme::ink(Ink::textDim), theme::numericFont(9.0),
                                    theme::Align::centre);
     }
 
-    for (double db : {-12.0, 0.0, 12.0}) {
-        const CGFloat y = midY + static_cast<CGFloat>(db) * scale;
-        theme::fillRect(NSMakeRect(NSMinX(plot), y, plot.size.width, 1.0),
+    // Half-way to each end, and the zero line the shelves hinge on.
+    const double half = axes.y.max / 2.0;
+
+    for (double db : {-half, 0.0, half}) {
+        const CGFloat y = [self viewYFor:app::axisPositionY(db, axes.y, plot)];
+        theme::fillRect(NSMakeRect(plot.x, y, plot.width, 1.0),
                         theme::ink(db == 0.0 ? Ink::gridLineStrong : Ink::gridLine));
     }
 
     NSBezierPath* curve = [NSBezierPath bezierPath];
     NSBezierPath* under = [NSBezierPath bezierPath];
 
-    for (CGFloat x = NSMinX(plot); x <= NSMaxX(plot); x += 1.0) {
-        const double t  = (x - NSMinX(plot)) / plot.size.width;
-        const double hz = minPlotHz * std::pow(maxPlotHz / minPlotHz, t);
-        const double db = std::clamp(dsp::eqMagnitudeDb(params, _sampleRate, hz), -displayDb,
-                                     displayDb);
+    const CGFloat left  = static_cast<CGFloat>(plot.x);
+    const CGFloat right = static_cast<CGFloat>(plot.right());
+    const CGFloat midY  = [self viewYFor:app::axisPositionY(0.0, axes.y, plot)];
 
-        const NSPoint point = NSMakePoint(x, midY + static_cast<CGFloat>(db) * scale);
+    for (CGFloat x = left; x <= right; x += 1.0) {
+        const double hz = app::axisValueX(x, axes.x, plot);
+        const double db = std::clamp(dsp::eqMagnitudeDb(params, _sampleRate, hz), axes.y.min,
+                                     axes.y.max);
 
-        if (x == NSMinX(plot)) {
+        const NSPoint point = NSMakePoint(x, [self viewYFor:app::axisPositionY(db, axes.y, plot)]);
+
+        if (x == left) {
             [curve moveToPoint:point];
             [under moveToPoint:NSMakePoint(x, midY)];
             [under lineToPoint:point];
@@ -418,7 +484,7 @@ NSString* text(const std::string& value)
         }
     }
 
-    [under lineToPoint:NSMakePoint(NSMaxX(plot), midY)];
+    [under lineToPoint:NSMakePoint(right, midY)];
     [under closePath];
 
     NSColor* accent = inkForToken(widget.tint, Ink::accent);
@@ -428,6 +494,48 @@ NSString* text(const std::string& value)
     curve.lineWidth = 2.0;
     [accent setStroke];
     [curve stroke];
+
+    [self drawHandlesOf:item axes:axes plot:plot accent:accent];
+}
+
+/// A band's handle: a filled disc with a ring, its name under it. The held
+/// one is drawn larger, so a drag is legible without a readout.
+- (void)drawHandlesOf:(const app::DeviceUiPlacement&)item
+                 axes:(const app::DeviceUiAxes&)axes
+                 plot:(const app::DeviceUiRect&)plot
+               accent:(NSColor*)accent
+{
+    const app::DeviceUiWidget& widget = *item.widget;
+    const std::function<double(std::uint32_t)> valueOf = [self valueLookup];
+
+    for (std::size_t index = 0; index < widget.points.size(); ++index) {
+        const app::DeviceUiRect cell =
+            app::handleRect(widget.points[index], axes, plot, valueOf);
+
+        const bool held = _drag == Drag::handle && _dragItem < _layout.items.size()
+                       && _layout.items[_dragItem].widget == item.widget && _dragHandle == index;
+
+        const CGFloat grow = held ? 2.0 : 0.0;
+        const NSRect  disc = NSInsetRect(NSMakeRect(cell.x, [self viewYFor:cell.bottom()],
+                                                    cell.width, cell.height),
+                                         -grow, -grow);
+
+        NSBezierPath* path = [NSBezierPath bezierPathWithOvalInRect:disc];
+
+        [accent setFill];
+        [path fill];
+
+        path.lineWidth = 1.5;
+        [theme::ink(Ink::panel) setStroke];
+        [path stroke];
+
+        if (!widget.points[index].label.empty())
+            theme::drawTextCentred(text(widget.points[index].label),
+                                   NSMakeRect(NSMidX(disc) - 24.0, NSMinY(disc) - 12.0, 48.0,
+                                              11.0),
+                                   theme::ink(Ink::textDim), theme::labelFont(9.0),
+                                   theme::Align::centre);
+    }
 }
 
 // ── Editing ──────────────────────────────────────────────────────────────────
@@ -553,6 +661,31 @@ NSString* text(const std::string& value)
         [self popUpComboFor:item at:event];
         return;
 
+    case app::DeviceWidget::drawableCurve: {
+        const app::DeviceUiRect plot = [self plotRectOf:item];
+        const app::DeviceUiAxes axes = [self axesOf:widget];
+
+        const std::optional<std::size_t> handle =
+            app::handleAt(widget, axes, plot, point.x, point.y, [self valueLookup]);
+
+        // A curve with no handle under the pointer is a picture, not a
+        // control: the click does nothing rather than jumping a band.
+        if (!handle.has_value())
+            return;
+
+        if (event.clickCount == 2) {
+            [self resetHandle:widget.points[*handle] widget:widget];
+            return;
+        }
+
+        _drag       = Drag::handle;
+        _dragItem   = index;
+        _dragHandle = *handle;
+
+        self.needsDisplay = YES;
+        return;
+    }
+
     case app::DeviceWidget::faderWall: {
         const std::size_t fader = [self faderIndexAt:point item:item];
         if (fader >= widget.parameters.size())
@@ -608,6 +741,18 @@ NSString* text(const std::string& value)
         return;
     }
 
+    case Drag::handle: {
+        const app::DeviceUiWidget& widget = *item.widget;
+        if (_dragHandle >= widget.points.size())
+            return;
+
+        [self apply:app::handleDrag(widget.points[_dragHandle], widget, [self axesOf:widget],
+                                    [self plotRectOf:item], point.x, point.y,
+                                    [self parameterLookup])
+             widget:widget];
+        return;
+    }
+
     case Drag::none:
         return;
     }
@@ -616,7 +761,58 @@ NSString* text(const std::string& value)
 - (void)mouseUp:(NSEvent*)event
 {
     (void)event;
-    _drag = Drag::none;
+    _drag             = Drag::none;
+    self.needsDisplay = YES;   // the held handle shrinks back
+}
+
+/// The wheel over a handle moves its third axis — a band's Q, a point's
+/// tension — along its own travel, so one tick is the same gesture whatever
+/// the parameter is. Over anything else the scroll belongs to the panel's
+/// scroll view, so it is passed on.
+- (void)scrollWheel:(NSEvent*)event
+{
+    const NSPoint     point = [self layoutPointFor:event];
+    const std::size_t index = [self itemAt:point inset:6.0];
+
+    if (index >= _layout.items.size()
+        || _layout.items[index].widget->kind != app::DeviceWidget::drawableCurve) {
+        [super scrollWheel:event];
+        return;
+    }
+
+    const app::DeviceUiPlacement& item   = _layout.items[index];
+    const app::DeviceUiWidget&    widget = *item.widget;
+
+    const std::optional<std::size_t> handle =
+        app::handleAt(widget, [self axesOf:widget], [self plotRectOf:item], point.x, point.y,
+                      [self valueLookup]);
+
+    if (!handle.has_value()) {
+        [super scrollWheel:event];
+        return;
+    }
+
+    const std::vector<app::DeviceUiWrite> writes =
+        app::handleScroll(widget.points[*handle], widget, event.scrollingDeltaY,
+                          [self parameterLookup]);
+
+    if (writes.empty()) {
+        [super scrollWheel:event];
+        return;
+    }
+
+    [self apply:writes widget:widget];
+}
+
+/// Double-clicking a handle puts the axes it moves back to the table's
+/// defaults. Its `z` is left alone: the wheel is a separate gesture.
+- (void)resetHandle:(const app::DeviceUiPoint&)handle
+             widget:(const app::DeviceUiWidget&)widget
+{
+    for (const std::optional<std::uint32_t>& id : {handle.x, handle.y})
+        if (id.has_value())
+            if (const app::DeviceUiParameter* parameter = [self parameterFor:*id])
+                [self write:*id value:app::resetValue(widget, *parameter) widget:widget];
 }
 
 - (void)applySliderAt:(NSPoint)point item:(const app::DeviceUiPlacement&)item
@@ -793,6 +989,15 @@ NSString* text(const std::string& value)
             for (std::uint32_t id : widget.parameters)
                 if (view->_params.count(id) == 0)
                     return false;
+
+            // A handle's axes are parameters too: a point naming an id the
+            // device lacks would ship as a control that writes nowhere, so
+            // the whole spec falls back to the generic panel instead.
+            for (const app::DeviceUiPoint& point : widget.points)
+                for (const std::optional<std::uint32_t>& id : {point.x, point.y, point.z})
+                    if (id.has_value() && view->_params.count(*id) == 0)
+                        return false;
+
             for (const app::DeviceUiWidget& child : widget.children)
                 if (!resolvable(child))
                     return false;

@@ -2,6 +2,8 @@
 
 #include "engine/dsp/effects/ToneEffects.h"
 
+#include <optional>
+
 namespace incdaw::app {
 
 namespace {
@@ -14,6 +16,10 @@ const DeviceUiSpec& toneSpec()
         using namespace widgets;
 
         const DeviceUiRange hz{20.0, 20000.0, DeviceSkew::logarithmic, 0.0};
+
+        // The curve's vertical axis. ±18 dB shows the whole of the EQ's
+        // range without the shelves running off the top.
+        constexpr double displayDb = 18.0;
 
         DeviceUiSpec s;
         s.uid             = "incdaw.tone";
@@ -28,7 +34,17 @@ const DeviceUiSpec& toneSpec()
                   {Eq::lowFreq, Eq::lowGainDb, Eq::midFreq, Eq::midGainDb, Eq::midQ,
                    Eq::highFreq, Eq::highGainDb},
                   "", "eq-response")
-                .withTint("accent"),
+                .withTint("accent")
+                // The curve is drawn against these two, and the three band
+                // handles are placed on them — one source, so a handle can
+                // never float off the curve it belongs to.
+                .withAxes(hz, {-displayDb, displayDb, DeviceSkew::linear, 0.0})
+                // Drag a band by its handle: sideways is its frequency, up
+                // and down is its gain, and the wheel over the mid widens or
+                // narrows its Q. The shelves have no Q to reach.
+                .withPoints({{Eq::lowFreq, Eq::lowGainDb, std::nullopt, "LOW"},
+                             {Eq::midFreq, Eq::midGainDb, Eq::midQ, "MID"},
+                             {Eq::highFreq, Eq::highGainDb, std::nullopt, "HIGH"}}),
 
             grid(3, {knob(Eq::lowGainDb, "BASS").withUnit("dB").asBipolar(),
                      knob(Eq::midGainDb, "MID").withUnit("dB").asBipolar(),

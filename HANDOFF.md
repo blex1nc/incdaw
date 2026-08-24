@@ -1709,6 +1709,26 @@ recording and the Audio Logger all work. What remains in it is polish):
     - NOT VERIFIED: pixel parity against the deleted panel. The tests
       state the geometry; no side-by-side screenshot was taken.
 
+  PLUGIN ARCHIVE WAVE 2 IS IN PROGRESS (2026-08-24): the drawn widgets
+  become controls. Increment 1 — the response curve — is done.
+    - Vocabulary extension, published in 00-CONTRACTS.md §4: a drawn
+      widget carries xAxis/yAxis (the ranges it is plotted against) and
+      points (DeviceUiPoint: one parameter id per axis, x/y dragged and z
+      scrolled). Additive; nothing renamed.
+    - app/devices/DeviceUiPlot.{h,cpp}: plotAxes, axisPositionX/Y and
+      axisValueX/Y, handleRect, handleAt (nearest inside grabRadius),
+      handleDrag (one constrained write per axis) and handleScroll. No
+      AppKit, so a gesture is a test.
+    - The renderer draws grid, curve AND handles from the SAME resolved
+      axes. Do not reintroduce a second source for either: a handle
+      floats off its curve the moment a spec states its own axes.
+    - A point naming an id the device lacks makes the whole spec fall
+      back to the generic panel, as `parameters` already did.
+    - STILL TO COME: xy-pad, envelope, step-grid, pad-grid, keyboard,
+      zone-map, matrix, waveform, and the lock-free snapshot the scope,
+      spectrum and goniometer need (they must never read engine state
+      under a lock).
+
   UI BUILD-OUT INCREMENT 2 IS DONE (2026-08-16): the generic insert
   parameter panel — the ten builtin effects have a UI, and "Open
   Editor" never dead-ends.

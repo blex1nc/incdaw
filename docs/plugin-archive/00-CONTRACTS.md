@@ -185,9 +185,13 @@ struct DeviceUiWidget {
     DeviceWidget kind;  std::string label;  std::vector<std::uint32_t> parameters;
     std::optional<DeviceUiRange> range;  std::string unit, tint, plot;
     std::vector<std::string> choices;  std::uint16_t columns, rows;
+    std::optional<DeviceUiRange> xAxis, yAxis;   // drawn widgets: the plot's axes
+    std::vector<DeviceUiPoint>   points;         // drawn widgets: its draggable handles
     bool bipolar, collapsed;  std::vector<DeviceUiWidget> children;
-    // chainable: withRange, withUnit, withTint, withPlot, asBipolar, startCollapsed
+    // chainable: withRange, withUnit, withTint, withPlot, withAxes, withPoints,
+    //            asBipolar, startCollapsed
 };
+struct DeviceUiPoint { std::optional<std::uint32_t> x, y, z; std::string label; };
 struct DeviceUiSpec { std::string uid, title; double preferredWidth, preferredHeight;
                       std::vector<DeviceUiWidget> root; std::string customView; };
 namespace widgets { knob, slider, toggle, combo, drawn, meter, label,
@@ -212,6 +216,34 @@ is deleted and `incdaw.tone` now opens through the renderer. Wave 1 draws
 `combo`, `meter` and the `eq-response` curve. **A spec may name a widget the
 renderer does not draw yet** — it lays out as a labelled well and the panel
 still opens, so Agents 2 and 3 need not wait for Wave 2.
+
+**Vocabulary extension (Agent 1, Wave 2, 2026-08-24) — additive, nothing
+renamed or removed.** A drawn widget can now say where its handles are:
+
+- `DeviceUiPoint { optional<uint32_t> x, y, z; string label; }` — one
+  draggable handle. Each axis names the parameter that axis writes; an axis
+  the point leaves unset does not move, and the handle sits centred on it.
+  `z` is the SCROLL axis (a band's Q, a point's tension). The ids are
+  `optional` rather than 0-as-sentinel because 0 is a real parameter id.
+- `DeviceUiWidget::xAxis` / `yAxis` — the ranges, with skew, the widget is
+  plotted against. Unset takes the renderer's own defaults for that `plot`.
+  **State them if the widget has points:** the renderer draws its grid and
+  its curve on exactly these, so stating them is what keeps a handle on the
+  line it belongs to.
+- `DeviceUiWidget::points` — the handles, in drawing order.
+- Chainable `withAxes(horizontal, vertical)` and `withPoints({...})`.
+
+The arithmetic is `app/devices/DeviceUiPlot.h`, and it is where a panel's
+gestures are tested without a window server: `plotAxes` resolves the pair,
+`handleRect` places a handle, `handleAt` grabs the nearest one within
+`plot::grabRadius`, `handleDrag` returns one already-constrained
+`DeviceUiWrite` per axis, and `handleScroll` moves `z` by
+`plot::scrollTravel` of its own range per tick. A point naming an id the
+device does not carry makes the WHOLE spec fall back to the generic panel,
+the same rule `parameters` already had — a dead handle never ships.
+
+`incdaw.tone` is the worked example: `.withAxes(20 Hz…20 kHz log, ±18 dB)`
+and three points, the mid band carrying `midQ` as its `z`.
 
 **Escape hatch:** `DeviceUiSpec::customView` names a bespoke Objective-C++
 view for surfaces the vocabulary genuinely cannot carry. Budget: **≤ 8

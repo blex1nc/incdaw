@@ -8,6 +8,23 @@ public version yet.
 
 ## [Unreleased]
 
+### Plugin archive, Wave 2 — the response curve becomes a control — 2026-08-24
+
+- **Drag a band by its point.** The Tone panel's EQ curve carries three
+  handles: sideways is the band's frequency, up and down is its gain, the
+  wheel over the mid band is its Q, and a double-click puts the point back
+  to the table's defaults. A click away from every handle does nothing —
+  the curve stays a picture where it is not a control.
+- **A spec says where its handles are.** `DeviceUiPoint` names one parameter
+  per axis and `withAxes` states the ranges the widget is plotted against;
+  the renderer draws its grid, its curve and its handles from that same
+  resolved pair, so a handle cannot float off its own line. The arithmetic
+  is `app/devices/DeviceUiPlot.cpp` and holds no AppKit, so "dragging MID a
+  quarter along writes that frequency" is a test rather than an eyeball.
+- **A dead handle cannot ship.** A point naming a parameter the device does
+  not carry makes the whole spec fall back to the generic slider panel — the
+  rule `parameters` already had, now covering `points` too.
+
 ### Plugin archive, Wave 1 — a device's editor is a spec, not a view — 2026-08-24
 
 - **One renderer for every device panel.** `INCDAWDevicePanel` draws any

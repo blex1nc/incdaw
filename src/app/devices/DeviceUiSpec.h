@@ -68,6 +68,18 @@ struct DeviceUiRange {
     double     step = 0.0;   ///< 0 = continuous
 };
 
+/// One draggable handle on a drawn widget (a curve's band, an envelope's
+/// corner, an xy-pad's dot). Each axis names the parameter that axis writes;
+/// an axis without one does not move. WHERE the handle sits is arithmetic
+/// on the widget's `xAxis`/`yAxis`, so it is the same in the renderer and in
+/// a test — see app/devices/DeviceUiPlot.h.
+struct DeviceUiPoint {
+    std::optional<std::uint32_t> x;   ///< horizontal drag writes this
+    std::optional<std::uint32_t> y;   ///< vertical drag writes this
+    std::optional<std::uint32_t> z;   ///< the scroll wheel writes this (a band's Q, a point's tension)
+    std::string label;                ///< drawn beside the handle ("LOW", "MID", ...)
+};
+
 /// One node of the tree.
 struct DeviceUiWidget {
     DeviceWidget kind = DeviceWidget::knob;
@@ -79,6 +91,10 @@ struct DeviceUiWidget {
     std::string tint;                         ///< theme ink token ("accent", "midi", "audio", ...); "" = the panel default
     std::string plot;                         ///< drawn widgets: what the renderer plots ("eq-response", "transfer", "gate", "sample", ...)
     std::vector<std::string> choices;         ///< combo: names of the stepped values, in value order
+
+    std::optional<DeviceUiRange> xAxis;       ///< drawn widgets: the horizontal axis (a curve's frequency); unset = the renderer's own
+    std::optional<DeviceUiRange> yAxis;       ///< drawn widgets: the vertical axis (a curve's dB); unset = the renderer's own
+    std::vector<DeviceUiPoint>   points;      ///< drawn widgets: the draggable handles, in drawing order
 
     std::uint16_t columns = 0;                ///< grid, fader-wall, step-grid, pad-grid, matrix
     std::uint16_t rows    = 0;                ///< step-grid, pad-grid, matrix
@@ -117,6 +133,19 @@ struct DeviceUiWidget {
     [[nodiscard]] DeviceUiWidget startCollapsed() &&
     {
         collapsed = true;
+        return std::move(*this);
+    }
+    /// The axes a drawn widget is plotted against. Stating them is what makes
+    /// its handles land ON the curve: the renderer plots from the same pair.
+    [[nodiscard]] DeviceUiWidget withAxes(DeviceUiRange horizontal, DeviceUiRange vertical) &&
+    {
+        xAxis = horizontal;
+        yAxis = vertical;
+        return std::move(*this);
+    }
+    [[nodiscard]] DeviceUiWidget withPoints(std::vector<DeviceUiPoint> value) &&
+    {
+        points = std::move(value);
         return std::move(*this);
     }
 };

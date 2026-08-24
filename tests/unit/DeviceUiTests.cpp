@@ -14,12 +14,14 @@
 
 #include "app/devices/DeviceUiCatalogue.h"
 #include "app/devices/DeviceUiLayout.h"
+#include "app/devices/DeviceUiPlot.h"
 #include "app/devices/DeviceUiSpec.h"
 #include "app/devices/DeviceUiValue.h"
 #include "engine/dsp/effects/BuiltinEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
 
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -419,4 +421,220 @@ TEST_CASE("every control of the Tone panel drives a real parameter, end to end")
     }
 
     CHECK(driven == 8);   // the curve, three knobs, four Advanced sliders
+}
+
+// ── Drawn widgets: the handles on a plot ─────────────────────────────────────
+
+namespace {
+
+/// The Tone curve, its axes and its plot rectangle — the three things every
+/// handle gesture is measured against.
+struct CurveUnderTest {
+    const app::DeviceUiWidget*          widget = nullptr;
+    app::DeviceUiAxes                   axes;
+    app::DeviceUiRect                   plot{0.0, 0.0, 400.0, 150.0};
+    std::vector<app::DeviceUiParameter> rows;
+};
+
+[[nodiscard]] CurveUnderTest toneCurve()
+{
+    CurveUnderTest out;
+
+    const app::DeviceUiSpec* spec = app::deviceUiSpec("incdaw.tone");
+    REQUIRE(spec != nullptr);
+    REQUIRE_FALSE(spec->root.empty());
+
+    out.widget = &spec->root[0];
+    REQUIRE(out.widget->kind == app::DeviceWidget::drawableCurve);
+
+    // The renderer's own defaults, which the spec is expected to override.
+    app::DeviceUiAxes fallback;
+    fallback.x = {20.0, 20000.0, app::DeviceSkew::logarithmic, 0.0};
+    fallback.y = {-24.0, 24.0, app::DeviceSkew::linear, 0.0};
+
+    out.axes = app::plotAxes(*out.widget, fallback);
+    out.rows = parametersOf("incdaw.tone");
+    REQUIRE_FALSE(out.rows.empty());
+
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("the curve names its own axes, and its handles sit on the values they carry")
+{
+    const CurveUnderTest curve = toneCurve();
+    using Eq = engine::dsp::EqEffect;
+
+    // The spec states ±18 dB rather than taking the renderer's ±24: stating
+    // axes is what makes a handle land on the line.
+    CHECK(curve.axes.x.skew == app::DeviceSkew::logarithmic);
+    CHECK(curve.axes.y.max == doctest::Approx(18.0));
+    CHECK(curve.axes.y.min == doctest::Approx(-18.0));
+
+    REQUIRE(curve.widget->points.size() == 3);
+    CHECK(curve.widget->points[0].label == "LOW");
+    CHECK(curve.widget->points[1].label == "MID");
+    CHECK(curve.widget->points[2].label == "HIGH");
+
+    // Only the peak band has a width to reach; a shelf has none.
+    CHECK(curve.widget->points[1].z == std::optional<std::uint32_t>{Eq::midQ});
+    CHECK_FALSE(curve.widget->points[0].z.has_value());
+    CHECK_FALSE(curve.widget->points[2].z.has_value());
+
+    // Every id a handle names is one the effect's own table declares.
+    for (const app::DeviceUiPoint& point : curve.widget->points)
+        for (const std::optional<std::uint32_t>& id : {point.x, point.y, point.z})
+            if (id.has_value())
+                CHECK(find(curve.rows, *id) != nullptr);
+
+    const auto valueOf = [&](std::uint32_t id) {
+        const app::DeviceUiParameter* row = find(curve.rows, id);
+        return row != nullptr ? row->value : 0.0;
+    };
+
+    // The MID handle is where its frequency and its gain say it is.
+    const app::DeviceUiRect mid =
+        app::handleRect(curve.widget->points[1], curve.axes, curve.plot, valueOf);
+
+    CHECK(mid.x + mid.width / 2.0
+          == doctest::Approx(app::axisPositionX(valueOf(Eq::midFreq), curve.axes.x, curve.plot)));
+    CHECK(mid.y + mid.height / 2.0
+          == doctest::Approx(app::axisPositionY(valueOf(Eq::midGainDb), curve.axes.y,
+                                                curve.plot)));
+    CHECK(mid.width == doctest::Approx(app::plot::handleSize));
+
+    // A gain of 0 dB is the middle of a symmetric axis, and the axis is
+    // inverted: more dB is FURTHER UP, which is a smaller layout y.
+    CHECK(app::axisPositionY(0.0, curve.axes.y, curve.plot)
+          == doctest::Approx(curve.plot.y + curve.plot.height / 2.0));
+    CHECK(app::axisPositionY(12.0, curve.axes.y, curve.plot)
+          < app::axisPositionY(-12.0, curve.axes.y, curve.plot));
+
+    // An axis a point does not name has nowhere to be but the middle.
+    app::DeviceUiPoint vertical;
+    vertical.y = Eq::midGainDb;
+    const app::DeviceUiRect only =
+        app::handleRect(vertical, curve.axes, curve.plot, valueOf);
+    CHECK(only.x + only.width / 2.0 == doctest::Approx(curve.plot.x + curve.plot.width / 2.0));
+}
+
+TEST_CASE("dragging a band writes its frequency and its gain, both inside the table")
+{
+    const CurveUnderTest curve = toneCurve();
+    using Eq = engine::dsp::EqEffect;
+
+    const auto parameterOf = [&](std::uint32_t id) { return find(curve.rows, id); };
+
+    // Drag the MID handle a quarter along and a quarter up.
+    const double x = curve.plot.x + curve.plot.width * 0.25;
+    const double y = curve.plot.y + curve.plot.height * 0.25;
+
+    const std::vector<app::DeviceUiWrite> writes = app::handleDrag(
+        curve.widget->points[1], *curve.widget, curve.axes, curve.plot, x, y, parameterOf);
+
+    REQUIRE(writes.size() == 2);
+    CHECK(writes[0].id == Eq::midFreq);
+    CHECK(writes[1].id == Eq::midGainDb);
+
+    CHECK(writes[0].value == doctest::Approx(app::axisValueX(x, curve.axes.x, curve.plot)));
+    CHECK(writes[1].value > 0.0);   // a quarter DOWN the rect is above the zero line
+
+    for (const app::DeviceUiWrite& write : writes) {
+        const app::DeviceUiParameter* row = parameterOf(write.id);
+        REQUIRE(row != nullptr);
+        CHECK(write.value >= row->minValue);
+        CHECK(write.value <= row->maxValue);
+    }
+
+    // A drag that leaves the plot pins the band at the end of its axis
+    // rather than running away with the parameter.
+    const std::vector<app::DeviceUiWrite> escaped =
+        app::handleDrag(curve.widget->points[1], *curve.widget, curve.axes, curve.plot,
+                        curve.plot.x - 500.0, curve.plot.y - 500.0, parameterOf);
+
+    REQUIRE(escaped.size() == 2);
+    CHECK(escaped[0].value == doctest::Approx(std::max(curve.axes.x.min,
+                                                       parameterOf(Eq::midFreq)->minValue)));
+    CHECK(escaped[1].value == doctest::Approx(std::min(curve.axes.y.max,
+                                                       parameterOf(Eq::midGainDb)->maxValue)));
+
+    // An axis the device does not carry is simply not written — a spec that
+    // outran its device drags nothing rather than writing the wrong id.
+    const std::vector<app::DeviceUiWrite> none =
+        app::handleDrag(curve.widget->points[1], *curve.widget, curve.axes, curve.plot, x, y,
+                        [](std::uint32_t) -> const app::DeviceUiParameter* { return nullptr; });
+    CHECK(none.empty());
+}
+
+TEST_CASE("the wheel widens the band under it, and leaves a shelf alone")
+{
+    const CurveUnderTest curve = toneCurve();
+    using Eq = engine::dsp::EqEffect;
+
+    const auto parameterOf = [&](std::uint32_t id) { return find(curve.rows, id); };
+    const app::DeviceUiParameter* q = parameterOf(Eq::midQ);
+    REQUIRE(q != nullptr);
+
+    const std::vector<app::DeviceUiWrite> up =
+        app::handleScroll(curve.widget->points[1], *curve.widget, 1.0, parameterOf);
+
+    REQUIRE(up.size() == 1);
+    CHECK(up[0].id == Eq::midQ);
+    CHECK(up[0].value > q->value);
+
+    // One tick is one tick of the parameter's OWN travel, whatever it is.
+    app::DeviceUiRange range;
+    range.min = q->minValue;
+    range.max = q->maxValue;
+    CHECK(app::toNormalised(up[0].value, range)
+          == doctest::Approx(app::toNormalised(q->value, range) + app::plot::scrollTravel));
+
+    const std::vector<app::DeviceUiWrite> down =
+        app::handleScroll(curve.widget->points[1], *curve.widget, -1.0, parameterOf);
+    REQUIRE(down.size() == 1);
+    CHECK(down[0].value < q->value);
+
+    // A shelf has no width to change, and a wheel that did not turn writes
+    // nothing at all — the panel passes the scroll on to its scroll view.
+    CHECK(app::handleScroll(curve.widget->points[0], *curve.widget, 1.0, parameterOf).empty());
+    CHECK(app::handleScroll(curve.widget->points[1], *curve.widget, 0.0, parameterOf).empty());
+}
+
+TEST_CASE("the nearest handle wins, and a click away from all of them grabs none")
+{
+    const CurveUnderTest curve = toneCurve();
+
+    const auto valueOf = [&](std::uint32_t id) {
+        const app::DeviceUiParameter* row = find(curve.rows, id);
+        return row != nullptr ? row->value : 0.0;
+    };
+
+    for (std::size_t index = 0; index < curve.widget->points.size(); ++index) {
+        const app::DeviceUiRect cell =
+            app::handleRect(curve.widget->points[index], curve.axes, curve.plot, valueOf);
+
+        const std::optional<std::size_t> hit =
+            app::handleAt(*curve.widget, curve.axes, curve.plot, cell.x + cell.width / 2.0,
+                          cell.y + cell.height / 2.0, valueOf);
+
+        REQUIRE(hit.has_value());
+        CHECK(*hit == index);
+    }
+
+    // Far from every band: the curve is a picture there, and the click must
+    // not jump the nearest band to the pointer.
+    const app::DeviceUiRect low =
+        app::handleRect(curve.widget->points[0], curve.axes, curve.plot, valueOf);
+
+    CHECK_FALSE(app::handleAt(*curve.widget, curve.axes, curve.plot,
+                              low.x + low.width / 2.0 + app::plot::grabRadius * 3.0,
+                              low.y + low.height / 2.0 + app::plot::grabRadius * 3.0, valueOf)
+                    .has_value());
+
+    // A widget with no points has nothing to grab, at any position.
+    app::DeviceUiWidget bare;
+    bare.kind = app::DeviceWidget::drawableCurve;
+    CHECK_FALSE(app::handleAt(bare, curve.axes, curve.plot, curve.plot.x, curve.plot.y, valueOf)
+                    .has_value());
 }

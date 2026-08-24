@@ -166,6 +166,7 @@ add_library(incdaw_app STATIC
     app/PlaylistModel.cpp
     app/devices/DeviceUiCatalogue.cpp
     app/devices/DeviceUiLayout.cpp
+    app/devices/DeviceUiPlot.cpp
     app/devices/DeviceUiValue.cpp
     app/devices/TonePanels.cpp
     # <<< incdaw:sources:app-panels — one line per family (Agents 2 and 3)
