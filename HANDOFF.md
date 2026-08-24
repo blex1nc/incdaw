@@ -1685,6 +1685,30 @@ recording and the Audio Logger all work. What remains in it is polish):
     dirty — invisible to the shell until clap_host_state.mark_dirty
     lands (PLUGIN_HOST §6 host-callback work).
 
+  PLUGIN ARCHIVE WAVE 1 IS DONE (2026-08-24): a device's editor is a
+  SPEC, not a view. "Open Editor" asks app::deviceUiSpec(uid); adding a
+  device's face never touches main.mm again.
+    - ui/macos/DevicePanel.{h,mm}: one renderer for any DeviceUiSpec.
+      Same discipline as the generic panel — row DATA and a write block,
+      never an engine pointer. refreshWindow:values: follows automation,
+      MIDI knobs and undo, and is ignored while the mouse is down.
+    - app/devices/DeviceUiLayout.{h,cpp} (geometry, in points) and
+      app/devices/DeviceUiValue.{h,cpp} (travel<->value, the stepped
+      round, the bipolar zero detent, the readout's text) hold NO
+      AppKit, which is what lets a panel be checked without a window
+      server — tests/unit/DeviceUiTests.cpp.
+    - Widgets drawn today: section, row, grid, label, knob, slider,
+      fader-wall, toggle, combo, meter, eq-response curve. A spec naming
+      anything else STILL OPENS, as a labelled well (Wave 2 draws them),
+      so Agents 2 and 3 may ship specs ahead of the renderer.
+    - TonePanel.{h,mm} deleted; incdaw.tone is 58 lines of spec in
+      app/devices/TonePanels.cpp. The vocabulary needed no extension.
+    - DEFERRED ON PURPOSE: openInstrumentPanelForChannel: still opens
+      the generic sliders. Instruments get specs when Agent 3 writes
+      them; the dispatch there is then a one-line change.
+    - NOT VERIFIED: pixel parity against the deleted panel. The tests
+      state the geometry; no side-by-side screenshot was taken.
+
   UI BUILD-OUT INCREMENT 2 IS DONE (2026-08-16): the generic insert
   parameter panel — the ten builtin effects have a UI, and "Open
   Editor" never dead-ends.
