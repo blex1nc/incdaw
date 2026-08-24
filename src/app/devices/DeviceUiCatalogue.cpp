@@ -1,5 +1,6 @@
 #include "app/devices/DeviceUiCatalogue.h"
 
+#include "app/devices/TonePanels.h"
 // <<< incdaw:registrars:panels:include — one line per family (Agents 2 and 3)
 // >>> incdaw:registrars:panels:include
 
@@ -10,6 +11,7 @@ const std::vector<const DeviceUiSpec*>& deviceUiSpecs()
     static const std::vector<const DeviceUiSpec*> specs = [] {
         std::vector<const DeviceUiSpec*> rows;
 
+        registerTonePanels(rows);
         // <<< incdaw:registrars:panels — one line per family (Agents 2 and 3)
         // >>> incdaw:registrars:panels
 

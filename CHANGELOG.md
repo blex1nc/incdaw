@@ -8,6 +8,31 @@ public version yet.
 
 ## [Unreleased]
 
+### Plugin archive, Wave 1 — a device's editor is a spec, not a view — 2026-08-24
+
+- **One renderer for every device panel.** `INCDAWDevicePanel` draws any
+  `DeviceUiSpec`: sections that fold, grids, labels, knobs, sliders, fader
+  walls, toggles, combos, meters, and the EQ response curve. It keeps row
+  data and a write block and never an engine pointer, so it survives the
+  graph rebuild every edit causes; it follows automation, MIDI knobs and
+  undo through `refreshWindow:values:`, ignores a refresh while the mouse is
+  down so it cannot fight a drag, and re-grounds itself when the palette
+  changes. A spec may name a widget the renderer does not draw yet — the
+  panel still opens, with that widget as a labelled well.
+- **The geometry and the arithmetic hold no AppKit.** Where each widget
+  goes is `app/devices/DeviceUiLayout.cpp`, and what a control's travel is
+  worth is `app/devices/DeviceUiValue.cpp` — linear and logarithmic laws, the
+  stepped round, the detent that puts a bipolar knob back to exactly zero,
+  and the readout's text. Both are plain C++, so a panel is checked without a
+  window server: that it fits its width, that no two controls overlap, that
+  folding "Advanced" shortens it rather than widening it, that a drag from
+  end to end stays inside the parameter's range.
+- **Tone is now data, and the shell names no device.** `TonePanel.mm` — 605
+  hand-placed points — is deleted; `incdaw.tone` is 58 lines of spec in
+  `app/devices/TonePanels.cpp`, and "Open Editor" asks the catalogue rather
+  than testing a uid. Adding a device's face no longer touches `main.mm`.
+  Instrument panels keep the generic sliders until Agent 3 writes their specs.
+
 ### Plugin archive, Wave 0 — the contract freeze — 2026-08-23
 
 - **Three registries, no new devices.** Builtin effects register through

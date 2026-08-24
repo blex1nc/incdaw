@@ -165,6 +165,9 @@ add_library(incdaw_app STATIC
     app/PluginPickerModel.cpp
     app/PlaylistModel.cpp
     app/devices/DeviceUiCatalogue.cpp
+    app/devices/DeviceUiLayout.cpp
+    app/devices/DeviceUiValue.cpp
+    app/devices/TonePanels.cpp
     # <<< incdaw:sources:app-panels — one line per family (Agents 2 and 3)
     # >>> incdaw:sources:app-panels
     app/commands/NoteCommands.cpp
@@ -219,8 +222,8 @@ if(APPLE)
         ui/macos/PluginPickerView.mm
         ui/macos/AudioEditorView.mm
         ui/macos/InsertParameterPanel.mm
+        ui/macos/DevicePanel.mm
         ui/macos/SpectrumView.mm
-        ui/macos/TonePanel.mm
         ui/macos/BrowserView.mm
         ui/macos/SettingsWindow.mm
         ui/macos/CommandPalette.mm)

@@ -5,16 +5,17 @@
 // on them in parallel. The claims: the effect catalogue still holds exactly
 // the seventeen devices the registrars replaced, with no duplicate uid; the
 // instrument registry builds the three core instruments through an
-// AssetResolver (and refuses an unknown uid cleanly); the spec catalogue is
-// empty today and says so; and the DeviceUiSpec vocabulary can express the
-// whole of the existing Tone panel as pure data — the existence proof Wave
-// 1 renders, checked here before sixty panels are written against it.
+// AssetResolver (and refuses an unknown uid cleanly); the spec catalogue
+// answers by uid and admits when a device has no spec; and the registered
+// Tone spec — Wave 1's existence proof, the panel the renderer now draws —
+// names only parameters the effect's own table declares.
 
 #include "doctest.h"
 
 #include "app/DevicePreset.h"
 #include "app/devices/DeviceUiCatalogue.h"
 #include "app/devices/DeviceUiSpec.h"
+#include "engine/dsp/effects/BuiltinEffects.h"
 #include "engine/dsp/effects/EffectRegistry.h"
 #include "engine/dsp/effects/SpaceEffects.h"
 #include "engine/dsp/effects/ToneEffects.h"
@@ -215,53 +216,48 @@ TEST_CASE("the sampler factory resolves its zones through the AssetResolver")
 
 // ── UI specs ─────────────────────────────────────────────────────────────────
 
-TEST_CASE("no device has a UI spec yet, and a missing spec is a nullptr, not an error")
+TEST_CASE("the catalogue answers by uid, and a device without a spec is a nullptr, not an error")
 {
-    CHECK(app::deviceUiSpecs().empty());
-    CHECK(app::deviceUiSpec("incdaw.tone") == nullptr);
+    const auto& specs = app::deviceUiSpecs();
+    REQUIRE_FALSE(specs.empty());
+
+    // Every registered spec is a real device, carries the uid it was filed
+    // under, and is filed exactly once.
+    std::set<std::string> seen;
+    for (const app::DeviceUiSpec* spec : specs) {
+        REQUIRE(spec != nullptr);
+        CHECK_FALSE(spec->uid.empty());
+        CHECK(seen.insert(spec->uid).second);
+        CHECK(app::deviceUiSpec(spec->uid) == spec);
+        CHECK(engine::dsp::findBuiltinEffect(spec->uid) != nullptr);
+    }
+
+    // `incdaw.eq` deliberately has none: it keeps the generic slider panel,
+    // which is the whole difference between the two catalogue entries.
+    CHECK(app::deviceUiSpec("incdaw.eq") == nullptr);
+    CHECK(app::deviceUiSpec("incdaw.not-a-device") == nullptr);
     CHECK(app::deviceUiSpec("") == nullptr);
 }
 
-TEST_CASE("the vocabulary expresses the whole Tone panel as data")
+TEST_CASE("the registered Tone panel is the whole device, expressed as data")
 {
-    using namespace app::widgets;
     using Eq = engine::dsp::EqEffect;
 
-    const app::DeviceUiRange hz{20.0, 20000.0, app::DeviceSkew::logarithmic, 0.0};
+    // Three bipolar gain knobs over a response curve, with the frequencies
+    // and Q folded away under "Advanced" — the panel as a tree.
+    const app::DeviceUiSpec* spec = app::deviceUiSpec("incdaw.tone");
+    REQUIRE(spec != nullptr);
+    CHECK(spec->customView.empty());
+    CHECK(spec->preferredWidth > 0.0);
+    REQUIRE(spec->root.size() == 3);
 
-    // Three bipolar gain knobs over a response curve, and the frequencies
-    // and Q behind a folded "Advanced" section — TonePanel.mm, as a tree.
-    app::DeviceUiSpec spec;
-    spec.uid             = "incdaw.tone";
-    spec.title           = "Tone";
-    spec.preferredWidth  = 468.0;
-    spec.preferredHeight = 344.0;
-    spec.root            = {
-        drawn(app::DeviceWidget::drawableCurve,
-              {Eq::lowFreq, Eq::lowGainDb, Eq::midFreq, Eq::midGainDb, Eq::midQ, Eq::highFreq,
-               Eq::highGainDb},
-              "Response", "eq-response")
-            .withTint("accent"),
-        grid(3, {knob(Eq::lowGainDb, "BASS").withUnit("dB").asBipolar(),
-                 knob(Eq::midGainDb, "MID").withUnit("dB").asBipolar(),
-                 knob(Eq::highGainDb, "TREBLE").withUnit("dB").asBipolar()}),
-        section("Advanced", {slider(Eq::lowFreq, "Bass Freq").withUnit("Hz").withRange(hz),
-                             slider(Eq::midFreq, "Mid Freq").withUnit("Hz").withRange(hz),
-                             slider(Eq::midQ, "Mid Q"),
-                             slider(Eq::highFreq, "Treble Freq").withUnit("Hz").withRange(hz)})
-            .startCollapsed(),
-    };
-
-    REQUIRE(spec.root.size() == 3);
-    CHECK(spec.customView.empty());
-
-    const app::DeviceUiWidget& curve = spec.root[0];
+    const app::DeviceUiWidget& curve = spec->root[0];
     CHECK(curve.kind == app::DeviceWidget::drawableCurve);
     CHECK(curve.parameters.size() == Eq::paramCount);
     CHECK(curve.plot == "eq-response");
     CHECK(curve.tint == "accent");
 
-    const app::DeviceUiWidget& knobs = spec.root[1];
+    const app::DeviceUiWidget& knobs = spec->root[1];
     CHECK(knobs.kind == app::DeviceWidget::grid);
     CHECK(knobs.columns == 3);
     REQUIRE(knobs.children.size() == 3);
@@ -273,7 +269,7 @@ TEST_CASE("the vocabulary expresses the whole Tone panel as data")
     }
     CHECK(knobs.children[2].parameters == std::vector<std::uint32_t>{Eq::highGainDb});
 
-    const app::DeviceUiWidget& advanced = spec.root[2];
+    const app::DeviceUiWidget& advanced = spec->root[2];
     CHECK(advanced.kind == app::DeviceWidget::section);
     CHECK(advanced.collapsed);
     REQUIRE(advanced.children.size() == 4);
@@ -290,6 +286,19 @@ TEST_CASE("the vocabulary expresses the whole Tone panel as data")
     for (const app::DeviceUiWidget& control : advanced.children)
         editable.insert(control.parameters.begin(), control.parameters.end());
     CHECK(editable.size() == Eq::paramCount);
+
+    // And every id the spec names is one the effect's own table declares —
+    // the check that catches a renamed parameter before a panel does.
+    const engine::dsp::BuiltinEffectInfo* info = engine::dsp::findBuiltinEffect("incdaw.tone");
+    REQUIRE(info != nullptr);
+    std::set<std::uint32_t> declared;
+    for (std::size_t index = 0; index < info->parameterCount; ++index)
+        declared.insert(info->parameters[index].id);
+
+    for (const std::uint32_t id : editable)
+        CHECK(declared.count(id) == 1);
+    for (const std::uint32_t id : curve.parameters)
+        CHECK(declared.count(id) == 1);
 }
 
 TEST_CASE("a preset is a device's state blob under a name")

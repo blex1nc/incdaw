@@ -32,7 +32,7 @@ immediately — two agents are waiting on it.
 
 ---
 
-## Wave 1 — The panel renderer
+## Wave 1 — The panel renderer  — **DONE 2026-08-24**
 
 `src/ui/macos/DevicePanel.{h,mm}` — one Objective-C++ view that renders any
 `DeviceUiSpec`.
@@ -56,6 +56,36 @@ vocabulary — that is what this wave is for.
 **Wire the dispatch:** `main.mm` "Open Editor" becomes: spec found → device
 panel; no spec → generic parameter panel; hosted plugin → its own editor.
 After this, **no device ever needs a line in `main.mm` again.**
+
+### What landed
+
+- `app/devices/DeviceUiLayout.{h,cpp}` — the geometry, in points, with no
+  AppKit. The renderer draws and hit-tests rectangles it does not compute,
+  which is what lets a panel be checked without a window server.
+- `app/devices/DeviceUiValue.{h,cpp}` — travel↔value (linear and log skew),
+  clamping, the stepped round, the bipolar zero detent, and the readout text.
+  Every panel in the archive shares this arithmetic.
+- `ui/macos/DevicePanel.{h,mm}` — the renderer. Row data and a write block,
+  never an engine pointer. Also `INCDAWDeviceCustomView`, the protocol behind
+  the `customView` escape hatch.
+- `app/devices/TonePanels.cpp` — `incdaw.tone` as data. The only spec Agent 1
+  owns; Agents 2 and 3 own theirs.
+- `main.mm` dispatch now reads `app::deviceUiSpec(uid)` and names no device.
+  `TonePanel.{h,mm}` deleted. The palette walk calls
+  `[INCDAWDevicePanel refreshAppearance:]` alongside the generic panel's.
+- Tests: `tests/unit/DeviceUiTests.cpp` (fits its width, nothing overlaps,
+  folding shortens the panel, a grid keeps one baseline and wraps, travel
+  round-trips, the detent, the readouts, every Tone control drives a real
+  parameter); `DeviceFrameworkTests.cpp` repointed from the inline spec to
+  the registered one. 759 cases green, zero warnings, layering clean.
+
+**Not verified:** pixel parity against the deleted `TonePanel.mm` — the app
+launches and the panel lays out as the tests state, but no side-by-side
+screenshot was taken.
+
+**Deferred, on purpose:** `openInstrumentPanelForChannel:` still uses the
+generic panel. Instruments get specs when Agent 3 writes them; the dispatch
+there is a one-line change then.
 
 ## Wave 2 — Drawn and interactive widgets
 

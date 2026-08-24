@@ -202,12 +202,16 @@ serialize through the device's `StateIO` blob, not a parameter per cell.
 `plot` is what a drawn widget shows (`"eq-response"`, `"transfer"`,
 `"gate"`, `"sample"`) and is interpreted by the renderer, never by `app/`.
 Adjacent `tab` siblings form one tab strip. The Tone panel is expressed as
-data in `tests/unit/DeviceFrameworkTests.cpp` — copy its shape.
+data in `src/app/devices/TonePanels.cpp` — copy its shape.
 
-**Existence proof for the spec (Agent 1, Wave 1):** the spec must be able to
-express the whole of today's `TonePanel.mm` (three bands, response curve,
-advanced section). If it cannot, the vocabulary is short — extend it before
-Agents 2/3 build 60 panels on it.
+**Existence proof for the spec (Agent 1, Wave 1) — DONE 2026-08-24:** the
+spec expressed the whole of `TonePanel.mm` (three bands, response curve,
+advanced section) without an extension to the vocabulary; the bespoke panel
+is deleted and `incdaw.tone` now opens through the renderer. Wave 1 draws
+`section`, `row`, `grid`, `label`, `knob`, `slider`, `fader-wall`, `toggle`,
+`combo`, `meter` and the `eq-response` curve. **A spec may name a widget the
+renderer does not draw yet** — it lays out as a labelled well and the panel
+still opens, so Agents 2 and 3 need not wait for Wave 2.
 
 **Escape hatch:** `DeviceUiSpec::customView` names a bespoke Objective-C++
 view for surfaces the vocabulary genuinely cannot carry. Budget: **≤ 8

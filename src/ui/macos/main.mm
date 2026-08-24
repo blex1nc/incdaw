@@ -55,11 +55,12 @@
 #include "ui/macos/ChannelRackView.h"
 #include "engine/dsp/effects/UtilityEffects.h"
 #include "ui/macos/ControlBarView.h"
+#include "ui/macos/DevicePanel.h"
 #include "ui/macos/InsertParameterPanel.h"
 #include "ui/macos/SpectrumView.h"
-#include "ui/macos/TonePanel.h"
 #include "ui/macos/Theme.h"
 #include "ui/ThemeLibrary.h"
+#include "app/devices/DeviceUiCatalogue.h"
 #include "ui/macos/PatternListView.h"
 #include "ui/macos/PianoRollView.h"
 #include "ui/macos/PianoRollHeaderView.h"
@@ -2031,7 +2032,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
     }
 
-    // Parameter panels, the Tone panel, spectrum windows and instrument panels
+    // Parameter panels, device panels, spectrum windows and instrument panels
     // are ours all the way down, so they follow the palette completely. The
     // ones that draw themselves need only invalidating; the generic panel
     // handed its colours to AppKit controls at build time and has to hand them
@@ -2041,6 +2042,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
         window.backgroundColor = ui::theme::ink(ui::theme::Ink::windowBackground);
 
         [INCDAWInsertParameterPanel refreshAppearance:window];
+        [INCDAWDevicePanel refreshAppearance:window];
         ui::theme::refreshViewTree(window.contentView);
     }
 }
@@ -2555,16 +2557,18 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
     NSWindow* window = nil;
 
-    // Tone is the three-band EQ wearing a mixing desk's face: knobs over a
-    // response curve rather than seven sliders. `incdaw.eq` keeps the generic
-    // panel, which is the difference between the two catalogue entries.
-    if (slot->plugin.format == plugins::Format::builtin
-        && slot->plugin.uid == "incdaw.tone")
-        window = [INCDAWTonePanel makePanelWithTitle:[self displayNameForSlotKey:slotKey]
-                                                rows:rows
-                                          sampleRate:_audio != nullptr
-                                                         ? _audio->sampleRate() : 48000.0
-                                             onWrite:write];
+    // A builtin with a UI spec wears its own face; one without keeps the
+    // generic sliders. The dispatch names no device: the catalogue does, so a
+    // new panel is a spec in app/devices/ and never a line here.
+    if (slot->plugin.format == plugins::Format::builtin) {
+        if (const app::DeviceUiSpec* spec = app::deviceUiSpec(slot->plugin.uid))
+            window = [INCDAWDevicePanel
+                makePanelWithTitle:[self displayNameForSlotKey:slotKey]
+                              spec:spec
+                              rows:rows
+                        sampleRate:_audio != nullptr ? _audio->sampleRate() : 48000.0
+                           onWrite:write];
+    }
 
     if (window == nil)
         window = [INCDAWInsertParameterPanel
@@ -2706,7 +2710,7 @@ static const NSTimeInterval kAutosaveInterval  = 120.0;
 
         if (values.count > 0) {
             [INCDAWInsertParameterPanel refreshWindow:_panelWindows[key] values:values];
-            [INCDAWTonePanel refreshWindow:_panelWindows[key] values:values];
+            [INCDAWDevicePanel refreshWindow:_panelWindows[key] values:values];
         }
     }
 }
